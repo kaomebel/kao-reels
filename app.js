@@ -494,9 +494,9 @@ function productForm(p = {}, readonly = false) {
     </div>
     <div class="form-grid">
       ${field('Nomi *', 'name', p.name, 'required', 'full')}
+      ${sizeField(p.size)}
       ${field('Kod / artikul', 'code', p.code)}
       ${selectField('Kategoriya', 'category', cats, p.category || '')}
-      ${field("O'lchami (E×Ch×B, sm)", 'size', p.size, 'placeholder="200 × 160 × 45"')}
       ${field('Rangi', 'color', p.color, 'placeholder="Oq, yong\'oq..."')}
       ${field('Materiali', 'material', p.material, 'placeholder="LDSP, MDF, massiv..."')}
       ${field('Ishlab chiqarilgan joyi', 'origin', p.origin, 'placeholder="O\'zbekiston, Toshkent / Turkiya..."')}
@@ -526,10 +526,56 @@ function renderPhotoList(readonly) {
   hydratePhotos(box);
 }
 
+// O'lcham uch katakda: raqamdan keyin probel (yoki x, *, vergul, Enter) — keyingi katakka o'tadi
+const DIM_NAMES = ['Uzunlik', 'Kenglik', 'Balandlik'];
+
+function sizeField(size) {
+  const parts = String(size || '').split(/[x×х*,\s]+/i).filter(Boolean);
+  return `<label class="wide2">O'lchami (sm): uzunlik × kenglik × balandlik
+    <div class="dims">
+      ${DIM_NAMES.map((n, i) => `${i ? '<span class="dim-x">×</span>' : ''}<input class="dim" inputmode="decimal" enterkeyhint="${i < 2 ? 'next' : 'done'}" placeholder="${n}" aria-label="${n}" value="${esc(parts[i] === '?' ? '' : parts[i] || '')}">`).join('')}
+    </div>
+    <input type="hidden" name="size" value="${esc(size || '')}">
+  </label>`;
+}
+
+function bindSizeField() {
+  const dims = $$('#modalBody .dim');
+  const hidden = $('#modalBody input[name=size]');
+  if (!dims.length) return;
+  const sync = () => {
+    const vals = dims.map((d) => d.value.trim());
+    hidden.value = vals.some(Boolean) ? vals.map((v) => v || '?').join(' × ') : '';
+  };
+  dims.forEach((input, i) => {
+    input.addEventListener('keydown', (e) => {
+      if ([' ', 'x', 'X', 'х', 'Х', '*', ',', 'Enter'].includes(e.key)) {
+        e.preventDefault();
+        if (dims[i + 1]) dims[i + 1].focus();
+        else if (e.key === 'Enter') input.blur();
+      } else if (e.key === 'Backspace' && !input.value && dims[i - 1]) {
+        e.preventDefault();
+        dims[i - 1].focus();
+      }
+    });
+    input.addEventListener('input', () => {
+      // "200x160x45" nusxalab joylansa — kataklarga taqsimlaymiz
+      const parts = input.value.split(/[x×х*,\s]+/i).filter(Boolean);
+      if (parts.length > 1) {
+        parts.slice(0, dims.length - i).forEach((v, k) => { dims[i + k].value = v; });
+        dims[Math.min(i + parts.length, dims.length) - 1].focus();
+      }
+      input.value = input.value.replace(/[^\d.]/g, '');
+      sync();
+    });
+  });
+}
+
 function bindProductForm(p, readonly = false) {
   photoEdit = { items: (p.photos || []).slice(), removed: [] };
   renderPhotoList(readonly);
   if (readonly) return;
+  bindSizeField();
   $('#photoInput').addEventListener('change', (e) => {
     const files = Array.from(e.target.files).slice(0, MAX_PHOTOS - photoEdit.items.length);
     if (e.target.files.length > files.length) alert(`Ko'pi bilan ${MAX_PHOTOS} ta rasm.`);

@@ -515,3 +515,8 @@ dialog h3 { margin: 0; padding: 18px 22px; border-bottom: 1px solid var(--border
   body { background: #fff; color: #000; }
   .card { border: none; padding: 0; box-shadow: none; }
 }
+
+/* ---- O'lcham: uch katak ---- */
+.dims { display: flex; align-items: center; gap: 6px; }
+.dims .dim { min-width: 0; flex: 1; text-align: center; font-variant-numeric: tabular-nums; }
+.dim-x { color: var(--muted); font-size: 15px; }
