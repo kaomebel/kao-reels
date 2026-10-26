@@ -1,0 +1,35 @@
+{
+  "name": "biznes-tizim",
+  "version": "1.0.0",
+  "description": "Mebel do'koni uchun ombor, savdo va pul hisobi",
+  "private": true,
+  "author": "KAO Mebel",
+  "main": "desktop/main.js",
+  "scripts": {
+    "build:web": "node scripts/build-web.js",
+    "desktop": "npm run build:web && electron .",
+    "dist:win": "npm run build:web && electron-builder --win --publish never",
+    "android:sync": "npm run build:web && cap sync android"
+  },
+  "devDependencies": {
+    "@capacitor/android": "8.5.3",
+    "@capacitor/cli": "8.5.3",
+    "@capacitor/core": "8.5.3",
+    "electron": "44.9.1",
+    "electron-builder": "26.17.0"
+  },
+  "build": {
+    "appId": "uz.kaomebel.biznestizim",
+    "productName": "Biznes Tizim",
+    "files": ["desktop/**", "www/**"],
+    "directories": { "output": "dist", "buildResources": "build" },
+    "win": { "target": ["nsis"], "icon": "build/icon.png" },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "shortcutName": "Biznes Tizim",
+      "artifactName": "Biznes-Tizim-Setup-${version}.${ext}"
+    }
+  }
+}

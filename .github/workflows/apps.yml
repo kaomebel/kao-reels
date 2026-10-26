@@ -1,0 +1,59 @@
+# Windows (.exe) va Android (.apk) ilovalarini yig'adi.
+# Natija: Actions → shu ishga tushirish → pastdagi "Artifacts" bo'limidan yuklab olinadi.
+name: Ilovalarni yig'ish
+
+on:
+  push:
+    branches: [main, 'claude/**']
+  workflow_dispatch:
+
+concurrency:
+  group: apps-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    name: Windows (.exe)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run dist:win
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Biznes-Tizim-Windows
+          path: dist/*.exe
+          if-no-files-found: error
+
+  android:
+    name: Android (.apk)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: gradle
+      - run: npm ci
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+      - run: npm run android:sync
+      - run: chmod +x gradlew && ./gradlew assembleDebug --no-daemon
+        working-directory: android
+      - run: mv android/app/build/outputs/apk/debug/app-debug.apk Biznes-Tizim.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Biznes-Tizim-Android
+          path: Biznes-Tizim.apk
+          if-no-files-found: error

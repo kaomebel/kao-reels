@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Biznes Tizim</string>
+    <string name="title_activity_main">Biznes Tizim</string>
+    <string name="package_name">uz.kaomebel.biznestizim</string>
+    <string name="custom_url_scheme">uz.kaomebel.biznestizim</string>
+</resources>

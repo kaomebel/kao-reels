@@ -2226,6 +2226,7 @@ async function start() {
 
 start();
 
-if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+// Telefon ilovasi (Capacitor) o'z fayllarini o'zi beradi — service worker faqat brauzer uchun
+if ('serviceWorker' in navigator && location.protocol.startsWith('http') && !window.Capacitor) {
   navigator.serviceWorker.register('sw.js').catch((e) => console.warn('Service worker:', e));
 }
