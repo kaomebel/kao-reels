@@ -58,7 +58,21 @@ Har bir qurilmada URL va kalitni qayta kiritmaslik uchun ularni [`config.js`](co
 - Dastur serverga faqat [`backend.js`](backend.js) orqali murojaat qiladi — server almashganda faqat shu fayl o'zgaradi.
 - **Sozlamalar → Zaxira nusxa** — barcha ma'lumotlar JSON faylga; boshqa tizimga tiklashda hujjat raqamlari ham to'g'ri davom etadi.
 
-## O'rnatish (telefon va kompyuter)
+## Ilovalar (Windows, Android, iPhone)
+
+Har push'da GitHub Actions ikkita ilovani yig'adi: repo → **Actions** → *Ilovalarni yig'ish* → oxirgi yashil ishga tushirish → pastdagi **Artifacts**:
+
+- **Biznes-Tizim-Windows** — `Biznes-Tizim-Setup-1.0.0.exe`. Ishga tushiring → o'rnatiladi, ish stolida *Biznes Tizim* ikonkasi paydo bo'ladi. Ilova hozircha raqamli imzosiz, shuning uchun Windows "Windows protected your PC" deb ogohlantiradi: *More info → Run anyway*.
+- **Biznes-Tizim-Android** — `Biznes-Tizim.apk`. Telefonga yuboring (Telegram orqali ham bo'ladi), ochib o'rnating. Telefon "noma'lum manbadan o'rnatish"ga ruxsat so'raydi — ruxsat bering.
+- **iPhone/iPad** — App Store'ga chiqarish uchun Apple Developer hisobi kerak (yiliga 99 $). Shungacha iPhone'da veb-versiyani Safari orqali o'rnatish mumkin (pastda).
+
+Birinchi ochilganda har bir ilovada *Serverga ulanish* orqali Supabase URL va kalitini kiritasiz (yoki ular `config.js` ga yozilgan bo'lsa, so'ralmaydi).
+
+Telefon ilovasida zaxira faylini yuklab olish va chek chop etish ishlamaydi — buni Windows ilovasi yoki brauzerdan bajaring.
+
+Play Market'ga chiqarish uchun Google Play Developer hisobi (bir martalik 25 $) va imzo kaliti kerak bo'ladi.
+
+### Brauzer orqali o'rnatish (PWA)
 
 Dasturni HTTPS saytga joylang (masalan GitHub Pages: repo *Settings → Pages → Branch*), so'ng:
 
@@ -82,4 +96,8 @@ Supabase rejimida token serverda saqlanadi va faqat administratorga ko'rinadi.
 - `config.js` — Supabase ulanish ma'lumotlari (ixtiyoriy)
 - `supabase/schema.sql` — baza sxemasi, ruxsatlar, server funksiyalari
 - `vendor/supabase.js` — Supabase kutubxonasi (MIT litsenziya)
-- `manifest.webmanifest`, `sw.js`, `icons/` — ilova sifatida o'rnatish
+- `manifest.webmanifest`, `sw.js`, `icons/` — brauzer orqali o'rnatish (PWA)
+- `desktop/main.js`, `package.json` — Windows ilovasi (Electron)
+- `android/`, `capacitor.config.json` — Android ilovasi (Capacitor)
+- `scripts/build-web.js` — ilovalar uchun veb-fayllarni `www/` ga yig'adi
+- `.github/workflows/apps.yml` — ilovalarni avtomatik yig'ish
