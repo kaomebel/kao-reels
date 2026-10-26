@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="96" fill="#17324d"/>
+  <rect x="96" y="250" width="320" height="150" rx="18" fill="#1f6feb"/>
+  <rect x="96" y="170" width="150" height="96" rx="14" fill="#5aa2ff"/>
+  <rect x="266" y="120" width="150" height="146" rx="14" fill="#9cc6ff"/>
+  <rect x="226" y="300" width="60" height="16" rx="8" fill="#fff"/>
+  <text x="256" y="465" font-family="Arial, sans-serif" font-size="56" font-weight="700" fill="#fff" text-anchor="middle">BT</text>
+</svg>

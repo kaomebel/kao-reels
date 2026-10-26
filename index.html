@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="uz">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Biznes Tizim</title>
+  <meta name="theme-color" content="#17324d">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Biznes Tizim">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="auth" hidden>
+    <div class="auth-card">
+      <h1>Biznes Tizim</h1>
+      <div class="muted" id="authSubtitle"></div>
+      <form id="authForm" novalidate></form>
+    </div>
+  </div>
+
+  <div id="app" hidden>
+    <header class="topbar">
+      <a class="brand" href="#dashboard">Biznes Tizim</a>
+      <nav id="sections"></nav>
+      <div class="user-box"><span id="userName"></span><button type="button" id="logoutBtn">Chiqish</button></div>
+    </header>
+    <nav id="subnav" class="subnav"></nav>
+    <main id="view"></main>
+  </div>
+
+  <dialog id="modal">
+    <form id="modalForm" novalidate>
+      <h3 id="modalTitle"></h3>
+      <div id="modalBody"></div>
+      <div class="modal-actions">
+        <div id="modalExtra"></div>
+        <div>
+          <button type="button" id="modalCancel">Yopish</button>
+          <button type="submit" class="primary" id="modalSubmit">Saqlash</button>
+        </div>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="app.js"></script>
+</body>
+</html>
