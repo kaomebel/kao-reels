@@ -9,46 +9,77 @@ Mebel do'koni uchun ombor, savdo va pul hisobi dasturi (MoySklad uslubida), o'zb
 | **Ko'rsatkichlar** | Bugungi va oylik savdo, foyda, pul qoldig'i, qarzlar, yaqin yetkazishlar, kam qolgan tovarlar |
 | **Xaridlar** | Ta'minotchiga buyurtma → Qabul qilish → Ta'minotchiga qaytarish |
 | **Savdo** | Mijoz buyurtmasi (rezerv bilan) → Jo'natish (sotuv) → Mijozdan qaytarish; yetkazish sanasi va manzili, chek chop etish |
-| **Tovarlar** | Mahsulot kartochkasi (rasm, o'lcham, rang, material, ishlab chiqarilgan joyi), omborlar bo'yicha qoldiqlar, kirim qilish, hisobdan chiqarish, omborlararo ko'chirish, inventarizatsiya |
+| **Tovarlar** | Mahsulot kartochkasi (5 tagacha rasm, o'lcham, rang, material, ishlab chiqarilgan joyi), omborlar bo'yicha qoldiqlar, kirim qilish, hisobdan chiqarish, ko'chirish, inventarizatsiya |
 | **Kontragentlar** | Mijozlar va ta'minotchilar, o'zaro hisob-kitob (akt sverka), qarzlar |
 | **Pul** | Kirim/chiqim to'lovlari (naqd, karta, hisob raqam), xarajat moddalari, kassa qoldig'i |
-| **Hisobotlar** | Foyda va zarar (tannarx, xarajatlar, sof foyda), eng ko'p sotilganlar, kategoriyalar, mijozlar va sotuvchilar reytingi |
-| **Telegram** | Omborga mahsulot kelganda uning rasmi, narxi, o'lchami, rangi, materiali, ishlab chiqarilgan joyi va omborda bor-yo'qligi guruhga avtomatik yuboriladi |
-
-Qoldiq va qarzlar alohida saqlanmaydi: ular har safar hujjatlardan qayta hisoblanadi, shuning uchun hujjat tahrirlansa yoki o'chirilsa, hammasi avtomatik to'g'rilanadi. Tannarx qabul qilish narxlarining o'rtacha tortilgan qiymati bo'yicha hisoblanadi.
+| **Hisobotlar** | Foyda va zarar, eng ko'p sotilganlar, kategoriyalar, mijozlar va sotuvchilar reytingi |
+| **Telegram** | Omborga mahsulot kelganda uning rasmlari (albom), narxi, o'lchami, rangi, materiali, ishlab chiqarilgan joyi va omborda bor-yo'qligi guruhga avtomatik yuboriladi |
 
 ## Foydalanuvchilar
 
-- **Administrator** — barcha bo'limlarga kiradi, foydalanuvchilarni qo'shadi.
-- **Sotuvchi** — faqat savdo hujjatlari, mijozlar, kirim to'lovlari, mahsulot va qoldiqlarni ko'radi. Tannarx, foyda, xaridlar, kassa va sozlamalar unga ko'rinmaydi. Faqat o'zi yaratgan hujjatlarni o'zgartira oladi, hech narsani o'chira olmaydi.
+- **Administrator** — barcha bo'limlar, foydalanuvchilarni qo'shadi va bloklaydi.
+- **Sotuvchi** — savdo hujjatlari, mijozlar, kirim to'lovlari, mahsulot va qoldiqlar. Tannarx, foyda, xaridlar, kassa va sozlamalar unga ko'rinmaydi; faqat o'zi yaratgan hujjatlarni o'zgartiradi, hech narsani o'chira olmaydi. Supabase rejimida bu cheklovlar **serverning o'zida** (RLS qoidalari) tekshiriladi — sotuvchiga tannarx va xarid narxlari umuman yuborilmaydi.
 
-Birinchi ochilganda administrator hisobi yaratiladi. Sotuvchilarni **Sozlamalar → Foydalanuvchilar** bo'limida qo'shasiz.
+## Ishlash rejimlari
 
-## Ishga tushirish
+| Rejim | Qachon | Ma'lumot qayerda |
+|---|---|---|
+| **Lokal** | Sinab ko'rish, bitta kompyuter | Shu brauzerda |
+| **Supabase** | Do'konda haqiqiy ish, bir nechta sotuvchi va qurilma | Supabase serverida (PostgreSQL + rasmlar xotirasi) |
 
-Dastur — oddiy HTML/JS ilova, o'rnatish talab qilinmaydi.
+Supabase rejimida barcha qurilmalar bitta bazada ishlaydi va bir qurilmadagi o'zgarish boshqalarida bir necha soniyada ko'rinadi. Internet uzilib qolsa, dastur ogohlantiradi va ulanish tiklanganda saqlanmagan o'zgarishlarni o'zi yuboradi. Yangi hujjat yaratish uchun internet kerak (hujjat raqami serverda beriladi, shuning uchun bir vaqtda ishlayotgan sotuvchilarda raqam takrorlanmaydi).
 
-- **Kompyuterda sinash:** `index.html` faylini Chrome yoki Edge'da oching.
-- **Telefon va kompyuterga ilova sifatida o'rnatish (PWA):** fayllarni HTTPS saytga joylang (masalan GitHub Pages: repo *Settings → Pages → Branch: main*), so'ng:
-  - **Android:** Chrome'da saytni oching → ⋮ menyu → *Ilovani o'rnatish* (yoki *Bosh ekranga qo'shish*).
-  - **iPhone/iPad:** Safari'da oching → *Ulashish* → *Bosh ekranga qo'shish* (Add to Home Screen).
-  - **Windows:** Edge yoki Chrome'da oching → manzil qatoridagi *Ilovani o'rnatish* belgisi. Ilova alohida oynada, ish stolidagi ikonka orqali ochiladi.
+## Supabase'ni sozlash (bir marta, ~10 daqiqa)
 
-  O'rnatilgandan keyin internet bo'lmasa ham ochiladi.
+1. **supabase.com** → *Start your project* → GitHub yoki email bilan ro'yxatdan o'ting.
+2. *New project*:
+   - **Name:** `biznes-tizim`
+   - **Database password:** kuchli parol o'ylab toping va **albatta saqlab qo'ying** (keyinchalik boshqa serverga ko'chishda kerak bo'ladi).
+   - **Region:** *Central EU (Frankfurt)* — O'zbekistonga yaqinlaridan biri.
+   - *Create new project* → 1–2 daqiqa kuting.
+3. **Email tasdiqlashni o'chiring** (aks holda administrator qo'shgan sotuvchi emailini tasdiqlamaguncha kira olmaydi): *Authentication → Sign In / Providers → Email* → **Confirm email** — o'chiring → *Save*.
+4. **Bazani yarating:** chap menyuda *SQL Editor* → *New query* → shu repodagi [`supabase/schema.sql`](supabase/schema.sql) faylining butun matnini joylang → **Run**. "Success" chiqishi kerak. (Qayta ishga tushirish xavfsiz.)
+5. **Ulanish ma'lumotlarini oling:** *Project Settings → API* (yoki *API Keys*):
+   - **Project URL** — `https://xxxxxxxx.supabase.co`
+   - **anon / publishable key** — uzun kalit. *service_role / secret* kalitni hech qachon dasturga yozmang.
+6. Dasturni oching → kirish oynasining pastidagi **Serverga ulanish** → URL va kalitni joylang → **Tekshirish va saqlash**.
+7. **Administrator hisobi:** ismingiz, email va parol (kamida 6 belgi). Serverda birinchi ro'yxatdan o'tgan foydalanuvchi avtomatik administrator bo'ladi.
+8. Avval lokal rejimda ma'lumot kiritgan bo'lsangiz: **Sozlamalar → Server → Serverga ko'chirish** (rasmlari bilan ko'chadi).
+9. Sotuvchilarni qo'shing: **Sozlamalar → Foydalanuvchilar → + Foydalanuvchi** (email + parol). Ular shu email va parol bilan istalgan qurilmadan kiradi.
+
+Har bir qurilmada URL va kalitni qayta kiritmaslik uchun ularni [`config.js`](config.js) fayliga yozib qo'yish mumkin — anon kalit ochiq kalit, uni saqlash xavfsiz.
+
+**Bepul tarif:** 500 MB baza, 1 GB rasm, oyiga ~5 GB trafik — 1000 ta mahsulot (har biriga 3–4 rasm) uchun yetarli. Band joy **Sozlamalar → Server** da ko'rinadi, 80% dan oshsa bosh sahifada ogohlantirish chiqadi. Bepul loyiha 7 kun umuman ishlatilmasa to'xtatiladi (ma'lumot o'chmaydi, panelda qayta yoqiladi).
+
+## Boshqa serverga ko'chish
+
+- Baza — oddiy PostgreSQL: `pg_dump` bilan to'liq nusxa olinadi va istalgan PostgreSQL serverga yuklanadi.
+- Rasmlar bazada nisbiy yo'l (`products/2026/abc.webp`) sifatida saqlanadi — fayllarni yangi xotiraga ko'chirish kifoya.
+- Dastur serverga faqat [`backend.js`](backend.js) orqali murojaat qiladi — server almashganda faqat shu fayl o'zgaradi.
+- **Sozlamalar → Zaxira nusxa** — barcha ma'lumotlar JSON faylga; boshqa tizimga tiklashda hujjat raqamlari ham to'g'ri davom etadi.
+
+## O'rnatish (telefon va kompyuter)
+
+Dasturni HTTPS saytga joylang (masalan GitHub Pages: repo *Settings → Pages → Branch*), so'ng:
+
+- **Android:** Chrome → ⋮ → *Ilovani o'rnatish*.
+- **iPhone/iPad:** Safari → *Ulashish* → *Bosh ekranga qo'shish*.
+- **Windows:** Edge yoki Chrome → manzil qatoridagi *Ilovani o'rnatish* belgisi.
 
 ## Telegram sozlash
 
 1. Telegramda **@BotFather** → `/newbot` → bot yarating va tokenni oling.
 2. Botni guruhingizga qo'shing va administrator qiling.
-3. Dasturda **Sozlamalar → Telegram**: tokenni kiriting, guruhga biror xabar yozing va *Guruh ID sini aniqlash* tugmasini bosing, so'ng *Sinov xabari*.
+3. Dasturda **Sozlamalar → Telegram**: tokenni kiriting, guruhga biror xabar yozing va *Guruh ID sini aniqlash*, so'ng *Sinov xabari*.
 
-## Muhim cheklov (hozirgi bosqich)
-
-Hozircha ma'lumotlar **har bir qurilmaning brauzerida alohida** saqlanadi. Bir nechta sotuvchi turli telefonlardan bitta bazada ishlashi uchun keyingi bosqichda server (ma'lumotlar bazasi) qo'shiladi. Shungacha **Sozlamalar → Zaxira nusxa** orqali muntazam nusxa oling.
+Supabase rejimida token serverda saqlanadi va faqat administratorga ko'rinadi.
 
 ## Fayllar
 
-- `index.html` — sahifa tuzilmasi
-- `styles.css` — dizayn
-- `app.js` — butun dastur mantig'i
-- `manifest.webmanifest`, `sw.js`, `icons/` — ilova sifatida o'rnatish va oflayn ishlash
+- `index.html`, `styles.css` — sahifa va dizayn
+- `app.js` — dastur mantig'i (hisob-kitob, sahifalar)
+- `backend.js` — ma'lumotlar qatlami (lokal / Supabase)
+- `config.js` — Supabase ulanish ma'lumotlari (ixtiyoriy)
+- `supabase/schema.sql` — baza sxemasi, ruxsatlar, server funksiyalari
+- `vendor/supabase.js` — Supabase kutubxonasi (MIT litsenziya)
+- `manifest.webmanifest`, `sw.js`, `icons/` — ilova sifatida o'rnatish

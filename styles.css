@@ -203,8 +203,6 @@ dialog h3 { margin: 0; padding: 16px 20px; border-bottom: 1px solid var(--border
 
 .product-form { display: grid; grid-template-columns: 200px 1fr; gap: 16px; }
 .photo-box { display: flex; flex-direction: column; gap: 8px; align-items: stretch; text-align: center; }
-.photo-box img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 8px; border: 1px solid var(--border); }
-#photoEmpty { aspect-ratio: 1; display: flex; align-items: center; justify-content: center; border: 1px dashed #cfd4da; border-radius: 8px; }
 
 .tg-preview { display: flex; flex-direction: column; gap: 8px; max-width: 380px; background: #e6f3ff; border-radius: 12px; padding: 10px; font-size: 14px; line-height: 1.45; }
 .tg-preview img { width: 100%; border-radius: 8px; }
@@ -232,7 +230,7 @@ dialog h3 { margin: 0; padding: 16px 20px; border-bottom: 1px solid var(--border
   .grid2 { grid-template-columns: 1fr; }
   .form-grid label.wide2 { grid-column: 1 / -1; }
   .product-form { grid-template-columns: 1fr; }
-  .photo-box img, #photoEmpty { max-width: 220px; margin: 0 auto; }
+  .photo-box { max-width: 320px; margin: 0 auto; width: 100%; }
   .stat .value { font-size: 17px; }
   .toolbar input, .toolbar select { flex: 1 1 140px; }
   .user-box span { display: none; }
@@ -243,3 +241,39 @@ dialog h3 { margin: 0; padding: 16px 20px; border-bottom: 1px solid var(--border
   body { background: #fff; }
   .card { border: none; padding: 0; }
 }
+
+/* ---- Server bilan ishlash ---- */
+.user-box a { color: #fff; text-decoration: none; }
+.user-box a:hover { text-decoration: underline; }
+.sync-banner { background: #fff4e5; color: #8a4b00; padding: 8px 16px; font-size: 14px; border-bottom: 1px solid #f3d7a8; }
+.loading {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  background: rgba(243, 244, 246, .85);
+  color: var(--muted);
+}
+.spinner { width: 36px; height: 36px; border: 4px solid #cfd8e3; border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.auth-server { text-align: center; margin-top: 4px; }
+
+.usage { height: 12px; border-radius: 6px; background: #e8ecf1; overflow: hidden; margin-bottom: 8px; }
+.usage-bar { height: 100%; background: var(--accent); }
+.usage-bar.over { background: var(--danger); }
+
+/* ---- Mahsulot rasmlari ---- */
+.photo-list { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+.photo-list .ph { position: relative; }
+.photo-list .ph:first-child { grid-column: 1 / -1; }
+.photo-list img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 8px; border: 1px solid var(--border); background: #f6f7f9; display: block; cursor: pointer; }
+.photo-list .ph-main { position: absolute; left: 6px; top: 6px; background: rgba(23, 50, 77, .85); color: #fff; font-size: 11px; padding: 2px 6px; border-radius: 4px; }
+.photo-list .ph-del { position: absolute; right: 6px; top: 6px; padding: 0 7px; line-height: 22px; border-radius: 50%; background: rgba(255, 255, 255, .9); color: var(--danger); }
+.photo-empty { grid-column: 1 / -1; aspect-ratio: 1; display: flex; align-items: center; justify-content: center; border: 1px dashed #cfd4da; border-radius: 8px; }
+td.thumb { position: relative; }
+.ph-count { position: absolute; right: 2px; bottom: 2px; background: rgba(23, 50, 77, .85); color: #fff; font-size: 10px; padding: 0 4px; border-radius: 4px; }
+.warn-card { background: #fff4e5; border-color: #f3d7a8; color: #8a4b00; }

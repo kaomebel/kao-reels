@@ -1,0 +1,660 @@
+'use strict';
+
+/*
+ * Ma'lumotlar qatlami. Dastur ma'lumotni faqat shu fayl orqali o'qiydi va yozadi,
+ * shuning uchun server almashtirilganda faqat shu fayl o'zgaradi.
+ *
+ *   LocalBackend    — shu brauzerning o'zida saqlaydi (serversiz sinash uchun)
+ *   SupabaseBackend — Supabase: umumiy baza, rasmlar xotirasi, foydalanuvchilar
+ *
+ * Ikkalasi ham bir xil `db` obyektini qaytaradi va qabul qiladi:
+ *   { products, counterparties, warehouses, docs, payments, categories, company, telegram, users, ... }
+ */
+
+const ENTITY_TABLES = ['warehouses', 'counterparties', 'products', 'docs', 'payments']; // yozish tartibi muhim
+const SETTINGS_KEYS = ['categories', 'company', 'telegram', 'legacyUsers'];
+const SERVER_CONFIG_KEY = 'biznes-tizim-server';
+const LOCAL_DATA_KEY = 'biznes-tizim-v1';
+const LOCAL_SESSION_KEY = 'biznes-tizim-session';
+const PHOTO_BUCKET = 'photos';
+
+function serverConfig() {
+  const c = window.BT_CONFIG || {};
+  let saved = {};
+  try { saved = JSON.parse(localStorage.getItem(SERVER_CONFIG_KEY) || '{}'); } catch (e) { /* xotira yopiq */ }
+  return { url: (saved.url || c.supabaseUrl || '').trim(), key: (saved.key || c.supabaseAnonKey || '').trim() };
+}
+
+function saveServerConfig(cfg) {
+  if (cfg) localStorage.setItem(SERVER_CONFIG_KEY, JSON.stringify(cfg));
+  else localStorage.removeItem(SERVER_CONFIG_KEY);
+}
+
+function createBackend() {
+  const cfg = serverConfig();
+  return cfg.url && cfg.key ? new SupabaseBackend(cfg) : new LocalBackend();
+}
+
+// Ulanish ma'lumotlarini saqlashdan oldin tekshirish
+async function testServerConfig(cfg) {
+  const client = window.supabase.createClient(cfg.url, cfg.key, { auth: { persistSession: false, autoRefreshToken: false } });
+  const { error } = await client.rpc('has_users');
+  if (error) {
+    if (/has_users/.test(error.message || '')) throw new Error("Server topildi, lekin sxema o'rnatilmagan: supabase/schema.sql faylini SQL Editor'da ishga tushiring.");
+    throw new Error(error.message || String(error));
+  }
+}
+
+// ---------- Rasmlar bilan ishlash (ikkala rejim uchun umumiy) ----------
+
+function loadImage(blob) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => { URL.revokeObjectURL(img.src); resolve(img); };
+    img.onerror = () => { URL.revokeObjectURL(img.src); reject(new Error("Rasmni o'qib bo'lmadi")); };
+    img.src = URL.createObjectURL(blob);
+  });
+}
+
+function canvasToBlob(img, max, type, quality) {
+  const k = Math.min(1, max / Math.max(img.width, img.height));
+  const c = document.createElement('canvas');
+  c.width = Math.round(img.width * k);
+  c.height = Math.round(img.height * k);
+  const ctx2d = c.getContext('2d');
+  ctx2d.fillStyle = '#fff'; // shaffof PNG qora bo'lib qolmasligi uchun
+  ctx2d.fillRect(0, 0, c.width, c.height);
+  ctx2d.drawImage(img, 0, 0, c.width, c.height);
+  return new Promise((resolve) => c.toBlob(resolve, type, quality));
+}
+
+// Katta (kartochka uchun) va kichik (ro'yxat uchun) nusxa. WebP qo'llanmasa — JPEG.
+async function preparePhoto(blob) {
+  const img = await loadImage(blob);
+  let full = await canvasToBlob(img, 1200, 'image/webp', 0.8);
+  let type = 'image/webp';
+  if (!full || full.type !== 'image/webp') {
+    type = 'image/jpeg';
+    full = await canvasToBlob(img, 1200, type, 0.8);
+  }
+  const thumb = await canvasToBlob(img, 240, type, 0.7);
+  return { full, thumb, ext: type === 'image/webp' ? 'webp' : 'jpg' };
+}
+
+// Telegram uchun JPEG ga o'tkazamiz (WebP ni hamma mijozlar ham rasm sifatida ko'rsatmaydi)
+async function toJpeg(blob) {
+  if (blob.type === 'image/jpeg') return blob;
+  const img = await loadImage(blob);
+  return canvasToBlob(img, 1600, 'image/jpeg', 0.88);
+}
+
+async function dataUrlToBlob(url) {
+  return (await fetch(url)).blob();
+}
+
+function blobToDataUrl(blob) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(r.result);
+    r.onerror = reject;
+    r.readAsDataURL(blob);
+  });
+}
+
+// Kalitlari tartiblangan JSON: PostgreSQL jsonb kalitlarni o'z tartibida qaytaradi,
+// oddiy JSON.stringify bilan solishtirsak, o'zgarmagan yozuvlar ham qayta yuborilardi.
+function stableJson(v) {
+  if (Array.isArray(v)) return '[' + v.map(stableJson).join(',') + ']';
+  if (v && typeof v === 'object') {
+    return '{' + Object.keys(v).filter((k) => v[k] !== undefined).sort().map((k) => JSON.stringify(k) + ':' + stableJson(v[k])).join(',') + '}';
+  }
+  return JSON.stringify(v) ?? 'null';
+}
+
+const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 9);
+const photoPath = (ext, suffix = '') => `products/${new Date().getFullYear()}/${newId()}${suffix}.${ext}`;
+
+// ---------- Lokal rejim ----------
+
+function openIdb() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open('biznes-tizim', 1);
+    req.onupgradeneeded = () => req.result.createObjectStore('photos');
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+function idbRequest(idb, mode, fn) {
+  return new Promise((resolve, reject) => {
+    const tx = idb.transaction('photos', mode);
+    const req = fn(tx.objectStore('photos'));
+    tx.oncomplete = () => resolve(req?.result);
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+async function sha256(text) {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+  return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+class LocalBackend {
+  constructor() {
+    this.kind = 'local';
+    this.label = "Lokal rejim (shu qurilmada)";
+    this.canSetOthersPassword = true;
+    this.loginLabel = 'Login';
+    this.urls = new Map();
+  }
+
+  async init() {
+    try { this.idb = await openIdb(); } catch (e) { console.warn('IndexedDB:', e); }
+    this.data = this.readData();
+  }
+
+  readData() {
+    try {
+      const raw = localStorage.getItem(LOCAL_DATA_KEY);
+      return raw ? JSON.parse(raw) : null;
+    } catch (e) {
+      console.error(e);
+      return null;
+    }
+  }
+
+  // --- Foydalanuvchilar ---
+
+  get users() {
+    return this.data?.users || [];
+  }
+
+  async hasUsers() {
+    return this.users.length > 0;
+  }
+
+  async restoreSession() {
+    let id = null;
+    try { id = localStorage.getItem(LOCAL_SESSION_KEY); } catch (e) { /* xotira yopiq */ }
+    return this.users.find((u) => u.id === id && u.active !== false) || null;
+  }
+
+  async signIn(login, password) {
+    const u = this.users.find((x) => x.login === login.trim().toLowerCase());
+    if (!u || u.passHash !== await sha256(u.salt + ':' + password)) throw new Error("Login yoki parol noto'g'ri.");
+    if (u.active === false) throw new Error('Bu hisob bloklangan. Administratorga murojaat qiling.');
+    localStorage.setItem(LOCAL_SESSION_KEY, u.id);
+    return u;
+  }
+
+  async createFirstAdmin({ name, login, password }) {
+    const u = { id: newId(), name, login: login.toLowerCase(), role: 'admin', active: true };
+    await this.setPassword(u, password);
+    this.data = Object.assign(this.data || {}, { users: [u] });
+    this.writeData(this.data);
+    localStorage.setItem(LOCAL_SESSION_KEY, u.id);
+    return u;
+  }
+
+  async signOut() {
+    localStorage.removeItem(LOCAL_SESSION_KEY);
+  }
+
+  async setPassword(u, password) {
+    u.salt = newId() + newId();
+    u.passHash = await sha256(u.salt + ':' + password);
+  }
+
+  async saveUser(user, password, isNew) {
+    if (this.users.some((x) => x.login === user.login && x.id !== user.id)) throw new Error('Bu login band.');
+    const target = isNew ? Object.assign(user, { id: newId() }) : this.users.find((x) => x.id === user.id);
+    Object.assign(target, { name: user.name, login: user.login, role: user.role, active: user.active });
+    if (password) await this.setPassword(target, password);
+    if (isNew) this.data.users.push(target);
+    this.writeData(this.data);
+  }
+
+  async changeOwnPassword(me, password) {
+    await this.saveUser(me, password, false);
+  }
+
+  async listUsers() {
+    return this.users.map(({ id, name, login, role, active }) => ({ id, name, login, role, active }));
+  }
+
+  // --- Ma'lumotlar ---
+
+  async load() {
+    const data = this.readData() || {};
+    // Eski versiyadagi bitta rasm (data URL) — rasmlar xotirasiga ko'chiriladi
+    let migrated = false;
+    for (const p of data.products || []) {
+      if (p.photo && p.photo.startsWith('data:')) {
+        try {
+          p.photos = [await this.uploadPhoto(await dataUrlToBlob(p.photo))];
+          migrated = true;
+        } catch (e) {
+          console.warn(e);
+        }
+      }
+      delete p.photo;
+    }
+    this.data = data;
+    if (migrated) this.writeData(data);
+    return JSON.parse(JSON.stringify(data));
+  }
+
+  writeData(data) {
+    try {
+      localStorage.setItem(LOCAL_DATA_KEY, JSON.stringify(data));
+    } catch (e) {
+      throw new Error("Brauzer xotirasi to'lgan: " + e.message);
+    }
+  }
+
+  async commit(db) {
+    // Hisoblagich (seq) va foydalanuvchilar parollari bilan faqat shu yerda saqlanadi
+    const data = Object.assign({}, db, { users: this.users, seq: this.data?.seq || {} });
+    this.writeData(data);
+    this.data = data;
+  }
+
+  async nextNo(kind, prefix) {
+    this.data.seq = this.data.seq || {};
+    this.data.seq[kind] = (this.data.seq[kind] || 0) + 1;
+    this.writeData(this.data);
+    return `${prefix}-${String(this.data.seq[kind]).padStart(5, '0')}`;
+  }
+
+  async counters() {
+    return this.data?.seq || {};
+  }
+
+  async setCounters(seq) {
+    this.data.seq = this.data.seq || {};
+    Object.entries(seq || {}).forEach(([k, v]) => { this.data.seq[k] = Math.max(this.data.seq[k] || 0, v); });
+    this.writeData(this.data);
+  }
+
+  subscribe() { /* bitta qurilma — jonli yangilanish kerak emas */ }
+  unsubscribe() {}
+
+  // --- Rasmlar ---
+
+  async uploadPhoto(blob) {
+    if (!this.idb) throw new Error("Brauzer rasmlarni saqlashni qo'llamaydi");
+    const { full, thumb, ext } = await preparePhoto(blob);
+    const path = photoPath(ext);
+    const thumbPath = photoPath(ext, '_t');
+    await idbRequest(this.idb, 'readwrite', (s) => { s.put(full, path); s.put(thumb, thumbPath); });
+    return { path, thumb: thumbPath };
+  }
+
+  async deletePhotos(paths) {
+    if (!this.idb || !paths.length) return;
+    await idbRequest(this.idb, 'readwrite', (s) => { paths.forEach((p) => s.delete(p)); });
+    paths.forEach((p) => { const u = this.urls.get(p); if (u) URL.revokeObjectURL(u); this.urls.delete(p); });
+  }
+
+  async photoBlob(path) {
+    if (!this.idb) return null;
+    const blob = await idbRequest(this.idb, 'readonly', (s) => s.get(path));
+    return blob instanceof Blob ? blob : null;
+  }
+
+  async photoUrl(path) {
+    if (!path) return '';
+    if (!this.urls.has(path)) {
+      const blob = await this.photoBlob(path);
+      this.urls.set(path, blob ? URL.createObjectURL(blob) : '');
+    }
+    return this.urls.get(path);
+  }
+
+  async storageUsage() {
+    if (!navigator.storage?.estimate) return null;
+    const e = await navigator.storage.estimate();
+    return { used: e.usage || 0, limit: e.quota || 0 };
+  }
+
+  // Serverga ko'chirish uchun: rasmlarni ham faylga joylab beradi
+  async exportWithPhotos() {
+    const data = JSON.parse(JSON.stringify(this.readData() || {}));
+    for (const p of data.products || []) {
+      const photos = [];
+      for (const ph of p.photos || []) {
+        const blob = await this.photoBlob(ph.path);
+        // Fayli yo'q rasm boshqa joyda baribir ochilmaydi — tashlab ketamiz
+        if (blob) photos.push(Object.assign(ph, { data: await blobToDataUrl(blob) }));
+      }
+      p.photos = photos;
+    }
+    return data;
+  }
+}
+
+// ---------- Supabase ----------
+
+const NETWORK_RE = /Failed to fetch|NetworkError|Load failed|fetch failed|ERR_|timeout/i;
+
+// Ruxsat yoki ma'lumot xatosi (qayta urinish foyda bermaydi) — internet uzilishidan farqli
+function syncError(error) {
+  const network = NETWORK_RE.test(error?.message || '') || NETWORK_RE.test(error?.details || '');
+  return Object.assign(new Error(friendlyError(error)), { fatal: !network });
+}
+
+function friendlyError(error) {
+  const m = error?.message || String(error);
+  if (/Invalid login credentials/i.test(m)) return "Email yoki parol noto'g'ri.";
+  if (/Email not confirmed/i.test(m)) return 'Email hali tasdiqlanmagan. Pochtangizdagi xatdagi havolani bosing.';
+  if (/User already registered/i.test(m)) return "Bu email bilan foydalanuvchi allaqachon mavjud.";
+  if (/Password should be at least/i.test(m)) return "Parol juda qisqa (kamida 6 belgi).";
+  if (/rate limit/i.test(m)) return "Juda ko'p urinish. Birozdan keyin qayta urinib ko'ring.";
+  if (/Failed to fetch|NetworkError|Load failed/i.test(m)) return "Serverga ulanib bo'lmadi. Internetni tekshiring.";
+  if (/row-level security|permission denied|42501/i.test(m)) return "Bu amal uchun ruxsatingiz yo'q.";
+  return m;
+}
+
+class SupabaseBackend {
+  constructor(cfg) {
+    this.kind = 'supabase';
+    this.cfg = cfg;
+    this.label = 'Supabase server: ' + cfg.url.replace(/^https?:\/\//, '');
+    this.canSetOthersPassword = false;
+    this.loginLabel = 'Email';
+    this.sb = window.supabase.createClient(cfg.url, cfg.key);
+    this.snap = {};
+    this.profile = null;
+    this.channel = null;
+  }
+
+  async init() {}
+
+  // --- Foydalanuvchilar ---
+
+  async hasUsers() {
+    const { data, error } = await this.sb.rpc('has_users');
+    if (error) throw new Error(friendlyError(error));
+    return data;
+  }
+
+  async loadProfile(user) {
+    const { data, error } = await this.sb.from('profiles').select('*').eq('id', user.id).maybeSingle();
+    if (error) throw new Error(friendlyError(error));
+    if (!data || !data.active) {
+      await this.sb.auth.signOut();
+      throw new Error("Hisobingiz hali faollashtirilmagan yoki bloklangan. Administratorga murojaat qiling.");
+    }
+    this.profile = data;
+    return { id: data.id, name: data.name, login: data.login, role: data.role, active: data.active };
+  }
+
+  async restoreSession() {
+    const { data } = await this.sb.auth.getSession();
+    return data.session ? this.loadProfile(data.session.user) : null;
+  }
+
+  async signIn(login, password) {
+    const { data, error } = await this.sb.auth.signInWithPassword({ email: login.trim(), password });
+    if (error) throw new Error(friendlyError(error));
+    return this.loadProfile(data.user);
+  }
+
+  async createFirstAdmin({ name, login, password }) {
+    const { data, error } = await this.sb.auth.signUp({ email: login.trim(), password, options: { data: { name } } });
+    if (error) throw new Error(friendlyError(error));
+    if (!data.session) throw new Error("Emailingizga tasdiqlash xati yuborildi. Havolani bosing, so'ng shu yerda kiring.");
+    return this.loadProfile(data.user);
+  }
+
+  async signOut() {
+    this.unsubscribe();
+    await this.sb.auth.signOut();
+  }
+
+  async saveUser(user, password, isNew) {
+    if (isNew) {
+      // Alohida mijoz: administratorning o'z sessiyasi almashib ketmasligi uchun
+      const tmp = window.supabase.createClient(this.cfg.url, this.cfg.key, {
+        auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false, storageKey: 'bt-signup' },
+      });
+      const { data, error } = await tmp.auth.signUp({ email: user.login, password, options: { data: { name: user.name } } });
+      if (error) throw new Error(friendlyError(error));
+      if (!data.user?.id || (data.user.identities && !data.user.identities.length)) throw new Error('Bu email bilan foydalanuvchi allaqachon mavjud.');
+      user.id = data.user.id;
+    }
+    const { error } = await this.sb.from('profiles')
+      .update({ name: user.name, role: user.role, active: user.active })
+      .eq('id', user.id);
+    if (error) throw new Error(friendlyError(error));
+  }
+
+  async changeOwnPassword(me, password) {
+    const { error } = await this.sb.auth.updateUser({ password });
+    if (error) throw new Error(friendlyError(error));
+  }
+
+  async listUsers() {
+    return this.fetchAll('profiles', 'id,name,login,role,active');
+  }
+
+  // --- Ma'lumotlar ---
+
+  get isAdmin() {
+    return this.profile?.role === 'admin';
+  }
+
+  async fetchAll(table, columns = 'id,data') {
+    const out = [];
+    for (let from = 0; ; from += 1000) {
+      const { data, error } = await this.sb.from(table).select(columns).order('id').range(from, from + 999);
+      if (error) throw new Error(`${table}: ${friendlyError(error)}`);
+      out.push(...data);
+      if (data.length < 1000) break;
+    }
+    return out;
+  }
+
+  async load(defaults) {
+    const [rows, costs, settings, profiles] = await Promise.all([
+      Promise.all(ENTITY_TABLES.map((t) => this.fetchAll(t))),
+      this.isAdmin ? this.fetchAll('product_costs') : Promise.resolve([]),
+      this.fetchAll('settings'),
+      this.fetchAll('profiles', 'id,name,login,role,active'),
+    ]);
+    const db = Object.assign({}, defaults);
+    this.snap = {};
+    ENTITY_TABLES.forEach((t, i) => {
+      db[t] = rows[i].map((r) => r.data);
+      this.snap[t] = new Map(rows[i].map((r) => [r.id, stableJson(r.data)]));
+    });
+    this.snap.product_costs = new Map(costs.map((r) => [r.id, stableJson(r.data)]));
+    const costMap = new Map(costs.map((r) => [r.id, r.data.buyPrice]));
+    db.products.forEach((p) => { if (costMap.has(p.id)) p.buyPrice = costMap.get(p.id); });
+    this.snap.settings = new Map(settings.map((r) => [r.id, stableJson(r.data)]));
+    settings.forEach((r) => { if (SETTINGS_KEYS.includes(r.id)) db[r.id] = r.data.value; });
+    db.users = profiles;
+
+    // Yangi bazani administrator birinchi kirganda boshlang'ich ma'lumotlar bilan to'ldiramiz
+    if (this.isAdmin && !db.warehouses.length) {
+      db.warehouses = defaults.warehouses;
+      if (!db.counterparties.length) db.counterparties = defaults.counterparties;
+      await this.commit(db);
+    }
+    return db;
+  }
+
+  // Joriy holatni qatorlarga aylantiramiz: { jadval: Map(id → data) }
+  rowsOf(db) {
+    const out = {};
+    ENTITY_TABLES.forEach((t) => {
+      out[t] = new Map((db[t] || []).map((x) => {
+        if (t === 'products') {
+          const { buyPrice, ...rest } = x;
+          return [x.id, rest];
+        }
+        return [x.id, x];
+      }));
+    });
+    if (this.isAdmin) {
+      out.product_costs = new Map((db.products || []).map((p) => [p.id, { buyPrice: p.buyPrice || 0 }]));
+      out.settings = new Map(SETTINGS_KEYS.filter((k) => db[k] !== undefined).map((k) => [k, { value: db[k] }]));
+    }
+    return out;
+  }
+
+  async commit(db) {
+    const rows = this.rowsOf(db);
+    const order = [...ENTITY_TABLES.slice(0, 3), 'product_costs', ...ENTITY_TABLES.slice(3), 'settings'];
+    const plan = order.filter((t) => rows[t]).map((t) => {
+      const snap = this.snap[t] || new Map();
+      const upserts = [];
+      rows[t].forEach((data, id) => {
+        const json = stableJson(data);
+        if (snap.get(id) !== json) upserts.push({ id, data, json });
+      });
+      const deletes = [...snap.keys()].filter((id) => !rows[t].has(id));
+      return { t, upserts, deletes };
+    });
+    // Avval qo'shish/yangilash (bog'liq yozuvlar tartibida), keyin teskari tartibda o'chirish
+    for (const { t, upserts } of plan) {
+      for (let i = 0; i < upserts.length; i += 500) {
+        const chunk = upserts.slice(i, i + 500);
+        const { error } = await this.sb.from(t).upsert(chunk.map(({ id, data }) => ({ id, data })));
+        if (error) throw syncError(error);
+        this.snap[t] = this.snap[t] || new Map();
+        chunk.forEach(({ id, json }) => this.snap[t].set(id, json));
+      }
+    }
+    for (const { t, deletes } of plan.slice().reverse()) {
+      for (let i = 0; i < deletes.length; i += 200) {
+        const chunk = deletes.slice(i, i + 200);
+        const { error } = await this.sb.from(t).delete().in('id', chunk);
+        if (error) throw syncError(error);
+        chunk.forEach((id) => this.snap[t].delete(id));
+      }
+    }
+  }
+
+  async nextNo(kind, prefix) {
+    const { data, error } = await this.sb.rpc('next_no', { kind, prefix });
+    if (error) throw new Error(friendlyError(error));
+    return data;
+  }
+
+  async counters() {
+    return {}; // hisoblagichlar serverda; zaxira nusxaga kerak emas
+  }
+
+  async setCounters(seq) {
+    if (!seq || !Object.keys(seq).length) return;
+    const { error } = await this.sb.rpc('set_counters', { seq });
+    if (error) throw new Error(friendlyError(error));
+  }
+
+  // Sotuvchi uchun qoldiq serverda hisoblanadi (u xarid hujjatlarini ko'rmaydi)
+  async stockLevels() {
+    const { data, error } = await this.sb.rpc('stock_levels');
+    if (error) throw new Error(friendlyError(error));
+    const st = {};
+    (data || []).forEach((r) => {
+      if (!r.product_id || !r.warehouse_id) return;
+      st[r.product_id] = st[r.product_id] || {};
+      st[r.product_id][r.warehouse_id] = (st[r.product_id][r.warehouse_id] || 0) + Number(r.qty);
+    });
+    return st;
+  }
+
+  // Boshqa qurilmalardagi o'zgarishlarni `db` ga qo'llaydi
+  subscribe(db, onChange) {
+    this.unsubscribe();
+    this.channel = this.sb.channel('biznes-tizim');
+    ['products', 'product_costs', 'warehouses', 'counterparties', 'docs', 'payments', 'settings', 'profiles'].forEach((table) => {
+      this.channel.on('postgres_changes', { event: '*', schema: 'public', table }, (payload) => {
+        if (this.applyChange(db, table, payload)) onChange(table);
+      });
+    });
+    this.channel.subscribe();
+  }
+
+  unsubscribe() {
+    if (this.channel) this.sb.removeChannel(this.channel);
+    this.channel = null;
+  }
+
+  applyChange(db, table, { eventType, new: row, old }) {
+    const id = row?.id || old?.id;
+    if (!id) return false;
+    if (table === 'profiles') {
+      const i = db.users.findIndex((u) => u.id === id);
+      if (eventType === 'DELETE') { if (i >= 0) db.users.splice(i, 1); } else {
+        const u = { id: row.id, name: row.name, login: row.login, role: row.role, active: row.active };
+        if (i >= 0) db.users[i] = u; else db.users.push(u);
+      }
+      return true;
+    }
+    const snap = (this.snap[table] = this.snap[table] || new Map());
+    if (eventType === 'DELETE') {
+      if (!snap.has(id)) return false;
+      snap.delete(id);
+    } else {
+      const json = stableJson(row.data);
+      if (snap.get(id) === json) return false; // o'zimizning o'zgarishimiz qaytib keldi
+      snap.set(id, json);
+    }
+    const data = eventType === 'DELETE' ? null : row.data;
+    if (table === 'settings') {
+      if (data && SETTINGS_KEYS.includes(id)) db[id] = data.value;
+      return true;
+    }
+    if (table === 'product_costs') {
+      const p = db.products.find((x) => x.id === id);
+      if (p) p.buyPrice = data ? data.buyPrice : 0;
+      return true;
+    }
+    const list = db[table];
+    const i = list.findIndex((x) => x.id === id);
+    if (!data) {
+      if (i >= 0) list.splice(i, 1);
+    } else {
+      if (table === 'products' && i >= 0) data.buyPrice = list[i].buyPrice;
+      if (i >= 0) list[i] = data; else list.push(data);
+    }
+    return true;
+  }
+
+  // --- Rasmlar ---
+
+  async uploadPhoto(blob) {
+    const { full, thumb, ext } = await preparePhoto(blob);
+    const path = photoPath(ext);
+    const thumbPath = photoPath(ext, '_t');
+    const storage = this.sb.storage.from(PHOTO_BUCKET);
+    for (const [p, b] of [[path, full], [thumbPath, thumb]]) {
+      const { error } = await storage.upload(p, b, { contentType: b.type, cacheControl: '31536000' });
+      if (error) throw new Error('Rasm yuklanmadi: ' + friendlyError(error));
+    }
+    return { path, thumb: thumbPath };
+  }
+
+  async deletePhotos(paths) {
+    if (!paths.length) return;
+    const { error } = await this.sb.storage.from(PHOTO_BUCKET).remove(paths);
+    if (error) console.warn('Rasm o\'chirilmadi:', error);
+  }
+
+  async photoUrl(path) {
+    return path ? this.sb.storage.from(PHOTO_BUCKET).getPublicUrl(path).data.publicUrl : '';
+  }
+
+  async photoBlob(path) {
+    const res = await fetch(await this.photoUrl(path));
+    return res.ok ? res.blob() : null;
+  }
+
+  async storageUsage() {
+    const { data, error } = await this.sb.rpc('photos_usage');
+    if (error) return null;
+    return { used: Number(data) || 0, limit: 1024 ** 3 }; // bepul tarif: 1 GB
+  }
+}

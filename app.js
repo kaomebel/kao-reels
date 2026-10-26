@@ -7,8 +7,6 @@
  * va to'lovlardan har safar hisoblab chiqiladi.
  */
 
-const STORAGE_KEY = 'biznes-tizim-v1';
-
 // ---------- Ma'lumotnomalar ----------
 
 const ORDER_STATUSES = { new: 'Yangi', confirmed: 'Tasdiqlandi', making: 'Tayyorlanmoqda', shipped: "Jo'natildi", cancel: 'Bekor qilindi' };
@@ -51,117 +49,204 @@ function emptyDb() {
     docs: [],
     payments: [],
     categories: DEFAULT_CATEGORIES.slice(),
-    seq: {},
     company: { name: 'KAO Mebel', phone: '', address: '' },
     telegram: { token: '', chatId: '', onReceipt: true, onNewProduct: true, showQty: true, log: [] },
+    legacyUsers: {},
     users: [],
   };
 }
 
-function loadDb() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) {
-      const data = JSON.parse(raw);
-      const base = emptyDb();
-      return Object.assign(base, data, { telegram: Object.assign(base.telegram, data.telegram) });
-    }
-  } catch (e) {
-    console.error(e);
-  }
-  return emptyDb();
+// Saqlangan ma'lumotni joriy tuzilishga keltiramiz (yangi maydonlar standart qiymat oladi)
+function normalizeDb(data) {
+  const base = emptyDb();
+  const out = Object.assign(base, data);
+  out.telegram = Object.assign(emptyDb().telegram, data.telegram);
+  out.company = Object.assign(emptyDb().company, data.company);
+  return out;
 }
 
-let db = loadDb();
+let backend = null;
+let db = emptyDb();
+let syncState = { offline: false, message: '' };
 
-function persist() {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(db));
-  } catch (e) {
-    alert("Ma'lumotlarni saqlab bo'lmadi (brauzer xotirasi to'lgan bo'lishi mumkin — rasmlar hajmini kamaytiring): " + e.message);
-  }
+// O'zgarishlar navbat bilan yuboriladi. Internet uzilsa — keyinroq qayta urinadi.
+let commitQueue = Promise.resolve();
+let retryTimer = null;
+
+function commit() {
+  commitQueue = commitQueue.then(async () => {
+    try {
+      await backend.commit(db);
+      setSyncState(false);
+      if (stockFromServer()) await refreshServerStock();
+    } catch (e) {
+      console.error(e);
+      if (backend.kind === 'local') {
+        alert("Saqlab bo'lmadi: " + e.message);
+      } else if (e.fatal) {
+        alert("Saqlanmadi: " + e.message + "\n\nMa'lumotlar serverdan qayta yuklanadi.");
+        await loadData();
+      } else {
+        setSyncState(true, e.message);
+        clearTimeout(retryTimer);
+        retryTimer = setTimeout(commit, 15000);
+      }
+    }
+    render();
+  });
+  return commitQueue;
 }
 
 function save() {
-  persist();
   render();
+  return commit();
+}
+
+function setSyncState(offline, message = '') {
+  syncState = { offline, message };
+  const el = $('#syncBanner');
+  if (!el) return;
+  el.hidden = !offline;
+  el.textContent = offline ? "⚠️ Internet yo'q — o'zgarishlar hali serverga yuborilmadi. Ulanish tiklanganda avtomatik yuboriladi. Sahifani yopmang." : '';
+}
+
+window.addEventListener('online', () => { if (syncState.offline) commit(); });
+window.addEventListener('beforeunload', (e) => {
+  if (syncState.offline) { e.preventDefault(); e.returnValue = ''; }
+});
+
+// Sotuvchi xarid hujjatlarini ko'rmaydi — unga qoldiq serverda hisoblab beriladi
+let serverStock = null;
+const stockFromServer = () => backend?.kind === 'supabase' && !isAdmin();
+
+async function refreshServerStock() {
+  if (!stockFromServer()) { serverStock = null; return; }
+  try {
+    serverStock = await backend.stockLevels();
+  } catch (e) {
+    console.warn(e);
+  }
+}
+
+let renderTimer = null;
+function scheduleRender() {
+  clearTimeout(renderTimer);
+  renderTimer = setTimeout(async () => {
+    if (stockFromServer()) await refreshServerStock();
+    render();
+  }, 300);
+}
+
+async function loadData() {
+  showLoading(true);
+  try {
+    db = normalizeDb(await backend.load(emptyDb()));
+    await refreshServerStock();
+    backend.subscribe(db, scheduleRender);
+    if (isAdmin()) refreshStorageUsage();
+  } finally {
+    showLoading(false);
+  }
+}
+
+function showLoading(on, text = 'Yuklanmoqda...') {
+  $('#loading').hidden = !on;
+  $('#loadingText').textContent = text;
 }
 
 // ---------- Foydalanuvchilar va kirish ----------
 
 const ROLES = { admin: 'Administrator', seller: 'Sotuvchi' };
-const SESSION_KEY = 'biznes-tizim-session';
 
 let me = null;
 const isAdmin = () => me?.role === 'admin';
 
-async function hashPassword(password, salt) {
-  const data = new TextEncoder().encode(salt + ':' + password);
-  const buf = await crypto.subtle.digest('SHA-256', data);
-  return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, '0')).join('');
-}
-
-async function setPassword(user, password) {
-  user.salt = uid() + uid();
-  user.passHash = await hashPassword(password, user.salt);
-}
-
-function restoreSession() {
-  let id = null;
-  try { id = localStorage.getItem(SESSION_KEY); } catch (e) { /* xotira yopiq */ }
-  me = db.users.find((u) => u.id === id && u.active !== false) || null;
-}
-
-function setSession(user) {
-  me = user;
-  try {
-    if (user) localStorage.setItem(SESSION_KEY, user.id);
-    else localStorage.removeItem(SESSION_KEY);
-  } catch (e) { /* xotira yopiq */ }
-}
+let authNeedsSetup = false;
+let authMessage = '';
 
 function renderAuth() {
-  const setup = !db.users.length;
-  $('#authSubtitle').textContent = setup
-    ? "Birinchi ishga tushirish: administrator hisobini yarating."
-    : 'Tizimga kirish';
+  const setup = authNeedsSetup;
+  const loginLabel = backend.loginLabel;
+  const isEmail = backend.kind === 'supabase';
+  $('#authSubtitle').textContent = setup ? 'Birinchi ishga tushirish: administrator hisobini yarating.' : 'Tizimga kirish';
   $('#authForm').innerHTML = `
     ${setup ? '<label>Ismingiz<input name="name" required autocomplete="name"></label>' : ''}
-    <label>Login<input name="login" required autocomplete="username" autocapitalize="none"></label>
+    <label>${loginLabel}<input name="login" required autocomplete="username" autocapitalize="none" ${isEmail ? 'type="email" inputmode="email"' : ''}></label>
     <label>Parol<input name="password" type="password" required autocomplete="${setup ? 'new-password' : 'current-password'}"></label>
     ${setup ? '<label>Parolni takrorlang<input name="password2" type="password" required autocomplete="new-password"></label>' : ''}
-    <div class="auth-error" id="authError"></div>
-    <button class="primary" type="submit">${setup ? 'Yaratish va kirish' : 'Kirish'}</button>`;
-  $('#authForm [name=login]')?.focus();
-  if (setup) $('#authForm [name=name]').focus();
+    <div class="auth-error" id="authError">${esc(authMessage)}</div>
+    <button class="primary" type="submit">${setup ? 'Yaratish va kirish' : 'Kirish'}</button>
+    <div class="auth-server muted small">${esc(backend.label)} · <a href="#" id="serverLink">${backend.kind === 'local' ? 'Serverga ulanish' : "O'zgartirish"}</a></div>`;
+  $('#serverLink').addEventListener('click', (e) => { e.preventDefault(); openServerSettings(); });
+  (setup ? $('#authForm [name=name]') : $('#authForm [name=login]')).focus();
 }
 
 async function onAuthSubmit(e) {
   e.preventDefault();
   const d = Object.fromEntries(new FormData(e.target).entries());
-  const err = (t) => { $('#authError').textContent = t; };
+  const err = (t) => { authMessage = t; $('#authError').textContent = t; };
   const login = (d.login || '').trim().toLowerCase();
-  if (!login || !d.password) return err('Login va parolni kiriting.');
-
-  if (!db.users.length) {
-    if (!d.name.trim()) return err('Ismingizni kiriting.');
-    if (d.password.length < 4) return err("Parol kamida 4 belgidan iborat bo'lsin.");
-    if (d.password !== d.password2) return err('Parollar mos emas.');
-    const u = { id: uid(), name: d.name.trim(), login, role: 'admin', active: true, created: today() };
-    await setPassword(u, d.password);
-    db.users.push(u);
-    persist();
-    setSession(u);
+  if (!login || !d.password) return err(`${backend.loginLabel} va parolni kiriting.`);
+  const btn = $('#authForm button[type=submit]');
+  btn.disabled = true;
+  try {
+    if (authNeedsSetup) {
+      if (!d.name.trim()) return err('Ismingizni kiriting.');
+      if (d.password.length < 6) return err("Parol kamida 6 belgidan iborat bo'lsin.");
+      if (d.password !== d.password2) return err('Parollar mos emas.');
+      me = await backend.createFirstAdmin({ name: d.name.trim(), login, password: d.password });
+    } else {
+      me = await backend.signIn(login, d.password);
+    }
+    authMessage = '';
+    location.hash = '#dashboard';
+    await loadData();
     render();
-    return;
+  } catch (ex) {
+    err(ex.message);
+  } finally {
+    btn.disabled = false;
   }
+}
 
-  const u = db.users.find((x) => x.login === login);
-  if (!u || u.passHash !== await hashPassword(d.password, u.salt)) return err("Login yoki parol noto'g'ri.");
-  if (u.active === false) return err('Bu hisob bloklangan. Administratorga murojaat qiling.');
-  setSession(u);
-  location.hash = '#dashboard';
+async function logout() {
+  await backend.signOut();
+  me = null;
+  db = emptyDb();
+  serverStock = null;
+  authNeedsSetup = !(await backend.hasUsers().catch(() => true));
   render();
+}
+
+// Server (Supabase) ulanish oynasi — kirish oynasidan ham, Sozlamalardan ham ochiladi
+function openServerSettings() {
+  const cfg = serverConfig();
+  openModal({
+    title: 'Serverga ulanish',
+    body: `<p class="muted">Supabase loyihangiz manzili va ochiq (anon / publishable) kaliti. Ularni Supabase panelida <b>Project Settings → API</b> bo'limidan nusxalang.</p>
+      <div class="form-grid">
+        ${field('Project URL', 'url', cfg.url, 'placeholder="https://xxxxxxxx.supabase.co" autocomplete="off"', 'full')}
+        ${field('Anon / publishable key', 'key', cfg.key, 'autocomplete="off"', 'full')}
+      </div>
+      <p class="muted small">Bo'sh qoldirib saqlasangiz, dastur lokal rejimga (faqat shu qurilmada saqlash) qaytadi.</p>`,
+    submitText: 'Tekshirish va saqlash',
+    onSubmit: async (d) => {
+      const next = { url: d.url.trim().replace(/\/+$/, ''), key: d.key.trim() };
+      if (!next.url && !next.key) {
+        saveServerConfig(null);
+        location.reload();
+        return;
+      }
+      try {
+        await testServerConfig(next);
+      } catch (e) {
+        alert('Ulanib bo\'lmadi: ' + e.message);
+        return false;
+      }
+      saveServerConfig(next);
+      location.reload();
+    },
+  });
 }
 
 // ---------- Yordamchi funksiyalar ----------
@@ -185,9 +270,11 @@ const party = (id) => db.counterparties.find((c) => c.id === id);
 const warehouse = (id) => db.warehouses.find((w) => w.id === id);
 const doc = (id) => db.docs.find((d) => d.id === id);
 
+const PAY_PREFIX = { payIn: 'PK', payOut: 'PC' };
+
+// Raqam serverda beriladi — bir vaqtda ishlayotgan sotuvchilarda takrorlanmaydi
 function nextNo(type) {
-  db.seq[type] = (db.seq[type] || 0) + 1;
-  return `${DOC_TYPES[type]?.prefix || 'P'}-${String(db.seq[type]).padStart(5, '0')}`;
+  return backend.nextNo(type, DOC_TYPES[type]?.prefix || PAY_PREFIX[type] || 'P');
 }
 
 function linesSum(d) {
@@ -230,21 +317,30 @@ function badge(text, cls = '') {
 // ---------- Hisob-kitoblar ----------
 
 // excludeId — tahrirlanayotgan hujjatni hisobga olmaslik uchun
-function computeStock(excludeId) {
-  const st = {};
+function applyDocStock(st, d, sign) {
+  const t = DOC_TYPES[d.type];
   const add = (pid, wh, q) => {
     st[pid] = st[pid] || {};
-    st[pid][wh] = (st[pid][wh] || 0) + q;
+    st[pid][wh] = (st[pid][wh] || 0) + sign * q;
   };
-  db.docs.forEach((d) => {
-    if (d.id === excludeId) return;
-    const t = DOC_TYPES[d.type];
-    if (t.move) {
-      d.items.forEach((it) => { add(it.productId, d.warehouseId, -it.qty); add(it.productId, d.toWarehouseId, it.qty); });
-    } else if (t.stock) {
-      d.items.forEach((it) => add(it.productId, d.warehouseId, t.stock * it.qty));
-    }
-  });
+  if (t.move) {
+    d.items.forEach((it) => { add(it.productId, d.warehouseId, -it.qty); add(it.productId, d.toWarehouseId, it.qty); });
+  } else if (t.stock) {
+    d.items.forEach((it) => add(it.productId, d.warehouseId, t.stock * it.qty));
+  }
+}
+
+// excludeId — tahrirlanayotgan hujjatni hisobga olmaslik uchun
+function computeStock(excludeId) {
+  if (serverStock) {
+    // Sotuvchi: serverdan kelgan qoldiq, tahrirlanayotgan hujjat ta'siri olib tashlanadi
+    const st = JSON.parse(JSON.stringify(serverStock));
+    const ex = excludeId && doc(excludeId);
+    if (ex) applyDocStock(st, ex, -1);
+    return st;
+  }
+  const st = {};
+  db.docs.forEach((d) => { if (d.id !== excludeId) applyDocStock(st, d, 1); });
   return st;
 }
 
@@ -323,6 +419,7 @@ function openModal({ title, body, onSubmit, onOpen, extra = [], wide = false, su
   if (!$('#modal').open) $('#modal').showModal();
   $('#modalBody').scrollTop = 0;
   if (onOpen) onOpen();
+  hydratePhotos($('#modalBody'));
 }
 
 function closeModal() {
@@ -339,8 +436,22 @@ $('#modalForm').addEventListener('submit', async (e) => {
     return;
   }
   const data = Object.fromEntries(new FormData(form).entries());
-  // onSubmit false qaytarsa oyna yopilmaydi
-  const result = modalState.onSubmit ? await modalState.onSubmit(data) : undefined;
+  // Ikki marta bosilib, hujjat ikki marta yaratilmasligi uchun
+  if (modalState.busy) return;
+  modalState.busy = true;
+  $('#modalSubmit').disabled = true;
+  let result;
+  try {
+    // onSubmit false qaytarsa oyna yopilmaydi
+    result = modalState.onSubmit ? await modalState.onSubmit(data) : undefined;
+  } catch (ex) {
+    console.error(ex);
+    alert(ex.message);
+    result = false;
+  } finally {
+    modalState.busy = false;
+    $('#modalSubmit').disabled = false;
+  }
   if (result !== false) closeModal();
 });
 $('#modalCancel').addEventListener('click', closeModal);
@@ -366,15 +477,15 @@ const whOptions = () => db.warehouses.map((w) => [w.id, w.name]);
 
 // ---------- Mahsulotlar ----------
 
-function productForm(p = {}) {
+const MAX_PHOTOS = 5;
+
+function productForm(p = {}, readonly = false) {
   const cats = [['', '—'], ...db.categories.map((c) => [c, c])];
   return `<div class="product-form">
     <div class="photo-box">
-      <img id="photoPreview" src="${p.photo || ''}" ${p.photo ? '' : 'hidden'} alt="">
-      <div id="photoEmpty" class="muted" ${p.photo ? 'hidden' : ''}>Rasm yo'q</div>
-      <label class="filebtn">Rasm tanlash<input type="file" id="photoInput" accept="image/*" hidden></label>
-      <button type="button" class="small" id="photoRemove">Rasmni olib tashlash</button>
-      <input type="hidden" name="photo" value="${esc(p.photo || '')}">
+      <div class="photo-list" id="photoList"></div>
+      ${readonly ? '' : `<label class="filebtn">+ Rasm qo'shish<input type="file" id="photoInput" accept="image/*" multiple hidden></label>
+      <div class="muted small">${MAX_PHOTOS} tagacha. Birinchisi — asosiy (Telegram va ro'yxatda). Asosiy qilish uchun rasm ustiga bosing.</div>`}
     </div>
     <div class="form-grid">
       ${field('Nomi *', 'name', p.name, 'required', 'full')}
@@ -390,43 +501,73 @@ function productForm(p = {}) {
       ${field('Sotish narxi *', 'salePrice', p.salePrice ?? '', 'inputmode="numeric" required')}
       ${field('Minimal qoldiq', 'minQty', p.minQty ?? 1, 'type="number" min="0"')}
       ${p.id ? '' : field("Boshlang'ich qoldiq", 'initQty', 0, 'type="number" min="0"')}
-      ${p.id ? '' : selectField('Ombor', 'initWh', whOptions(), db.warehouses[0].id)}
+      ${p.id ? '' : selectField('Ombor', 'initWh', whOptions(), db.warehouses[0]?.id)}
       ${textArea('Tavsif', 'note', p.note)}
     </div>
   </div>`;
 }
 
-// Rasmni brauzer xotirasini to'ldirmasligi uchun kichraytirib JPEG ga o'tkazamiz
-function resizeImage(file, max = 1000) {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.onload = () => {
-      const k = Math.min(1, max / Math.max(img.width, img.height));
-      const c = document.createElement('canvas');
-      c.width = Math.round(img.width * k);
-      c.height = Math.round(img.height * k);
-      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
-      URL.revokeObjectURL(img.src);
-      resolve(c.toDataURL('image/jpeg', 0.8));
-    };
-    img.onerror = reject;
-    img.src = URL.createObjectURL(file);
+// Kartochkadagi rasmlar: saqlanganlari ({path, thumb}) va hali yuklanmagan yangilari ({file, url})
+let photoEdit = null;
+
+function renderPhotoList(readonly) {
+  const box = $('#photoList');
+  if (!box) return;
+  box.innerHTML = photoEdit.items.length ? photoEdit.items.map((ph, i) => `<div class="ph ${i === 0 ? 'main' : ''}">
+      <img ${ph.file ? `src="${ph.url}"` : `data-photo="${esc(ph.thumb)}"`} data-i="${i}" alt="">
+      ${i === 0 ? '<span class="ph-main">Asosiy</span>' : ''}
+      ${readonly ? '' : `<button type="button" class="ph-del" data-i="${i}" title="Olib tashlash">×</button>`}
+    </div>`).join('') : '<div class="photo-empty muted">Rasm yo\'q</div>';
+  hydratePhotos(box);
+}
+
+function bindProductForm(p, readonly = false) {
+  photoEdit = { items: (p.photos || []).slice(), removed: [] };
+  renderPhotoList(readonly);
+  if (readonly) return;
+  $('#photoInput').addEventListener('change', (e) => {
+    const files = Array.from(e.target.files).slice(0, MAX_PHOTOS - photoEdit.items.length);
+    if (e.target.files.length > files.length) alert(`Ko'pi bilan ${MAX_PHOTOS} ta rasm.`);
+    files.forEach((file) => photoEdit.items.push({ file, url: URL.createObjectURL(file) }));
+    e.target.value = '';
+    renderPhotoList();
+  });
+  $('#photoList').addEventListener('click', (e) => {
+    const del = e.target.closest('.ph-del');
+    const img = e.target.closest('img[data-i]');
+    if (del) {
+      const [ph] = photoEdit.items.splice(+del.dataset.i, 1);
+      if (ph.file) URL.revokeObjectURL(ph.url);
+      else photoEdit.removed.push(ph.path, ph.thumb);
+    } else if (img && +img.dataset.i > 0) {
+      const [ph] = photoEdit.items.splice(+img.dataset.i, 1);
+      photoEdit.items.unshift(ph);
+    } else return;
+    renderPhotoList();
   });
 }
 
-function bindProductForm() {
-  const hidden = $('#modalForm [name=photo]');
-  const show = (src) => {
-    hidden.value = src;
-    $('#photoPreview').src = src;
-    $('#photoPreview').hidden = !src;
-    $('#photoEmpty').hidden = !!src;
-  };
-  $('#photoInput').addEventListener('change', async (e) => {
-    const f = e.target.files[0];
-    if (f) show(await resizeImage(f));
-  });
-  $('#photoRemove').addEventListener('click', () => show(''));
+// Yangi rasmlarni yuklaydi va mahsulotga yoziladigan ro'yxatni qaytaradi
+async function uploadPendingPhotos() {
+  const btn = $('#modalSubmit');
+  const out = [];
+  const pending = photoEdit.items.filter((ph) => ph.file).length;
+  let done = 0;
+  for (const ph of photoEdit.items) {
+    if (!ph.file) { out.push({ path: ph.path, thumb: ph.thumb }); continue; }
+    btn.textContent = `Rasm yuklanmoqda ${++done}/${pending}...`;
+    out.push(await backend.uploadPhoto(ph.file));
+    URL.revokeObjectURL(ph.url);
+  }
+  return out;
+}
+
+async function hydratePhotos(root = document) {
+  for (const img of $$('img[data-photo]', root)) {
+    const path = img.dataset.photo;
+    img.removeAttribute('data-photo');
+    backend.photoUrl(path).then((u) => { if (u) img.src = u; }).catch(() => {});
+  }
 }
 
 function readProduct(d, p) {
@@ -444,8 +585,23 @@ function readProduct(d, p) {
     salePrice: num(d.salePrice),
     minQty: num(d.minQty),
     note: d.note.trim(),
-    photo: d.photo,
   });
+}
+
+async function withPhotos(fn) {
+  const btn = $('#modalSubmit');
+  btn.disabled = true;
+  try {
+    const photos = await uploadPendingPhotos();
+    await fn(photos);
+    if (photoEdit.removed.length) backend.deletePhotos(photoEdit.removed);
+  } catch (e) {
+    alert(e.message);
+    return false;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Saqlash';
+  }
 }
 
 function newProduct() {
@@ -453,23 +609,23 @@ function newProduct() {
     title: 'Yangi mahsulot',
     body: productForm(),
     wide: true,
-    onOpen: bindProductForm,
-    onSubmit: (d) => {
-      const p = readProduct(d, { id: uid(), created: today() });
+    onOpen: () => bindProductForm({}),
+    onSubmit: (d) => withPhotos(async (photos) => {
+      const p = readProduct(d, { id: uid(), created: today(), photos });
       db.products.push(p);
       const qty = num(d.initQty);
       let entry = null;
       if (qty > 0) {
         entry = {
-          id: uid(), type: 'enter', no: nextNo('enter'), date: today(), warehouseId: d.initWh,
+          id: uid(), type: 'enter', no: await nextNo('enter'), date: today(), warehouseId: d.initWh, userId: me.id,
           items: [{ productId: p.id, qty, price: p.buyPrice }], note: "Boshlang'ich qoldiq",
         };
         db.docs.push(entry);
       }
-      save();
+      await save();
       if (entry) telegramOnStockIn(entry);
       else if (db.telegram.onNewProduct) telegramPostProducts([p.id]);
-    },
+    }),
   });
 }
 
@@ -477,23 +633,23 @@ function editProduct(id) {
   const p = product(id);
   if (!isAdmin()) {
     // Sotuvchi kartochkani faqat ko'radi
-    openModal({ title: p.name, body: `<fieldset disabled>${productForm(p)}</fieldset>`, wide: true });
-    $$('#modalBody .filebtn, #photoRemove').forEach((el) => { el.hidden = true; });
+    openModal({ title: p.name, body: `<fieldset disabled>${productForm(p, true)}</fieldset>`, wide: true, onOpen: () => bindProductForm(p, true) });
     return;
   }
   openModal({
     title: 'Mahsulot kartochkasi',
     body: productForm(p),
     wide: true,
-    onOpen: bindProductForm,
+    onOpen: () => bindProductForm(p),
     extra: [
       { label: 'Telegramga yuborish', onClick: () => telegramPostProducts([id], true) },
       { label: 'Harakatlar tarixi', onClick: () => productHistory(id) },
     ],
-    onSubmit: (d) => {
+    onSubmit: (d) => withPhotos(async (photos) => {
       readProduct(d, p);
-      save();
-    },
+      p.photos = photos;
+      await save();
+    }),
   });
 }
 
@@ -508,7 +664,7 @@ function deleteProduct(id) {
   }
   if (!confirm(`"${p.name}" o'chirilsinmi?`)) return;
   db.products = db.products.filter((x) => x.id !== id);
-  save();
+  save().then(() => backend.deletePhotos((p.photos || []).flatMap((ph) => [ph.path, ph.thumb])));
 }
 
 function productHistory(id) {
@@ -764,7 +920,7 @@ const SELLER_DOCS = ['order', 'sale', 'salesReturn'];
 const canUseDoc = (type) => isAdmin() || SELLER_DOCS.includes(type);
 const canEditDoc = (d) => isAdmin() || (canUseDoc(d.type) && d.userId === me?.id);
 
-function saveDoc(type, existing, preset, data, stock) {
+async function saveDoc(type, existing, preset, data, stock) {
   const t = DOC_TYPES[type];
   const items = readItems();
   if (!items.length) {
@@ -799,7 +955,7 @@ function saveDoc(type, existing, preset, data, stock) {
     if (short.length && !confirm("Omborda yetarli emas:\n" + short.join('\n') + "\n\nBaribir saqlansinmi? (qoldiq manfiy bo'ladi)")) return false;
   }
 
-  const d = existing || Object.assign({ id: uid(), type, no: nextNo(type), created: new Date().toISOString(), userId: me?.id }, preset.orderId ? { orderId: preset.orderId } : {}, preset.baseId ? { baseId: preset.baseId } : {});
+  const d = existing || Object.assign({ id: uid(), type, no: await nextNo(type), created: new Date().toISOString(), userId: me?.id }, preset.orderId ? { orderId: preset.orderId } : {}, preset.baseId ? { baseId: preset.baseId } : {});
   Object.assign(d, {
     date: data.date,
     counterpartyId,
@@ -818,7 +974,7 @@ function saveDoc(type, existing, preset, data, stock) {
     const pay = num(data.payNow);
     if (pay > 0) {
       db.payments.push({
-        id: uid(), no: nextNo(t.pay === 'in' ? 'payIn' : 'payOut'), dir: t.pay, date: d.date, counterpartyId, docId: d.id,
+        id: uid(), no: await nextNo(t.pay === 'in' ? 'payIn' : 'payOut'), dir: t.pay, date: d.date, counterpartyId, docId: d.id,
         amount: pay, method: data.payMethod, purpose: t.pay === 'in' ? PAY_PURPOSES_IN[0] : PAY_PURPOSES_OUT[0], note: '', userId: me?.id,
       });
     }
@@ -935,19 +1091,19 @@ function openInventory(existing) {
         $('.inv-diff', tr).classList.toggle('debt', diff < 0);
       });
     },
-    onSubmit: (data) => {
+    onSubmit: async (data) => {
       const items = $$('#invRows tr[data-pid]').map((tr) => ({ productId: tr.dataset.pid, expected: num(tr.dataset.exp), qty: num($('.inv-fact', tr).value), price: ctx.cost[tr.dataset.pid] || 0 }));
-      const inv = { id: uid(), type: 'inventory', no: nextNo('inventory'), date: data.date, warehouseId: data.warehouseId, items, note: '' };
+      const inv = { id: uid(), type: 'inventory', no: await nextNo('inventory'), userId: me.id, date: data.date, warehouseId: data.warehouseId, items, note: '' };
       const plus = items.filter((it) => it.qty > it.expected).map((it) => ({ productId: it.productId, qty: it.qty - it.expected, price: it.price }));
       const minus = items.filter((it) => it.qty < it.expected).map((it) => ({ productId: it.productId, qty: it.expected - it.qty, price: it.price }));
       const created = [];
       if (plus.length) {
-        const e = { id: uid(), type: 'enter', no: nextNo('enter'), date: data.date, warehouseId: data.warehouseId, items: plus, note: `Inventarizatsiya ${inv.no} — ortiqcha`, baseId: inv.id };
+        const e = { id: uid(), type: 'enter', no: await nextNo('enter'), userId: me.id, date: data.date, warehouseId: data.warehouseId, items: plus, note: `Inventarizatsiya ${inv.no} — ortiqcha`, baseId: inv.id };
         db.docs.push(e);
         created.push(`Kirim qilish ${e.no}`);
       }
       if (minus.length) {
-        const w = { id: uid(), type: 'writeoff', no: nextNo('writeoff'), date: data.date, warehouseId: data.warehouseId, items: minus, note: `Inventarizatsiya ${inv.no} — kamomad`, baseId: inv.id };
+        const w = { id: uid(), type: 'writeoff', no: await nextNo('writeoff'), userId: me.id, date: data.date, warehouseId: data.warehouseId, items: minus, note: `Inventarizatsiya ${inv.no} — kamomad`, baseId: inv.id };
         db.docs.push(w);
         created.push(`Hisobdan chiqarish ${w.no}`);
       }
@@ -979,14 +1135,14 @@ function newPayment(dir, preset = {}) {
         ${selectField('Kontragent', 'counterpartyId', [['', "— yo'q (xarajat) —"], ...partyOptions().slice(1)], preset.counterpartyId || '', 'full')}
         ${textArea('Izoh', 'note', '')}
       </div>`,
-    onSubmit: (d) => {
+    onSubmit: async (d) => {
       const amount = num(d.amount);
       if (amount <= 0) {
         alert("Summani kiriting.");
         return false;
       }
       db.payments.push({
-        id: uid(), no: nextNo(dir === 'in' ? 'payIn' : 'payOut'), dir, date: d.date, amount, method: d.method,
+        id: uid(), no: await nextNo(dir === 'in' ? 'payIn' : 'payOut'), dir, date: d.date, amount, method: d.method,
         purpose: d.purpose, counterpartyId: d.counterpartyId || null, docId: preset.docId || null, note: d.note.trim(), userId: me?.id,
       });
       save();
@@ -1023,31 +1179,52 @@ function telegramCaption(p) {
   return lines.join('\n');
 }
 
-async function dataUrlToBlob(url) {
-  return (await fetch(url)).blob();
+async function telegramCall(method, body) {
+  const api = `https://api.telegram.org/bot${db.telegram.token}/${method}`;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const res = await fetch(api, body instanceof FormData
+      ? { method: 'POST', body }
+      : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const json = await res.json().catch(() => ({}));
+    if (json.ok) return json;
+    // Telegram tezlikni cheklasa, aytgan vaqtcha kutib qayta urinamiz
+    const wait = json.parameters?.retry_after;
+    if (res.status === 429 && wait && attempt < 2) {
+      await new Promise((r) => setTimeout(r, (wait + 1) * 1000));
+      continue;
+    }
+    throw new Error(json.description || `HTTP ${res.status}`);
+  }
 }
 
 async function telegramSend(p) {
-  const { token, chatId } = db.telegram;
-  const api = `https://api.telegram.org/bot${token}/`;
+  const chatId = db.telegram.chatId;
   const caption = telegramCaption(p);
-  let res;
-  if (p.photo && caption.length <= 1024) {
-    const fd = new FormData();
-    fd.append('chat_id', chatId);
-    fd.append('caption', caption);
-    fd.append('parse_mode', 'HTML');
-    fd.append('photo', await dataUrlToBlob(p.photo), 'photo.jpg');
-    res = await fetch(api + 'sendPhoto', { method: 'POST', body: fd });
-  } else {
-    res = await fetch(api + 'sendMessage', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chat_id: chatId, text: caption, parse_mode: 'HTML' }),
-    });
+  const fits = caption.length <= 1024; // rasm izohi chegarasi
+  const blobs = [];
+  for (const ph of (p.photos || []).slice(0, 10)) {
+    const b = await backend.photoBlob(ph.path).catch(() => null);
+    if (b) blobs.push(await toJpeg(b));
   }
-  const json = await res.json().catch(() => ({}));
-  if (!json.ok) throw new Error(json.description || `HTTP ${res.status}`);
+  if (!blobs.length) {
+    await telegramCall('sendMessage', { chat_id: chatId, text: caption, parse_mode: 'HTML' });
+    return;
+  }
+  const fd = new FormData();
+  fd.append('chat_id', chatId);
+  if (blobs.length === 1) {
+    fd.append('photo', blobs[0], 'photo.jpg');
+    if (fits) { fd.append('caption', caption); fd.append('parse_mode', 'HTML'); }
+    await telegramCall('sendPhoto', fd);
+  } else {
+    fd.append('media', JSON.stringify(blobs.map((b, i) => Object.assign(
+      { type: 'photo', media: `attach://p${i}` },
+      i === 0 && fits ? { caption, parse_mode: 'HTML' } : {},
+    ))));
+    blobs.forEach((b, i) => fd.append(`p${i}`, b, `p${i}.jpg`));
+    await telegramCall('sendMediaGroup', fd);
+  }
+  if (!fits) await telegramCall('sendMessage', { chat_id: chatId, text: caption, parse_mode: 'HTML' });
 }
 
 function telegramLog(text, ok) {
@@ -1063,9 +1240,12 @@ async function telegramPostProducts(ids, manual = false) {
     return;
   }
   const errors = [];
-  for (const id of [...new Set(ids)]) {
+  const list = [...new Set(ids)];
+  for (const [i, id] of list.entries()) {
     const p = product(id);
     if (!p) continue;
+    // Guruhga daqiqasiga ~20 xabardan ko'p yuborib bo'lmaydi
+    if (i > 0) await new Promise((r) => setTimeout(r, 3500));
     try {
       await telegramSend(p);
       telegramLog(`Yuborildi: ${p.name}`, true);
@@ -1074,8 +1254,7 @@ async function telegramPostProducts(ids, manual = false) {
       telegramLog(`Xato: ${p.name} — ${e.message}`, false);
     }
   }
-  persist();
-  if (currentRoute().view === 'telegram') render();
+  commit();
   if (errors.length) alert("Telegramga yuborilmadi:\n" + errors.join('\n'));
   else if (manual) alert('Telegramga yuborildi.');
 }
@@ -1095,7 +1274,7 @@ const SECTIONS = [
   { id: 'parties', title: 'Kontragentlar', views: [['parties', 'Kontragentlar'], ['debts', 'Qarzlar', 'A']] },
   { id: 'money', title: 'Pul', views: [['payments', "To'lovlar"], ['cash', 'Kassa va hisoblar', 'A']] },
   { id: 'reports', title: 'Hisobotlar', admin: true, views: [['profit', 'Foyda va zarar'], ['top', 'Savdo tahlili']] },
-  { id: 'settings', title: 'Sozlamalar', admin: true, views: [['users', 'Foydalanuvchilar'], ['telegram', 'Telegram'], ['company', 'Kompaniya'], ['warehouses', 'Omborlar'], ['categories', 'Kategoriyalar'], ['backup', 'Zaxira nusxa']] },
+  { id: 'settings', title: 'Sozlamalar', admin: true, views: [['users', 'Foydalanuvchilar'], ['server', 'Server'], ['telegram', 'Telegram'], ['company', 'Kompaniya'], ['warehouses', 'Omborlar'], ['categories', 'Kategoriyalar'], ['backup', 'Zaxira nusxa']] },
 ];
 
 function viewTitle(v) {
@@ -1114,7 +1293,7 @@ function currentRoute() {
   return { section, view: v ? v[0] : section.id };
 }
 
-const userName = (id) => db.users.find((u) => u.id === id)?.name || '';
+const userName = (id) => db.users.find((u) => u.id === id)?.name || db.legacyUsers?.[id] || '';
 
 // Filtrlar qayta chizishda yo'qolmasligi uchun
 const filters = {};
@@ -1196,7 +1375,11 @@ function viewDashboard() {
   const recent = db.docs.filter((d) => canUseDoc(d.type))
     .sort((a, b) => (b.created || b.date).localeCompare(a.created || a.date)).slice(0, 8);
 
-  return `<div class="stats">${cards.map(([l, v, h, cls]) => `<div class="stat"><div class="label">${l}</div><div class="value ${cls || ''}">${v}</div><div class="muted small">${h}</div></div>`).join('')}</div>
+  const usagePct = isAdmin() && storageUsage?.limit ? (storageUsage.used / storageUsage.limit) * 100 : 0;
+  const usageWarn = usagePct >= 80
+    ? `<div class="card warn-card">⚠️ Rasmlar xotirasining ${usagePct.toFixed(0)}% band. <a href="#settings/server">Batafsil</a></div>` : '';
+
+  return usageWarn + `<div class="stats">${cards.map(([l, v, h, cls]) => `<div class="stat"><div class="label">${l}</div><div class="value ${cls || ''}">${v}</div><div class="muted small">${h}</div></div>`).join('')}</div>
     <div class="quick">${quick}</div>
     <div class="grid2">
       <div class="card"><h3>Yaqin yetkazishlar</h3><table><thead><tr><th>Sana</th><th>Hujjat</th><th>Mijoz</th><th>Manzil</th></tr></thead><tbody>
@@ -1279,7 +1462,7 @@ function viewProducts() {
     const st = qtyIn(ctx.stock, p.id);
     const rs = qtyIn(ctx.reserve, p.id);
     return `<tr>
-      <td class="thumb">${p.photo ? `<img src="${p.photo}" alt="">` : ''}</td>
+      <td class="thumb">${p.photos?.length ? `<img data-photo="${esc(p.photos[0].thumb)}" alt="" loading="lazy">` : ''}${p.photos?.length > 1 ? `<span class="ph-count">${p.photos.length}</span>` : ''}</td>
       <td class="click" data-act="editProduct" data-id="${p.id}"><b>${esc(p.name)}</b><div class="muted small">${esc([p.code, p.category].filter(Boolean).join(' · '))}</div></td>
       <td>${esc(p.size)}</td>
       <td>${esc([p.color, p.material].filter(Boolean).join(', '))}</td>
@@ -1514,41 +1697,51 @@ function viewUsers() {
 function editUser(id) {
   const u = id ? db.users.find((x) => x.id === id) : { role: 'seller', active: true };
   const self = u.id === me.id;
+  const server = backend.kind === 'supabase';
+  // Supabase'da boshqa foydalanuvchi parolini faqat uning o'zi o'zgartiradi
+  const canSetPassword = !id || self || backend.canSetOthersPassword;
   openModal({
     title: id ? 'Foydalanuvchi' : 'Yangi foydalanuvchi',
     body: `<div class="form-grid">
       ${field('Ism *', 'name', u.name, 'required')}
-      ${field('Login *', 'login', u.login, 'required autocapitalize="none" autocomplete="off"')}
+      ${field(server ? 'Email (login) *' : 'Login *', 'login', u.login, `required autocapitalize="none" autocomplete="off" ${server ? 'type="email"' : ''} ${server && id ? 'disabled' : ''}`)}
       ${selectField('Roli', 'role', Object.entries(ROLES), u.role, '', self ? 'disabled' : '')}
       ${selectField('Holati', 'active', [['1', 'Faol'], ['0', 'Bloklangan']], u.active === false ? '0' : '1', '', self ? 'disabled' : '')}
-      ${field(id ? "Yangi parol (o'zgartirmaslik uchun bo'sh qoldiring)" : 'Parol *', 'password', '', `type="password" autocomplete="new-password" ${id ? '' : 'required'}`, 'full')}
+      ${canSetPassword
+        ? field(id ? "Yangi parol (o'zgartirmaslik uchun bo'sh qoldiring)" : 'Parol * (kamida 6 belgi)', 'password', '', `type="password" autocomplete="new-password" ${id ? '' : 'required'}`, 'full')
+        : '<p class="muted small full">Parolni foydalanuvchining o\'zi o\'zgartiradi (yuqoridagi ismi ustiga bosib). Unutgan bo\'lsa — uni bloklab, yangi email bilan qayta qo\'shing.</p>'}
     </div>`,
     onSubmit: async (d) => {
-      const login = d.login.trim().toLowerCase();
-      if (db.users.some((x) => x.login === login && x.id !== u.id)) {
-        alert('Bu login band.');
+      const password = d.password || '';
+      if (password && password.length < 6) {
+        alert("Parol kamida 6 belgidan iborat bo'lsin.");
         return false;
       }
-      if (d.password && d.password.length < 4) {
-        alert("Parol kamida 4 belgidan iborat bo'lsin.");
+      const next = {
+        id: u.id,
+        name: d.name.trim(),
+        login: server && id ? u.login : d.login.trim().toLowerCase(),
+        role: self ? u.role : d.role,
+        active: self ? true : d.active === '1',
+      };
+      try {
+        if (self && password && server) await backend.changeOwnPassword(me, password);
+        await backend.saveUser(next, self && server ? '' : password, !id);
+      } catch (e) {
+        alert(e.message);
         return false;
       }
-      Object.assign(u, { name: d.name.trim(), login });
-      if (!self) Object.assign(u, { role: d.role, active: d.active === '1' });
-      if (d.password) await setPassword(u, d.password);
-      if (!id) {
-        u.id = uid();
-        u.created = today();
-        db.users.push(u);
-      }
-      save();
+      db.users = await backend.listUsers();
+      if (self) Object.assign(me, { name: next.name });
+      render();
+      if (!id && server) alert(`Foydalanuvchi qo'shildi. U ${next.login} va siz bergan parol bilan kiradi.`);
     },
   });
 }
 
 function viewTelegram() {
   const tg = db.telegram;
-  const sample = db.products[0];
+  const sample = db.products.find((p) => p.photos?.length) || db.products[0];
   return `<div class="card narrow">
     <h3>Telegram guruhga avtomatik e'lon</h3>
     <p class="muted">Omborga mahsulot kelganda (Qabul qilish yoki Kirim qilish hujjati, yoki boshlang'ich qoldiq bilan yangi mahsulot) uning rasmi va ma'lumotlari guruhga yuboriladi.</p>
@@ -1572,7 +1765,7 @@ function viewTelegram() {
     </div>
     <p class="muted small">Diqqat: token shu brauzerda saqlanadi. Kompyuterga begona odamlar kirmasligiga ishonch hosil qiling.</p>
   </div>
-  ${sample ? `<div class="card narrow"><h3>Namuna xabar</h3><div class="tg-preview">${sample.photo ? `<img src="${sample.photo}" alt="">` : ''}<div>${telegramCaption(sample).replace(/\n/g, '<br>')}</div></div></div>` : ''}
+  ${sample ? `<div class="card narrow"><h3>Namuna xabar</h3><div class="tg-preview">${sample.photos?.length ? `<img data-photo="${esc(sample.photos[0].path)}" alt="">` : ''}<div>${telegramCaption(sample).replace(/\n/g, '<br>')}</div></div></div>` : ''}
   <div class="card narrow"><h3>Yuborish jurnali</h3><table><tbody>
     ${tg.log.length ? tg.log.map((l) => `<tr><td class="muted small">${esc(l.at)}</td><td class="${l.ok ? '' : 'debt'}">${esc(l.text)}</td></tr>`).join('') : emptyRow(2, "Hali yuborilmagan")}
   </tbody></table></div>`;
@@ -1613,7 +1806,7 @@ async function tgDetect() {
 
 async function tgTest() {
   tgReadForm();
-  persist();
+  commit();
   const { token, chatId } = db.telegram;
   if (!token || !chatId) return alert('Token va guruh ID sini kiriting.');
   try {
@@ -1675,46 +1868,198 @@ function viewCategories() {
 }
 
 function viewBackup() {
+  const server = backend.kind === 'supabase';
   return `<div class="card narrow"><h3>Zaxira nusxa</h3>
-    <p class="muted">Barcha ma'lumotlar shu brauzerda saqlanadi. Ularni yo'qotmaslik uchun har kuni zaxira nusxasini yuklab oling. Boshqa kompyuterga o'tkazish uchun ham shu fayldan foydalaning.</p>
+    <p class="muted">${server
+      ? "Ma'lumotlar serverda saqlanadi. Shunga qaramay, haftada bir marta zaxira nusxa olib qo'ying. Rasmlar serverdagi xotirada qoladi, faylga faqat ularning manzili yoziladi."
+      : "Ma'lumotlar shu brauzerda saqlanadi. Ularni yo'qotmaslik uchun har kuni zaxira nusxa oling. Fayl rasmlarni ham o'z ichiga oladi va undan serverga ko'chirishda ham foydalanish mumkin."}</p>
     <div class="toolbar">
       <button class="primary" data-act="backup">Zaxira nusxani yuklab olish (.json)</button>
       <label class="filebtn">Zaxiradan tiklash<input type="file" id="restoreInput" accept=".json,application/json" hidden></label>
-    </div></div>
+    </div>
+    <p class="muted small">Tiklashda joriy ma'lumotlar fayldagisi bilan to'liq almashtiriladi.</p></div>
     <div class="card narrow"><h3>Namuna ma'lumotlar</h3><p class="muted">Dasturni sinab ko'rish uchun bir nechta mahsulot, kontragent va hujjat qo'shadi.</p>
       <button data-act="demo">Namuna ma'lumotlarni yuklash</button></div>
     <div class="card narrow"><h3>Tozalash</h3><button class="danger" data-act="reset">Barcha ma'lumotlarni o'chirish</button></div>`;
 }
 
-function loadDemo() {
+let storageUsage = null;
+async function refreshStorageUsage() {
+  storageUsage = await backend.storageUsage().catch(() => null);
+  if (['server', 'dashboard'].includes(currentRoute().view)) render();
+}
+
+function usageBar() {
+  if (!storageUsage || !storageUsage.limit) return '<p class="muted">Ma\'lumot yo\'q</p>';
+  const pct = Math.min(100, (storageUsage.used / storageUsage.limit) * 100);
+  const mb = (b) => (b < 1024 * 1024 ? (b / 1024).toFixed(0) + ' KB' : (b / 1024 / 1024).toFixed(b < 10 * 1024 * 1024 ? 1 : 0) + ' MB');
+  return `<div class="usage"><div class="usage-bar ${pct >= 80 ? 'over' : ''}" style="width:${Math.max(1, pct)}%"></div></div>
+    <p>${mb(storageUsage.used)} / ${mb(storageUsage.limit)} (${pct.toFixed(1)}%)
+    ${pct >= 80 ? '<br><b class="debt">Joy tugab bormoqda.</b> Arxivdagi mahsulotlar rasmlarini o\'chiring yoki Supabase Pro tarifiga o\'ting.' : ''}</p>`;
+}
+
+function localDataSummary() {
+  try {
+    const d = JSON.parse(localStorage.getItem(LOCAL_DATA_KEY) || 'null');
+    if (!d || !(d.products?.length || d.docs?.length)) return null;
+    return { products: d.products?.length || 0, docs: d.docs?.length || 0, payments: d.payments?.length || 0 };
+  } catch (e) {
+    return null;
+  }
+}
+
+function viewServer() {
+  const server = backend.kind === 'supabase';
+  const local = server && localDataSummary();
+  return `<div class="card narrow"><h3>Server</h3>
+    <p><b>${esc(backend.label)}</b></p>
+    <p class="muted">${server
+      ? "Barcha qurilmalar shu bitta bazada ishlaydi. Bir qurilmadagi o'zgarish boshqalarida bir necha soniyada ko'rinadi."
+      : "Ma'lumotlar faqat shu qurilmada. Sotuvchilar telefondan ishlashi uchun Supabase serveriga ulaning (README → \"Supabase'ni sozlash\")."}</p>
+    <button class="primary" data-act="serverSettings">${server ? 'Ulanish sozlamalari' : 'Serverga ulanish'}</button></div>
+    <div class="card narrow"><h3>${server ? 'Rasmlar xotirasi (bepul tarif — 1 GB)' : 'Brauzer xotirasi'}</h3>${usageBar()}
+      <button class="small" data-act="refreshUsage">Yangilash</button></div>
+    ${local ? `<div class="card narrow"><h3>Lokal ma'lumotlarni serverga ko'chirish</h3>
+      <p class="muted">Shu brauzerda serverga ulanishdan oldin kiritilgan ma'lumotlar topildi: ${local.products} ta mahsulot, ${local.docs} ta hujjat, ${local.payments} ta to'lov. Ular rasmlari bilan birga serverdagi ma'lumotlarga qo'shiladi.</p>
+      <button class="primary" data-act="migrateLocal">Serverga ko'chirish</button></div>` : ''}`;
+}
+
+// Hujjat raqamlaridagi eng katta sonni topamiz — tiklangandan keyin raqamlar takrorlanmasligi uchun
+function countersFromData(data) {
+  const seq = Object.assign({}, data.seq);
+  const bump = (kind, no) => {
+    const n = parseInt(String(no || '').split('-').pop(), 10);
+    if (n) seq[kind] = Math.max(seq[kind] || 0, n);
+  };
+  (data.docs || []).forEach((d) => bump(d.type, d.no));
+  (data.payments || []).forEach((p) => bump(p.dir === 'in' ? 'payIn' : 'payOut', p.no));
+  return seq;
+}
+
+// merge=true — mavjud ma'lumotlarga qo'shadi; false — to'liq almashtiradi
+async function importData(data, merge, progress = () => {}) {
+  if (!Array.isArray(data.products) || !Array.isArray(data.docs)) throw new Error('Bu Biznes Tizim zaxira fayli emas');
+  const incoming = normalizeDb(JSON.parse(JSON.stringify(data)));
+  const total = incoming.products.reduce((s, p) => s + (p.photo?.startsWith('data:') ? 1 : 0) + (p.photos || []).filter((ph) => ph.data).length, 0);
+  let done = 0;
+  for (const p of incoming.products) {
+    const sources = [];
+    if (p.photo?.startsWith('data:')) sources.push(p.photo);
+    delete p.photo;
+    const photos = [];
+    for (const ph of p.photos || []) {
+      if (ph.data) sources.push(ph.data); else if (ph.path) photos.push({ path: ph.path, thumb: ph.thumb });
+    }
+    for (const src of sources) {
+      progress(++done, total);
+      photos.push(await backend.uploadPhoto(await dataUrlToBlob(src)));
+    }
+    p.photos = photos;
+  }
+  // Boshqa tizimdagi foydalanuvchilar nomlari hisobotlarda saqlanib qolsin
+  const known = new Set(db.users.map((u) => u.id));
+  const legacy = Object.assign({}, db.legacyUsers, incoming.legacyUsers);
+  (data.users || []).forEach((u) => { if (!known.has(u.id)) legacy[u.id] = u.name; });
+
+  if (merge) {
+    ['warehouses', 'counterparties', 'products', 'docs', 'payments'].forEach((t) => {
+      const byId = new Map(db[t].map((x) => [x.id, x]));
+      incoming[t].forEach((x) => byId.set(x.id, x));
+      db[t] = [...byId.values()];
+    });
+    db.categories = [...new Set([...db.categories, ...incoming.categories])];
+  } else {
+    incoming.users = db.users;
+    db = incoming;
+  }
+  db.legacyUsers = legacy;
+  await backend.setCounters(countersFromData(data));
+  await save();
+}
+
+async function runImport(data, merge) {
+  showLoading(true, "Ma'lumotlar yuklanmoqda...");
+  try {
+    await importData(data, merge, (n, total) => showLoading(true, `Rasmlar yuklanmoqda: ${n} / ${total}`));
+    alert(merge ? "Ma'lumotlar serverga ko'chirildi." : 'Tiklandi.');
+  } catch (e) {
+    alert("Xato: " + e.message);
+  } finally {
+    showLoading(false);
+  }
+}
+
+async function backupData() {
+  let data;
+  if (backend.kind === 'local') {
+    showLoading(true, 'Zaxira tayyorlanmoqda...');
+    try { data = await backend.exportWithPhotos(); } finally { showLoading(false); }
+  } else {
+    data = JSON.parse(JSON.stringify(db));
+    data.seq = countersFromData(data);
+  }
+  data.users = db.users.map(({ id, name, login, role }) => ({ id, name, login, role }));
+  data.exportedAt = new Date().toISOString();
+  download(`biznes-tizim-zaxira-${today()}.json`, JSON.stringify(data), 'application/json');
+}
+
+async function migrateLocal() {
+  if (!confirm("Lokal ma'lumotlar (rasmlari bilan) serverga qo'shilsinmi?")) return;
+  showLoading(true, "Lokal ma'lumotlar o'qilmoqda...");
+  let data;
+  try {
+    const local = new LocalBackend();
+    await local.init();
+    data = await local.exportWithPhotos();
+  } catch (e) {
+    showLoading(false);
+    alert('Xato: ' + e.message);
+    return;
+  }
+  await runImport(data, true);
+  if (confirm("Ko'chirish tugadi. Lokal nusxa shu brauzerdan o'chirilsinmi? (Serverdagi ma'lumotlarga ta'sir qilmaydi)")) {
+    localStorage.removeItem(LOCAL_DATA_KEY);
+    render();
+  }
+}
+
+async function loadDemo() {
   if (db.products.length && !confirm("Namuna ma'lumotlar mavjud ma'lumotlarga qo'shiladi. Davom etilsinmi?")) return;
   const sup = { id: uid(), name: '"Mebel Lux" MChJ', kind: 'supplier', phone: '+998 71 200 00 00', address: 'Toshkent, Chilonzor', inn: '301234567', note: '' };
   const cus = { id: uid(), name: 'Aliyev Jamshid', kind: 'customer', phone: '+998 90 111 22 33', address: "Toshkent, Yunusobod 4-kvartal", inn: '', note: '' };
   db.counterparties.push(sup, cus);
   const mk = (name, category, size, color, material, origin, buyPrice, salePrice) =>
-    ({ id: uid(), name, code: 'A' + String(db.products.length + 101), category, size, color, material, origin, maker: '', unit: 'dona', buyPrice, salePrice, minQty: 1, note: '', photo: '' });
-  const ps = [
-    mk('Yotoqxona to\'plami "Milano"', 'Yotoqxona', '200 × 180 × 110', 'Oq / oltin', 'MDF, LDSP', 'Turkiya, Istanbul', 18000000, 24500000),
-    mk('Burchak divan "Oskar"', 'Divan va kreslo', '280 × 180 × 90', 'Kulrang', 'Velyur, yog\'och karkas', "O'zbekiston, Toshkent", 6500000, 9200000),
-    mk('Oshxona stoli + 6 stul "Verona"', 'Stol va stul', '160 × 90 × 76', "Yong'oq", 'Massiv (buk)', 'Malayziya', 4200000, 6300000),
-    mk('Shkaf-kupe 3 eshikli', 'Shkaf', '240 × 60 × 240', 'Sonoma eman', 'LDSP, oyna', "O'zbekiston, Samarqand", 3900000, 5600000),
-    mk('Ortopedik matras "Comfort"', 'Matras', '160 × 200 × 25', 'Oq', 'Mustaqil prujina', 'Rossiya', 1800000, 2700000),
-  ];
-  db.products.push(...ps);
+    ({ id: uid(), name, code: 'A' + String(db.products.length + 101), category, size, color, material, origin, maker: '', unit: 'dona', buyPrice, salePrice, minQty: 1, note: '', photos: [] });
+  const ps = [];
+  for (const args of [
+    ['Yotoqxona to\'plami "Milano"', 'Yotoqxona', '200 × 180 × 110', 'Oq / oltin', 'MDF, LDSP', 'Turkiya, Istanbul', 18000000, 24500000],
+    ['Burchak divan "Oskar"', 'Divan va kreslo', '280 × 180 × 90', 'Kulrang', 'Velyur, yog\'och karkas', "O'zbekiston, Toshkent", 6500000, 9200000],
+    ['Oshxona stoli + 6 stul "Verona"', 'Stol va stul', '160 × 90 × 76', "Yong'oq", 'Massiv (buk)', 'Malayziya', 4200000, 6300000],
+    ['Shkaf-kupe 3 eshikli', 'Shkaf', '240 × 60 × 240', 'Sonoma eman', 'LDSP, oyna', "O'zbekiston, Samarqand", 3900000, 5600000],
+    ['Ortopedik matras "Comfort"', 'Matras', '160 × 200 × 25', 'Oq', 'Mustaqil prujina', 'Rossiya', 1800000, 2700000],
+  ]) {
+    const p = mk(...args);
+    db.products.push(p);
+    ps.push(p);
+  }
   const d0 = new Date();
   const ago = (n) => localDate(new Date(d0 - n * 864e5));
   const wh = db.warehouses[0].id;
-  const rec = { id: uid(), type: 'receipt', no: nextNo('receipt'), date: ago(10), counterpartyId: sup.id, warehouseId: wh, discount: 0, note: '', items: ps.map((p, i) => ({ productId: p.id, qty: [2, 3, 2, 4, 6][i], price: p.buyPrice })) };
-  const sale = { id: uid(), type: 'sale', no: nextNo('sale'), date: ago(2), counterpartyId: cus.id, warehouseId: wh, status: 'pending', deliveryDate: ago(-1), address: cus.address, discount: 200000, note: '', userId: me.id, items: [{ productId: ps[1].id, qty: 1, price: ps[1].salePrice }, { productId: ps[4].id, qty: 2, price: ps[4].salePrice }] };
-  const order = { id: uid(), type: 'order', no: nextNo('order'), date: ago(1), counterpartyId: cus.id, warehouseId: wh, status: 'confirmed', deliveryDate: ago(-5), address: cus.address, discount: 0, note: '', userId: me.id, items: [{ productId: ps[0].id, qty: 1, price: ps[0].salePrice }] };
+  const base = { created: new Date().toISOString(), userId: me.id, warehouseId: wh, note: '', discount: 0 };
+  const rec = { ...base, id: uid(), type: 'receipt', no: await nextNo('receipt'), date: ago(10), counterpartyId: sup.id, items: ps.map((p, i) => ({ productId: p.id, qty: [2, 3, 2, 4, 6][i], price: p.buyPrice })) };
+  const sale = { ...base, id: uid(), type: 'sale', no: await nextNo('sale'), date: ago(2), counterpartyId: cus.id, status: 'pending', deliveryDate: ago(-1), address: cus.address, discount: 200000, items: [{ productId: ps[1].id, qty: 1, price: ps[1].salePrice }, { productId: ps[4].id, qty: 2, price: ps[4].salePrice }] };
+  const order = { ...base, id: uid(), type: 'order', no: await nextNo('order'), date: ago(1), counterpartyId: cus.id, status: 'confirmed', deliveryDate: ago(-5), address: cus.address, items: [{ productId: ps[0].id, qty: 1, price: ps[0].salePrice }] };
   db.docs.push(rec, sale, order);
+  const pay = async (dir, date, amount, method, purpose, counterpartyId, docId, note = '') => ({
+    id: uid(), no: await nextNo(dir === 'in' ? 'payIn' : 'payOut'), dir, date, amount, method, purpose, counterpartyId, docId, note, userId: me.id,
+  });
   db.payments.push(
-    { id: uid(), no: nextNo('payOut'), dir: 'out', date: ago(9), amount: 50000000, method: 'bank', purpose: "Ta'minotchiga to'lov", counterpartyId: sup.id, docId: rec.id, note: '' },
-    { id: uid(), no: nextNo('payIn'), dir: 'in', date: ago(2), amount: 8000000, method: 'cash', purpose: "Mijozdan to'lov", counterpartyId: cus.id, docId: sale.id, note: '' },
-    { id: uid(), no: nextNo('payIn'), dir: 'in', date: ago(1), amount: 5000000, method: 'card', purpose: "Mijozdan to'lov", counterpartyId: cus.id, docId: order.id, note: 'Oldindan to\'lov' },
-    { id: uid(), no: nextNo('payOut'), dir: 'out', date: ago(3), amount: 4000000, method: 'cash', purpose: 'Ijara', counterpartyId: null, docId: null, note: "Do'kon ijarasi" },
+    await pay('out', ago(9), 50000000, 'bank', "Ta'minotchiga to'lov", sup.id, rec.id),
+    await pay('in', ago(2), 8000000, 'cash', "Mijozdan to'lov", cus.id, sale.id),
+    await pay('in', ago(1), 5000000, 'card', "Mijozdan to'lov", cus.id, order.id, "Oldindan to'lov"),
+    await pay('out', ago(3), 4000000, 'cash', 'Ijara', null, null, "Do'kon ijarasi"),
   );
-  save();
+  await save();
   location.hash = '#dashboard';
 }
 
@@ -1724,11 +2069,16 @@ const VIEWS = {
   dashboard: viewDashboard, products: viewProducts, stock: viewStock, parties: viewParties, debts: viewDebts,
   payments: viewPayments, cash: viewCash, profit: viewProfit, top: viewTop, users: viewUsers,
   telegram: viewTelegram, company: viewCompany, warehouses: viewWarehouses, categories: viewCategories, backup: viewBackup,
+  server: viewServer,
 };
 
 function render() {
-  // Hisob bloklangan yoki o'chirilgan bo'lsa sessiyani yopamiz
-  if (me && !db.users.some((u) => u.id === me.id && u.active !== false)) setSession(null);
+  // Hisob bloklangan yoki o'chirilgan bo'lsa (boshqa qurilmadan) — tizimdan chiqaramiz
+  if (me && db.users.length && !db.users.some((u) => u.id === me.id && u.active !== false)) {
+    me = null;
+    logout();
+    return;
+  }
   $('#auth').hidden = !!me;
   $('#app').hidden = !me;
   if (!me) {
@@ -1736,9 +2086,10 @@ function render() {
     renderAuth();
     return;
   }
-  me = db.users.find((u) => u.id === me.id);
+  me = Object.assign(me, db.users.find((u) => u.id === me.id));
   $('#authForm').innerHTML = '';
   $('#userName').textContent = `${me.name} · ${ROLES[me.role]}`;
+  $('#syncBanner').hidden = !syncState.offline;
   refreshCtx();
   const { section, view } = currentRoute();
   $('#sections').innerHTML = visibleSections().map((s) => `<a href="#${s.id}" class="${s === section ? 'active' : ''}">${s.title}</a>`).join('');
@@ -1749,6 +2100,7 @@ function render() {
   const focused = document.activeElement?.dataset?.filter;
   const caret = document.activeElement?.selectionStart;
   $('#view').innerHTML = (VIEWS[view] || ((v) => viewDocs(v)))(view);
+  hydratePhotos($('#view'));
   // Qidiruv maydonida yozayotganda fokusni saqlaymiz
   if (focused) {
     const el = $(`[data-filter="${focused}"]`);
@@ -1771,25 +2123,19 @@ document.addEventListener('input', (e) => {
 document.addEventListener('change', (e) => {
   if (e.target.id !== 'restoreInput') return;
   const file = e.target.files[0];
+  e.target.value = '';
   if (!file) return;
-  const reader = new FileReader();
-  reader.onload = () => {
+  file.text().then((text) => {
+    let data;
     try {
-      const data = JSON.parse(reader.result);
-      if (!Array.isArray(data.products) || !Array.isArray(data.docs)) throw new Error("Bu Biznes Tizim zaxira fayli emas");
-      if (!confirm("Joriy ma'lumotlar zaxiradagisi bilan almashtiriladi. Davom etilsinmi?")) return;
-      const base = emptyDb();
-      db = Object.assign(base, data, { telegram: Object.assign(base.telegram, data.telegram) });
-      // Eski zaxirada foydalanuvchilar bo'lmasa, joriy administratorni saqlab qolamiz
-      if (!db.users.length) db.users.push(me);
-      save();
-      alert('Tiklandi.');
+      data = JSON.parse(text);
     } catch (err) {
       alert("Faylni o'qib bo'lmadi: " + err.message);
+      return;
     }
-  };
-  reader.readAsText(file);
-  e.target.value = '';
+    if (!confirm("Joriy ma'lumotlar zaxiradagisi bilan to'liq almashtiriladi. Davom etilsinmi?")) return;
+    runImport(data, false);
+  });
 });
 
 const ACTIONS = {
@@ -1816,7 +2162,7 @@ const ACTIONS = {
   tgAll: () => {
     const ids = db.products.filter((p) => !p.archived && qtyIn(ctx.stock, p.id) > 0).map((p) => p.id);
     if (!ids.length) return alert("Omborda mahsulot yo'q.");
-    if (confirm(`${ids.length} ta mahsulot guruhga yuborilsinmi?`)) { tgReadForm(); persist(); telegramPostProducts(ids, true); }
+    if (confirm(`${ids.length} ta mahsulot guruhga yuborilsinmi? Telegram cheklovi sababli har biri ~4 soniyada (jami ~${Math.ceil(ids.length * 4 / 60)} daqiqa); shu vaqt sahifani yopmang.`)) { tgReadForm(); commit(); telegramPostProducts(ids, true); }
   },
   coSave: () => {
     Object.assign(db.company, { name: $('#coName').value.trim(), phone: $('#coPhone').value.trim(), address: $('#coAddress').value.trim() });
@@ -1830,19 +2176,24 @@ const ACTIONS = {
     save();
     alert('Saqlandi.');
   },
-  backup: () => download(`biznes-tizim-zaxira-${today()}.json`, JSON.stringify(db), 'application/json'),
+  backup: () => backupData(),
   demo: () => loadDemo(),
   reset: () => {
     if (!confirm("Barcha ma'lumotlar o'chiriladi. Zaxira nusxa olganmisiz?")) return;
+    if (backend.kind === 'supabase' && !confirm("DIQQAT: serverdagi ma'lumotlar BARCHA qurilmalarda o'chadi va qaytarib bo'lmaydi. Rostdan ham o'chirilsinmi?")) return;
     db = Object.assign(emptyDb(), { users: db.users });
     save();
   },
   editUser: (ds) => editUser(ds.id),
+  serverSettings: () => openServerSettings(),
+  refreshUsage: () => refreshStorageUsage(),
+  migrateLocal: () => migrateLocal(),
 };
 
 // Sotuvchi tugmani ko'rmasa ham, bu amallarni bajara olmasligi kerak
 const ADMIN_ACTIONS = ['newProduct', 'deleteProduct', 'unarchive', 'exportProducts', 'tgProduct', 'deleteParty', 'deletePayment',
-  'tgSave', 'tgDetect', 'tgTest', 'tgAll', 'coSave', 'editWh', 'deleteWh', 'catSave', 'backup', 'demo', 'reset', 'editUser', 'exportDocs'];
+  'tgSave', 'tgDetect', 'tgTest', 'tgAll', 'coSave', 'editWh', 'deleteWh', 'catSave', 'backup', 'demo', 'reset', 'editUser', 'exportDocs',
+  'serverSettings', 'refreshUsage', 'migrateLocal'];
 
 document.addEventListener('click', (e) => {
   const el = e.target.closest('[data-act]');
@@ -1853,13 +2204,27 @@ document.addEventListener('click', (e) => {
 });
 
 $('#authForm').addEventListener('submit', onAuthSubmit);
-$('#logoutBtn').addEventListener('click', () => {
-  setSession(null);
-  render();
-});
+$('#logoutBtn').addEventListener('click', logout);
+$('#userName').addEventListener('click', (e) => { e.preventDefault(); editUser(me.id); });
 
-restoreSession();
-render();
+async function start() {
+  backend = createBackend();
+  showLoading(true);
+  try {
+    await backend.init();
+    me = await backend.restoreSession().catch((e) => { authMessage = e.message; return null; });
+    if (me) await loadData();
+    else authNeedsSetup = !(await backend.hasUsers());
+  } catch (e) {
+    console.error(e);
+    authMessage = e.message;
+  } finally {
+    showLoading(false);
+  }
+  render();
+}
+
+start();
 
 if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
   navigator.serviceWorker.register('sw.js').catch((e) => console.warn('Service worker:', e));

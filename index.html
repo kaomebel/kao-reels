@@ -25,11 +25,14 @@
     <header class="topbar">
       <a class="brand" href="#dashboard">Biznes Tizim</a>
       <nav id="sections"></nav>
-      <div class="user-box"><span id="userName"></span><button type="button" id="logoutBtn">Chiqish</button></div>
+      <div class="user-box"><a href="#" id="userName" title="Profil va parol"></a><button type="button" id="logoutBtn">Chiqish</button></div>
     </header>
+    <div id="syncBanner" class="sync-banner" hidden></div>
     <nav id="subnav" class="subnav"></nav>
     <main id="view"></main>
   </div>
+
+  <div id="loading" class="loading" hidden><div class="spinner"></div><div id="loadingText">Yuklanmoqda...</div></div>
 
   <dialog id="modal">
     <form id="modalForm" novalidate>
@@ -45,6 +48,9 @@
     </form>
   </dialog>
 
+  <script src="config.js"></script>
+  <script src="vendor/supabase.js"></script>
+  <script src="backend.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
