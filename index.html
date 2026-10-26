@@ -4,32 +4,44 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Biznes Tizim</title>
-  <meta name="theme-color" content="#17324d">
+  <meta name="theme-color" content="#4b3427">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="Biznes Tizim">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icons/icon-192.png">
   <link rel="stylesheet" href="styles.css">
+  <script>
+    // Tanlangan mavzuni sahifa chizilishidan oldin qo'llaymiz (oq-qora miltillamasligi uchun)
+    try { if (localStorage.getItem('biznes-tizim-theme') === 'dark') document.documentElement.dataset.theme = 'dark'; } catch (e) {}
+  </script>
 </head>
 <body>
   <div id="auth" hidden>
     <div class="auth-card">
+      <div class="auth-logo" id="authLogo"></div>
       <h1>Biznes Tizim</h1>
       <div class="muted" id="authSubtitle"></div>
       <form id="authForm" novalidate></form>
     </div>
   </div>
 
-  <div id="app" hidden>
-    <header class="topbar">
-      <a class="brand" href="#dashboard">Biznes Tizim</a>
+  <div id="app" class="shell" hidden>
+    <aside class="sidebar">
+      <a class="brand" href="#dashboard"><span class="brand-mark" id="brandMark"></span><span>Biznes Tizim</span></a>
       <nav id="sections"></nav>
-      <div class="user-box"><a href="#" id="userName" title="Profil va parol"></a><button type="button" id="logoutBtn">Chiqish</button></div>
-    </header>
-    <div id="syncBanner" class="sync-banner" hidden></div>
-    <nav id="subnav" class="subnav"></nav>
-    <main id="view"></main>
+      <div class="side-foot">
+        <a href="#" id="userName" class="side-user" title="Profil va parol"></a>
+        <button type="button" id="themeBtn" class="side-btn" title="Mavzuni almashtirish"></button>
+        <button type="button" id="logoutBtn" class="side-btn" title="Chiqish"></button>
+      </div>
+    </aside>
+    <div class="main-col">
+      <div id="syncBanner" class="sync-banner" hidden></div>
+      <div class="page-head" id="pageHead"></div>
+      <nav id="subnav" class="subnav"></nav>
+      <main id="view"></main>
+    </div>
   </div>
 
   <div id="loading" class="loading" hidden><div class="spinner"></div><div id="loadingText">Yuklanmoqda...</div></div>
@@ -50,6 +62,7 @@
 
   <script src="config.js"></script>
   <script src="vendor/supabase.js"></script>
+  <script src="icons.js"></script>
   <script src="backend.js"></script>
   <script src="app.js"></script>
 </body>

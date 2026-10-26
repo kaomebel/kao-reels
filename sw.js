@@ -1,7 +1,7 @@
 // Ilova fayllarini keshlaydi — internet bo'lmasa ham dastur ochiladi.
 // Fayllar o'zgarganda CACHE versiyasini oshiring.
-const CACHE = 'biznes-tizim-v2';
-const FILES = ['./', './index.html', './styles.css', './config.js', './vendor/supabase.js', './backend.js', './app.js', './manifest.webmanifest', './icons/icon.svg', './icons/icon-192.png', './icons/icon-512.png'];
+const CACHE = 'biznes-tizim-v3';
+const FILES = ['./', './index.html', './styles.css', './config.js', './vendor/supabase.js', './icons.js', './backend.js', './app.js', './manifest.webmanifest', './icons/icon.svg', './icons/icon-192.png', './icons/icon-512.png'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(FILES)).then(() => self.skipWaiting()));

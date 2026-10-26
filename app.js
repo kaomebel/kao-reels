@@ -260,6 +260,11 @@ const today = () => localDate(new Date());
 const num = (v) => Number(String(v ?? '').replace(/\s/g, '').replace(',', '.')) || 0;
 const fmt = (v) => Math.round(v).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
 const money = (v) => fmt(v) + " so'm";
+// O'zbekistonda odatiy sana ko'rinishi: 27.10.2026
+const fmtDate = (iso) => (iso ? `<span class="dt">${esc(String(iso).split('-').reverse().join('.'))}</span>` : '');
+const UZ_MONTHS = ['yanvar', 'fevral', 'mart', 'aprel', 'may', 'iyun', 'iyul', 'avgust', 'sentabr', 'oktabr', 'noyabr', 'dekabr'];
+const UZ_DAYS = ['yakshanba', 'dushanba', 'seshanba', 'chorshanba', 'payshanba', 'juma', 'shanba'];
+const longDate = (d) => `${d.getDate()}-${UZ_MONTHS[d.getMonth()]} ${d.getFullYear()}, ${UZ_DAYS[d.getDay()]}`;
 
 function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -484,7 +489,7 @@ function productForm(p = {}, readonly = false) {
   return `<div class="product-form">
     <div class="photo-box">
       <div class="photo-list" id="photoList"></div>
-      ${readonly ? '' : `<label class="filebtn">+ Rasm qo'shish<input type="file" id="photoInput" accept="image/*" multiple hidden></label>
+      ${readonly ? '' : `<label class="filebtn">${icon('camera')}Rasm qo'shish<input type="file" id="photoInput" accept="image/*" multiple hidden></label>
       <div class="muted small">${MAX_PHOTOS} tagacha. Birinchisi — asosiy (Telegram va ro'yxatda). Asosiy qilish uchun rasm ustiga bosing.</div>`}
     </div>
     <div class="form-grid">
@@ -517,7 +522,7 @@ function renderPhotoList(readonly) {
       <img ${ph.file ? `src="${ph.url}"` : `data-photo="${esc(ph.thumb)}"`} data-i="${i}" alt="">
       ${i === 0 ? '<span class="ph-main">Asosiy</span>' : ''}
       ${readonly ? '' : `<button type="button" class="ph-del" data-i="${i}" title="Olib tashlash">×</button>`}
-    </div>`).join('') : '<div class="photo-empty muted">Rasm yo\'q</div>';
+    </div>`).join('') : `<div class="photo-empty">${icon('camera')}<span>Rasm yo'q</span></div>`;
   hydratePhotos(box);
 }
 
@@ -684,7 +689,7 @@ function productHistory(id) {
     title: `Harakatlar: ${p.name}`,
     wide: true,
     body: `<table><thead><tr><th>Sana</th><th>Hujjat</th><th>Ombor</th><th class="num">Soni</th><th class="num">Narx</th><th class="num">Qoldiqqa ta'siri</th></tr></thead><tbody>
-      ${rows.length ? rows.map(({ d, t, it, delta, wh }) => `<tr><td>${esc(d.date)}</td><td>${esc(t.one)} ${esc(d.no)}</td><td>${esc(wh)}</td>
+      ${rows.length ? rows.map(({ d, t, it, delta, wh }) => `<tr><td>${fmtDate(d.date)}</td><td>${esc(t.one)} ${esc(d.no)}</td><td>${esc(wh)}</td>
         <td class="num">${it.qty}</td><td class="num">${money(it.price)}</td><td class="num">${delta > 0 ? '+' : ''}${delta || '—'}</td></tr>`).join('') : emptyRow(6, "Harakat yo'q")}
       </tbody></table>`,
   });
@@ -757,7 +762,7 @@ function partyStatement(id) {
   let bal = 0;
   const body = rows.map((r) => {
     bal += r.delta;
-    return `<tr><td>${esc(r.date)}</td><td>${esc(r.title)}</td><td class="num">${r.delta > 0 ? money(r.delta) : ''}</td><td class="num">${r.delta < 0 ? money(-r.delta) : ''}</td><td class="num">${money(bal)}</td></tr>`;
+    return `<tr><td>${fmtDate(r.date)}</td><td>${esc(r.title)}</td><td class="num">${r.delta > 0 ? money(r.delta) : ''}</td><td class="num">${r.delta < 0 ? money(-r.delta) : ''}</td><td class="num">${money(bal)}</td></tr>`;
   }).join('');
   openModal({
     title: `O'zaro hisob-kitob: ${c.name}`,
@@ -827,7 +832,7 @@ function docForm(type, d) {
       <thead><tr><th>Mahsulot</th><th class="num">Omborda</th><th>Soni</th><th>Narxi</th><th class="num">Summa</th><th></th></tr></thead>
       <tbody id="itemRows">${items}</tbody>
     </table></div>
-    <button type="button" class="small" id="addItemRow">+ Qator qo'shish</button>
+    <button type="button" class="small" id="addItemRow">${icon('plus')}Qator qo'shish</button>
     <div class="form-grid" style="margin-top:12px">${foot}</div>
     <div class="total-line">Jami: <b id="docTotal">0</b></div>`;
 }
@@ -1036,7 +1041,7 @@ function printDoc(id) {
     <style>body{font-family:Arial,sans-serif;padding:24px;color:#000}table{width:100%;border-collapse:collapse;margin:12px 0}td,th{border:1px solid #888;padding:6px;text-align:left;vertical-align:top}h2{margin:0 0 4px}.r{text-align:right}</style>
     </head><body>
     <div><b>${esc(db.company.name)}</b> ${esc(db.company.phone)} ${esc(db.company.address)}</div>
-    <h2>${esc(t.one)} № ${esc(d.no)} — ${esc(d.date)}</h2>
+    <h2>${esc(t.one)} № ${esc(d.no)} — ${fmtDate(d.date)}</h2>
     ${t.party ? `<div>${t.party === 'supplier' ? "Ta'minotchi" : 'Mijoz'}: <b>${esc(c.name)}</b> ${esc(c.phone)}</div>` : ''}
     <div>Ombor: ${esc(warehouse(d.warehouseId)?.name)}${t.move ? ' → ' + esc(warehouse(d.toWarehouseId)?.name) : ''}</div>
     ${d.address ? `<div>Yetkazish: ${esc(d.address)} ${esc(d.deliveryDate || '')}</div>` : ''}
@@ -1056,7 +1061,7 @@ function openInventory(existing) {
     openModal({
       title: `Inventarizatsiya ${existing.no}`,
       wide: true,
-      body: `<p>Sana: ${esc(existing.date)} · Ombor: ${esc(warehouse(existing.warehouseId)?.name)}</p>
+      body: `<p>Sana: ${fmtDate(existing.date)} · Ombor: ${esc(warehouse(existing.warehouseId)?.name)}</p>
         <table><thead><tr><th>Mahsulot</th><th class="num">Hisobda</th><th class="num">Haqiqatda</th><th class="num">Farq</th></tr></thead><tbody>
         ${existing.items.map((it) => `<tr><td>${esc(product(it.productId)?.name)}</td><td class="num">${it.expected}</td><td class="num">${it.qty}</td>
           <td class="num ${it.qty - it.expected < 0 ? 'debt' : ''}">${it.qty - it.expected}</td></tr>`).join('')}</tbody></table>
@@ -1267,14 +1272,14 @@ function telegramOnStockIn(d) {
 
 // Uchinchi element 'A' — faqat administrator ko'radi
 const SECTIONS = [
-  { id: 'dashboard', title: "Ko'rsatkichlar" },
-  { id: 'purchases', title: 'Xaridlar', admin: true, views: [['purchaseOrder'], ['receipt'], ['purchaseReturn']] },
-  { id: 'sales', title: 'Savdo', views: [['order'], ['sale'], ['salesReturn']] },
-  { id: 'goods', title: 'Tovarlar', views: [['products', 'Mahsulotlar'], ['stock', 'Qoldiqlar'], ['enter', '', 'A'], ['writeoff', '', 'A'], ['move', '', 'A'], ['inventory', '', 'A']] },
-  { id: 'parties', title: 'Kontragentlar', views: [['parties', 'Kontragentlar'], ['debts', 'Qarzlar', 'A']] },
-  { id: 'money', title: 'Pul', views: [['payments', "To'lovlar"], ['cash', 'Kassa va hisoblar', 'A']] },
-  { id: 'reports', title: 'Hisobotlar', admin: true, views: [['profit', 'Foyda va zarar'], ['top', 'Savdo tahlili']] },
-  { id: 'settings', title: 'Sozlamalar', admin: true, views: [['users', 'Foydalanuvchilar'], ['server', 'Server'], ['telegram', 'Telegram'], ['company', 'Kompaniya'], ['warehouses', 'Omborlar'], ['categories', 'Kategoriyalar'], ['backup', 'Zaxira nusxa']] },
+  { id: 'dashboard', icon: 'dashboard', title: "Ko'rsatkichlar" },
+  { id: 'purchases', icon: 'truck', title: 'Xaridlar', admin: true, views: [['purchaseOrder'], ['receipt'], ['purchaseReturn']] },
+  { id: 'sales', icon: 'bag', title: 'Savdo', views: [['order'], ['sale'], ['salesReturn']] },
+  { id: 'goods', icon: 'sofa', title: 'Tovarlar', views: [['products', 'Mahsulotlar'], ['stock', 'Qoldiqlar'], ['enter', '', 'A'], ['writeoff', '', 'A'], ['move', '', 'A'], ['inventory', '', 'A']] },
+  { id: 'parties', icon: 'users', title: 'Kontragentlar', views: [['parties', 'Kontragentlar'], ['debts', 'Qarzlar', 'A']] },
+  { id: 'money', icon: 'wallet', title: 'Pul', views: [['payments', "To'lovlar"], ['cash', 'Kassa va hisoblar', 'A']] },
+  { id: 'reports', icon: 'chart', title: 'Hisobotlar', admin: true, views: [['profit', 'Foyda va zarar'], ['top', 'Savdo tahlili']] },
+  { id: 'settings', icon: 'settings', title: 'Sozlamalar', admin: true, views: [['users', 'Foydalanuvchilar'], ['server', 'Server'], ['telegram', 'Telegram'], ['company', 'Kompaniya'], ['warehouses', 'Omborlar'], ['categories', 'Kategoriyalar'], ['backup', 'Zaxira nusxa']] },
 ];
 
 function viewTitle(v) {
@@ -1359,12 +1364,12 @@ function viewDashboard() {
     ['Mijozlar qarzi', money(receivable), 'undirilishi kerak', 'debt'],
   ];
   const quick = [
-    ['sale', '+ Sotuv', 'primary'], ['order', '+ Buyurtma'],
-    ...(isAdmin() ? [['receipt', '+ Qabul qilish']] : []),
-  ].map(([type, label, cls]) => `<button class="${cls || ''}" data-act="newDoc" data-type="${type}">${label}</button>`).join('') +
-    (isAdmin() ? '<button data-act="newProduct">+ Mahsulot</button>' : '') +
-    `<button data-act="newPayment" data-dir="in">+ Kirim to'lovi</button>` +
-    (isAdmin() ? `<button data-act="newPayment" data-dir="out">+ Xarajat</button>` : '');
+    ['sale', 'Sotuv', 'bag', 'primary'], ['order', 'Buyurtma', 'receipt'],
+    ...(isAdmin() ? [['receipt', 'Qabul qilish', 'truck']] : []),
+  ].map(([type, label, ic, cls]) => `<button class="${cls || ''}" data-act="newDoc" data-type="${type}">${icon(ic)}${label}</button>`).join('') +
+    (isAdmin() ? `<button data-act="newProduct">${icon('sofa')}Mahsulot</button>` : '') +
+    `<button data-act="newPayment" data-dir="in">${icon('arrowIn')}Kirim to'lovi</button>` +
+    (isAdmin() ? `<button data-act="newPayment" data-dir="out">${icon('arrowOut')}Xarajat</button>` : '');
 
   const low = db.products.filter((p) => !p.archived && qtyIn(ctx.stock, p.id) - qtyIn(ctx.reserve, p.id) <= (p.minQty || 0));
   const deliveries = db.docs
@@ -1377,21 +1382,28 @@ function viewDashboard() {
 
   const usagePct = isAdmin() && storageUsage?.limit ? (storageUsage.used / storageUsage.limit) * 100 : 0;
   const usageWarn = usagePct >= 80
-    ? `<div class="card warn-card">⚠️ Rasmlar xotirasining ${usagePct.toFixed(0)}% band. <a href="#settings/server">Batafsil</a></div>` : '';
+    ? `<div class="card warn-card">${icon('alert')} Rasmlar xotirasining ${usagePct.toFixed(0)}% band. <a href="#settings/server">Batafsil</a></div>` : '';
 
-  return usageWarn + `<div class="stats">${cards.map(([l, v, h, cls]) => `<div class="stat"><div class="label">${l}</div><div class="value ${cls || ''}">${v}</div><div class="muted small">${h}</div></div>`).join('')}</div>
+  const cardIcon = {
+    'Bugungi savdo': 'cash', 'Shu oy savdosi': 'calendar', 'Shu oy yalpi foydasi': 'trend', "Pul qoldig'i": 'wallet',
+    'Bizga qarzlar': 'arrowIn', 'Bizning qarzlar': 'arrowOut', 'Ombordagi tovar': 'box', 'Faol buyurtmalar': 'bag',
+    'Mening savdom (shu oy)': 'user', 'Mijozlar qarzi': 'arrowIn',
+  };
+  return usageWarn + `<div class="stats">${cards.map(([l, v, h, cls]) => `<div class="stat">
+      <div class="stat-ic ${cls || ''}">${icon(cardIcon[l] || 'chart')}</div>
+      <div class="label">${l}</div><div class="value ${cls || ''}">${v}</div><div class="muted small">${h}</div></div>`).join('')}</div>
     <div class="quick">${quick}</div>
     <div class="grid2">
-      <div class="card"><h3>Yaqin yetkazishlar</h3><table><thead><tr><th>Sana</th><th>Hujjat</th><th>Mijoz</th><th>Manzil</th></tr></thead><tbody>
-        ${deliveries.length ? deliveries.map((d) => `<tr class="click" data-act="openDoc" data-id="${d.id}"><td class="${d.deliveryDate < t ? 'debt' : ''}">${esc(d.deliveryDate)}</td><td>${esc(d.no)}</td>
+      <div class="card"><h3>${icon('truck')}Yaqin yetkazishlar</h3><table><thead><tr><th>Sana</th><th>Hujjat</th><th>Mijoz</th><th>Manzil</th></tr></thead><tbody>
+        ${deliveries.length ? deliveries.map((d) => `<tr class="click" data-act="openDoc" data-id="${d.id}"><td class="${d.deliveryDate < t ? 'debt' : ''}">${fmtDate(d.deliveryDate)}</td><td>${esc(d.no)}</td>
           <td>${esc(party(d.counterpartyId)?.name)}</td><td>${esc(d.address)}</td></tr>`).join('') : emptyRow(4, "Rejalashtirilgan yetkazish yo'q")}
       </tbody></table></div>
-      <div class="card"><h3>Kam qolgan mahsulotlar</h3><table><thead><tr><th>Mahsulot</th><th class="num">Mavjud</th><th class="num">Min.</th></tr></thead><tbody>
+      <div class="card"><h3>${icon('alert')}Kam qolgan mahsulotlar</h3><table><thead><tr><th>Mahsulot</th><th class="num">Mavjud</th><th class="num">Min.</th></tr></thead><tbody>
         ${low.length ? low.map((p) => `<tr class="click" data-act="editProduct" data-id="${p.id}"><td>${esc(p.name)}</td><td class="num debt">${qtyIn(ctx.stock, p.id) - qtyIn(ctx.reserve, p.id)}</td><td class="num">${p.minQty}</td></tr>`).join('') : emptyRow(3, 'Hammasi yetarli')}
       </tbody></table></div>
     </div>
-    <div class="card"><h3>Oxirgi hujjatlar</h3><table><thead><tr><th>Sana</th><th>Hujjat</th><th>Kontragent</th><th class="num">Summa</th></tr></thead><tbody>
-      ${recent.length ? recent.map((d) => `<tr class="click" data-act="openDoc" data-id="${d.id}"><td>${esc(d.date)}</td><td>${esc(DOC_TYPES[d.type].one)} ${esc(d.no)}</td>
+    <div class="card"><h3>${icon('clock')}Oxirgi hujjatlar</h3><table><thead><tr><th>Sana</th><th>Hujjat</th><th>Kontragent</th><th class="num">Summa</th></tr></thead><tbody>
+      ${recent.length ? recent.map((d) => `<tr class="click" data-act="openDoc" data-id="${d.id}"><td>${fmtDate(d.date)}</td><td>${esc(DOC_TYPES[d.type].one)} ${esc(d.no)}</td>
         <td>${esc(party(d.counterpartyId)?.name || warehouse(d.warehouseId)?.name)}</td><td class="num">${d.type === 'inventory' ? '' : money(docTotal(d))}</td></tr>`).join('') : emptyRow(4, "Hali hujjat yo'q. Boshlash uchun mahsulot qo'shing.")}
     </tbody></table></div>`;
 }
@@ -1420,7 +1432,7 @@ function viewDocs(type) {
     const paid = t.pay ? docPaid(d) : 0;
     const where = t.party ? esc(party(d.counterpartyId)?.name) : esc(warehouse(d.warehouseId)?.name) + (t.move ? ' → ' + esc(warehouse(d.toWarehouseId)?.name) : '');
     return `<tr class="click" data-act="openDoc" data-id="${d.id}">
-      <td>${esc(d.no)}</td><td>${esc(d.date)}${d.userId ? `<div class="muted small">${esc(userName(d.userId))}</div>` : ''}</td><td>${where}</td>
+      <td>${esc(d.no)}</td><td>${fmtDate(d.date)}${d.userId ? `<div class="muted small">${esc(userName(d.userId))}</div>` : ''}</td><td>${where}</td>
       <td class="items-cell">${d.items.slice(0, 3).map((it) => `${esc(product(it.productId)?.name)} × ${it.qty}`).join('<br>')}${d.items.length > 3 ? `<br><span class="muted">yana ${d.items.length - 3} ta</span>` : ''}</td>
       <td class="num">${type === 'inventory' ? '' : money(docTotal(d))}</td>
       ${t.pay ? `<td class="num">${paid >= docTotal(d) && paid > 0 ? badge("To'langan", 'done') : paid > 0 ? fmt(paid) : badge("To'lanmagan", 'cancel')}</td>` : ''}
@@ -1430,7 +1442,7 @@ function viewDocs(type) {
 
   return toolbar(type, {
     extra: periodInputs(type) + statusFilter,
-    buttons: `<button class="primary" data-act="newDoc" data-type="${type}">+ ${esc(t.one)}</button>${isAdmin() ? `<button data-act="exportDocs" data-type="${type}">CSV</button>` : ''}`,
+    buttons: `<button class="primary" data-act="newDoc" data-type="${type}">${icon('plus')}${esc(t.one)}</button>${isAdmin() ? `<button data-act="exportDocs" data-type="${type}">${icon('download')}CSV</button>` : ''}`,
   }) + `<div class="card"><div class="table-wrap"><table><thead><tr>${cols.map((c, i) => `<th class="${i === 4 || i === 5 ? 'num' : ''}">${c}</th>`).join('')}</tr></thead>
     <tbody>${rows || emptyRow(cols.length, "Tanlangan davrda hujjat yo'q")}</tbody>
     ${list.length && type !== 'inventory' ? `<tfoot><tr><td colspan="4">Jami: ${list.length} ta</td><td class="num">${money(total)}</td><td colspan="${cols.length - 5}"></td></tr></tfoot>` : ''}
@@ -1471,8 +1483,8 @@ function viewProducts() {
       <td class="num">${money(p.salePrice)}</td>
       <td class="num ${st - rs <= (p.minQty || 0) ? 'debt' : ''}">${st}${rs ? `<div class="muted small">rezerv ${rs}</div>` : ''}</td>
       <td class="actions">${admin ? `
-        <button class="small" data-act="tgProduct" data-id="${p.id}" title="Telegram guruhga yuborish">✈︎</button>
-        ${p.archived ? `<button class="small" data-act="unarchive" data-id="${p.id}">Tiklash</button>` : `<button class="small danger" data-act="deleteProduct" data-id="${p.id}">O'chirish</button>`}` : ''}
+        <button class="small icon-only" data-act="tgProduct" data-id="${p.id}" title="Telegram guruhga yuborish">${icon('send')}</button>
+        ${p.archived ? `<button class="small" data-act="unarchive" data-id="${p.id}">Tiklash</button>` : `<button class="small danger icon-only" data-act="deleteProduct" data-id="${p.id}" title="O'chirish">${icon('trash')}</button>`}` : ''}
       </td>
     </tr>`;
   }).join('');
@@ -1480,7 +1492,7 @@ function viewProducts() {
   return toolbar('products', {
     extra: `<select data-filter="products.cat"><option value="">Barcha kategoriyalar</option>${db.categories.map((c) => `<option ${c === cat ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select>
       <select data-filter="products.arch"><option value="">Faol</option><option value="1" ${arch ? 'selected' : ''}>Arxiv</option></select>`,
-    buttons: admin ? `<button class="primary" data-act="newProduct">+ Mahsulot</button><button data-act="exportProducts">CSV</button>` : '',
+    buttons: admin ? `<button class="primary" data-act="newProduct">${icon('plus')}Mahsulot</button><button data-act="exportProducts">${icon('download')}CSV</button>` : '',
   }) + `<div class="card"><div class="table-wrap"><table><thead><tr><th></th><th>Nomi</th><th>O'lchami</th><th>Rangi / materiali</th><th>Ishlab chiqarilgan</th>
     ${admin ? '<th class="num">Tannarx</th>' : ''}<th class="num">Sotish narxi</th><th class="num">Qoldiq</th><th></th></tr></thead>
     <tbody>${rows || emptyRow(9, "Mahsulot yo'q")}</tbody></table></div></div>`;
@@ -1517,7 +1529,7 @@ function viewStock() {
     extra: `<select data-filter="stock.wh"><option value="">Barcha omborlar</option>${db.warehouses.map((w) => `<option value="${w.id}" ${w.id === wh ? 'selected' : ''}>${esc(w.name)}</option>`).join('')}</select>
       <select data-filter="stock.cat"><option value="">Barcha kategoriyalar</option>${db.categories.map((c) => `<option ${c === cat ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select>
       <select data-filter="stock.pos"><option value="">Hammasi</option><option value="1" ${onlyPos ? 'selected' : ''}>Faqat bor</option></select>`,
-    buttons: `<button data-act="print">Chop etish</button>`,
+    buttons: `<button data-act="print">${icon('print')}Chop etish</button>`,
   }) + `<div class="card"><div class="table-wrap"><table><thead><tr><th>Kod</th><th>Nomi</th><th>Kategoriya</th><th class="num">Qoldiq</th><th class="num">Rezerv</th><th class="num">Mavjud</th>
     ${admin ? '<th class="num">Tannarx</th><th class="num">Tannarx summa</th>' : ''}<th class="num">Sotish narxi</th><th class="num">Sotish summa</th></tr></thead>
     <tbody>${rows || emptyRow(10, "Ma'lumot yo'q")}</tbody>
@@ -1536,11 +1548,11 @@ function viewParties() {
     const b = partyBalance(c.id);
     return `<tr class="click" data-act="editParty" data-id="${c.id}"><td><b>${esc(c.name)}</b>${c.note ? `<div class="muted small">${esc(c.note)}</div>` : ''}</td><td>${esc(KINDS[c.kind])}</td>
       <td>${esc(c.phone)}</td><td>${esc(c.address)}</td><td class="num ${b > 0 ? 'debt' : b < 0 ? 'warn' : ''}">${b ? money(b) : '—'}</td>
-      <td class="actions"><button class="small" data-act="statement" data-id="${c.id}">Hisob-kitob</button>${isAdmin() ? `<button class="small danger" data-act="deleteParty" data-id="${c.id}">O'chirish</button>` : ''}</td></tr>`;
+      <td class="actions"><button class="small" data-act="statement" data-id="${c.id}">${icon('receipt')}Hisob-kitob</button>${isAdmin() ? `<button class="small danger icon-only" data-act="deleteParty" data-id="${c.id}" title="O'chirish">${icon('trash')}</button>` : ''}</td></tr>`;
   }).join('');
   return toolbar('parties', {
     extra: !isAdmin() ? '' : `<select data-filter="parties.kind"><option value="">Hammasi</option><option value="customer" ${kind === 'customer' ? 'selected' : ''}>Mijozlar</option><option value="supplier" ${kind === 'supplier' ? 'selected' : ''}>Ta'minotchilar</option></select>`,
-    buttons: `<button class="primary" data-act="newParty">+ Kontragent</button>`,
+    buttons: `<button class="primary" data-act="newParty">${icon('plus')}Kontragent</button>`,
   }) + `<div class="card"><div class="table-wrap"><table><thead><tr><th>Nomi</th><th>Turi</th><th>Telefon</th><th>Manzil</th><th class="num">Balans</th><th></th></tr></thead>
     <tbody>${rows || emptyRow(6, "Kontragent yo'q")}</tbody></table></div>
     <p class="muted small">Balans: qizil — kontragent bizga qarzdor, sariq — biz qarzdormiz.</p></div>`;
@@ -1572,7 +1584,7 @@ function viewPayments() {
   const rows = list.map((p) => {
     if (p.dir === 'in') tin += p.amount; else tout += p.amount;
     const d = p.docId && doc(p.docId);
-    return `<tr><td>${esc(p.no)}</td><td>${esc(p.date)}</td><td>${p.dir === 'in' ? badge('Kirim', 'done') : badge('Chiqim', 'cancel')}</td>
+    return `<tr><td>${esc(p.no)}</td><td>${fmtDate(p.date)}</td><td>${p.dir === 'in' ? badge('Kirim', 'done') : badge('Chiqim', 'cancel')}</td>
       <td>${esc(p.purpose)}</td><td>${esc(party(p.counterpartyId)?.name || '—')}</td>
       <td>${d ? `<a href="javascript:void 0" data-act="openDoc" data-id="${d.id}">${esc(d.no)}</a>` : ''}</td>
       <td>${esc(PAY_METHODS[p.method])}</td><td class="num">${money(p.amount)}</td><td>${esc(p.note)}</td>
@@ -1580,7 +1592,7 @@ function viewPayments() {
   }).join('');
   return toolbar('payments', {
     extra: periodInputs('payments') + (!admin ? '' : `<select data-filter="payments.dir"><option value="">Hammasi</option><option value="in" ${dir === 'in' ? 'selected' : ''}>Kirim</option><option value="out" ${dir === 'out' ? 'selected' : ''}>Chiqim</option></select>`),
-    buttons: `<button class="primary" data-act="newPayment" data-dir="in">+ Kirim</button>${admin ? '<button data-act="newPayment" data-dir="out">+ Chiqim</button>' : ''}`,
+    buttons: `<button class="primary" data-act="newPayment" data-dir="in">${icon('arrowIn')}Kirim</button>${admin ? `<button data-act="newPayment" data-dir="out">${icon('arrowOut')}Chiqim</button>` : ''}`,
   }) + `<div class="card"><div class="table-wrap"><table><thead><tr><th>№</th><th>Sana</th><th>Turi</th><th>Moddasi</th><th>Kontragent</th><th>Hujjat</th><th>Usul</th><th class="num">Summa</th><th>Izoh</th><th></th></tr></thead>
     <tbody>${rows || emptyRow(10, "To'lov yo'q")}</tbody>
     <tfoot><tr><td colspan="7">Kirim: ${money(tin)} · Chiqim: ${money(tout)}</td><td class="num">${money(tin - tout)}</td><td colspan="2"></td></tr></tfoot></table></div></div>`;
@@ -1591,7 +1603,7 @@ function viewCash() {
   return `<div class="stats">${Object.entries(PAY_METHODS).map(([k, v]) => `<div class="stat"><div class="label">${v}</div><div class="value">${money(b[k] || 0)}</div></div>`).join('')}
     <div class="stat"><div class="label">Jami</div><div class="value">${money(b.cash + b.card + b.bank)}</div></div></div>
     <div class="card"><p class="muted">Qoldiqlar barcha kirim va chiqim to'lovlaridan hisoblanadi. Boshlang'ich qoldiqni kiritish uchun "Boshqa kirim" moddasi bilan kirim to'lovi yarating.</p>
-    <button data-act="newPayment" data-dir="in">+ Kirim</button> <button data-act="newPayment" data-dir="out">+ Chiqim</button></div>`;
+    <button data-act="newPayment" data-dir="in">${icon('arrowIn')}Kirim</button> <button data-act="newPayment" data-dir="out">${icon('arrowOut')}Chiqim</button></div>`;
 }
 
 // --- Hisobotlar ---
@@ -1689,9 +1701,9 @@ function viewUsers() {
     <table><thead><tr><th>Ism</th><th>Login</th><th>Roli</th><th>Holati</th><th></th></tr></thead><tbody>
     ${db.users.map((u) => `<tr><td>${esc(u.name)}${u.id === me.id ? ' <span class="muted small">(siz)</span>' : ''}</td><td>${esc(u.login)}</td>
       <td>${badge(ROLES[u.role], u.role === 'admin' ? 'admin' : '')}</td><td>${u.active === false ? badge('Bloklangan', 'cancel') : badge('Faol', 'done')}</td>
-      <td class="actions"><button class="small" data-act="editUser" data-id="${u.id}">Tahrirlash</button></td></tr>`).join('')}
+      <td class="actions"><button class="small" data-act="editUser" data-id="${u.id}">${icon('edit')}Tahrirlash</button></td></tr>`).join('')}
     </tbody></table>
-    <div class="toolbar" style="margin-top:12px"><button class="primary" data-act="editUser">+ Foydalanuvchi</button></div></div>`;
+    <div class="toolbar" style="margin-top:12px"><button class="primary" data-act="editUser">${icon('plus')}Foydalanuvchi</button></div></div>`;
 }
 
 function editUser(id) {
@@ -1836,8 +1848,8 @@ function viewCompany() {
 function viewWarehouses() {
   return `<div class="card narrow"><h3>Omborlar va do'konlar</h3><table><thead><tr><th>Nomi</th><th>Manzil</th><th class="num">Tovar soni</th><th></th></tr></thead><tbody>
     ${db.warehouses.map((w) => `<tr><td>${esc(w.name)}</td><td>${esc(w.address)}</td><td class="num">${db.products.reduce((s, p) => s + qtyIn(ctx.stock, p.id, w.id), 0)}</td>
-      <td class="actions"><button class="small" data-act="editWh" data-id="${w.id}">Tahrirlash</button><button class="small danger" data-act="deleteWh" data-id="${w.id}">O'chirish</button></td></tr>`).join('')}
-    </tbody></table><div class="toolbar" style="margin-top:12px"><button class="primary" data-act="editWh">+ Ombor</button></div></div>`;
+      <td class="actions"><button class="small" data-act="editWh" data-id="${w.id}">${icon('edit')}Tahrirlash</button><button class="small danger icon-only" data-act="deleteWh" data-id="${w.id}" title="O'chirish">${icon('trash')}</button></td></tr>`).join('')}
+    </tbody></table><div class="toolbar" style="margin-top:12px"><button class="primary" data-act="editWh">${icon('plus')}Ombor</button></div></div>`;
 }
 
 function editWarehouse(id) {
@@ -2088,11 +2100,14 @@ function render() {
   }
   me = Object.assign(me, db.users.find((u) => u.id === me.id));
   $('#authForm').innerHTML = '';
-  $('#userName').textContent = `${me.name} · ${ROLES[me.role]}`;
+  $('#userName').innerHTML = `<b>${esc(me.name)}</b><span>${ROLES[me.role]}</span>`;
   $('#syncBanner').hidden = !syncState.offline;
   refreshCtx();
   const { section, view } = currentRoute();
-  $('#sections').innerHTML = visibleSections().map((s) => `<a href="#${s.id}" class="${s === section ? 'active' : ''}">${s.title}</a>`).join('');
+  $('#sections').innerHTML = visibleSections().map((s) => `<a href="#${s.id}" class="${s === section ? 'active' : ''}">${icon(s.icon)}<span>${s.title}</span></a>`).join('');
+  const sub = section.views && visibleViews(section).find((v) => v[0] === view);
+  $('#pageHead').innerHTML = `<h1>${icon(section.icon)}${esc(sub && section.id !== 'dashboard' ? viewTitle(sub) : section.title)}</h1>
+    ${section.id === 'dashboard' ? `<span class="date">${longDate(new Date())}</span>` : ''}`;
   $('#subnav').innerHTML = section.views
     ? visibleViews(section).map((v) => `<a href="#${section.id}/${v[0]}" class="${v[0] === view ? 'active' : ''}">${esc(viewTitle(v))}</a>`).join('')
     : '';
@@ -2205,6 +2220,20 @@ document.addEventListener('click', (e) => {
 
 $('#authForm').addEventListener('submit', onAuthSubmit);
 $('#logoutBtn').addEventListener('click', logout);
+$('#logoutBtn').innerHTML = icon('logout');
+$('#brandMark').innerHTML = icon('sofa');
+$('#authLogo').innerHTML = icon('sofa');
+
+// Mavzu: mayin jigarrang (kunduzgi) yoki tungi. Har bir qurilmada alohida eslab qolinadi.
+function applyTheme(theme) {
+  if (theme === 'dark') document.documentElement.dataset.theme = 'dark';
+  else delete document.documentElement.dataset.theme;
+  $('#themeBtn').innerHTML = icon(theme === 'dark' ? 'sun' : 'moon');
+  $('#themeBtn').title = theme === 'dark' ? 'Kunduzgi mavzu' : 'Tungi mavzu';
+  try { localStorage.setItem('biznes-tizim-theme', theme); } catch (e) { /* xotira yopiq */ }
+}
+applyTheme(document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light');
+$('#themeBtn').addEventListener('click', () => applyTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'));
 $('#userName').addEventListener('click', (e) => { e.preventDefault(); editUser(me.id); });
 
 async function start() {
