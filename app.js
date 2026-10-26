@@ -39,6 +39,21 @@ const EXPENSE_PURPOSES = PAY_PURPOSES_OUT.slice(2);
 
 const DEFAULT_CATEGORIES = ['Yotoqxona', 'Mehmonxona', 'Oshxona', 'Divan va kreslo', 'Stol va stul', 'Shkaf', 'Bolalar mebeli', 'Ofis mebeli', 'Matras'];
 
+// Har bir kategoriyaning turlari (Sozlamalarda o'zgartiriladi)
+const DEFAULT_CATEGORY_TYPES = {
+  Yotoqxona: ['Yotoqxona to\'plami', 'Karavot', 'Kiyim shkafi', 'Tumbochka', 'Komod', 'Trelyaj'],
+  Mehmonxona: ['Mehmonxona to\'plami', 'TV tumba', 'Jurnal stoli', 'Vitrina', 'Kitob javoni', 'Komod'],
+  Oshxona: ['Oshxona garnituri', 'Oshxona stoli', 'Oshxona stuli', 'Oshxona burchak divani', 'Bar stuli'],
+  'Divan va kreslo': ['To\'g\'ri divan', 'Burchak divan', 'Divan-karavot', 'Kreslo', 'Kreslo-karavot', 'Puf'],
+  'Stol va stul': ['Ovqat stoli', 'Stul', 'Stol-stul to\'plami', 'Jurnal stoli', 'Yozuv stoli'],
+  Shkaf: ['Shkaf-kupe', 'Kiyim shkafi', 'Kitob shkafi', 'Dahliz shkafi', 'Burchak shkaf'],
+  'Bolalar mebeli': ['Bolalar karavoti', 'Ikki qavatli karavot', 'Bolalar shkafi', 'Bolalar yozuv stoli', 'Beshik', 'Bolalar to\'plami'],
+  'Ofis mebeli': ['Rahbar stoli', 'Xodim stoli', 'Kompyuter stoli', 'Majlislar stoli', 'Telefon tumba', 'Ofis kreslo', 'Rahbar kreslosi', 'Stul', 'Hujjat shkafi', 'Seyf', 'Resepshn'],
+  Matras: ['Ortopedik matras', 'Prujinali matras', 'Prujinasiz matras', 'Bolalar matrasi', 'Topper'],
+};
+
+const DEFAULT_MATERIALS = ['LDSP', 'MDF', 'DSP', 'Massiv (yog\'och)', 'Faner', 'Metall', 'Shisha', 'Oyna', 'Velyur', 'Ekokoja', 'Charm', 'Mato', 'Rattan', 'Plastik'];
+
 // ---------- Ma'lumotlar ombori ----------
 
 function emptyDb() {
@@ -49,6 +64,8 @@ function emptyDb() {
     docs: [],
     payments: [],
     categories: DEFAULT_CATEGORIES.slice(),
+    categoryTypes: JSON.parse(JSON.stringify(DEFAULT_CATEGORY_TYPES)),
+    materials: DEFAULT_MATERIALS.slice(),
     company: { name: 'KAO Mebel', phone: '', address: '' },
     telegram: { token: '', chatId: '', onReceipt: true, onNewProduct: true, showQty: true, log: [] },
     legacyUsers: {},
@@ -496,9 +513,12 @@ function productForm(p = {}, readonly = false) {
       ${field('Nomi *', 'name', p.name, 'required', 'full')}
       ${sizeField(p.size)}
       ${field('Kod / artikul', 'code', p.code)}
-      ${selectField('Kategoriya', 'category', cats, p.category || '')}
+      ${selectField('Kategoriya', 'category', cats, p.category || '', '', 'id="catSel"')}
+      <label>Turi<select name="type" id="typeSel">${typeOptions(p.category, p.type)}</select>
+        <input name="typeNew" id="typeNew" placeholder="Yangi tur nomi" hidden></label>
       ${field('Rangi', 'color', p.color, 'placeholder="Oq, yong\'oq..."')}
-      ${field('Materiali', 'material', p.material, 'placeholder="LDSP, MDF, massiv..."')}
+      <div class="field full"><span class="field-label">Materiali</span>${materialChips(p.material)}
+        <input type="hidden" name="material" value="${esc(p.material || '')}"></div>
       ${field('Ishlab chiqarilgan joyi', 'origin', p.origin, 'placeholder="O\'zbekiston, Toshkent / Turkiya..."')}
       ${field('Ishlab chiqaruvchi (fabrika)', 'maker', p.maker)}
       ${field("O'lchov birligi", 'unit', p.unit || 'dona')}
@@ -571,11 +591,49 @@ function bindSizeField() {
   });
 }
 
+// Turi — tanlangan kategoriyaning o'z turlari
+function typeOptions(cat, value) {
+  const types = (db.categoryTypes[cat] || []).slice();
+  if (value && !types.includes(value)) types.push(value);
+  return [['', '—'], ...types.map((t) => [t, t]), ...(isAdmin() ? [['__new', '+ Yangi tur...']] : [])]
+    .map(([v, t]) => `<option value="${esc(v)}" ${v === (value || '') ? 'selected' : ''}>${esc(t)}</option>`).join('');
+}
+
+function bindTypeField() {
+  const cat = $('#catSel');
+  const type = $('#typeSel');
+  const fresh = $('#typeNew');
+  const toggle = () => {
+    fresh.hidden = type.value !== '__new';
+    if (!fresh.hidden) fresh.focus();
+  };
+  cat.addEventListener('change', () => { type.innerHTML = typeOptions(cat.value, ''); toggle(); });
+  type.addEventListener('change', toggle);
+}
+
+// Materiallar — bir nechtasini belgilash mumkin, saqlanganda "LDSP, Oyna" ko'rinishida yoziladi
+const splitList = (str) => String(str || '').split(',').map((x) => x.trim()).filter(Boolean);
+
+function materialChips(value) {
+  const selected = splitList(value);
+  const all = [...db.materials, ...selected.filter((m) => !db.materials.includes(m))];
+  return `<div class="chips" id="matChips">
+    ${all.map((m) => `<button type="button" class="chip ${selected.includes(m) ? 'on' : ''}" data-act="chipToggle" data-v="${esc(m)}">${esc(m)}</button>`).join('')}
+    ${isAdmin() ? '<input class="chip-add" id="matAdd" placeholder="+ Boshqa material" enterkeyhint="done">' : ''}
+  </div>`;
+}
+
+function syncMaterials() {
+  const hidden = $('#modalBody input[name=material]');
+  if (hidden) hidden.value = $$('#matChips .chip.on').map((c) => c.dataset.v).join(', ');
+}
+
 function bindProductForm(p, readonly = false) {
   photoEdit = { items: (p.photos || []).slice(), removed: [] };
   renderPhotoList(readonly);
   if (readonly) return;
   bindSizeField();
+  bindTypeField();
   $('#photoInput').addEventListener('change', (e) => {
     const files = Array.from(e.target.files).slice(0, MAX_PHOTOS - photoEdit.items.length);
     if (e.target.files.length > files.length) alert(`Ko'pi bilan ${MAX_PHOTOS} ta rasm.`);
@@ -622,10 +680,18 @@ async function hydratePhotos(root = document) {
 }
 
 function readProduct(d, p) {
+  const type = d.type === '__new' ? d.typeNew.trim() : d.type;
+  // Yangi tur va materiallar keyingi safar ro'yxatda tursin
+  if (type && d.category) {
+    const list = (db.categoryTypes[d.category] = db.categoryTypes[d.category] || []);
+    if (!list.includes(type)) list.push(type);
+  }
+  splitList(d.material).forEach((m) => { if (!db.materials.includes(m)) db.materials.push(m); });
   return Object.assign(p, {
     name: d.name.trim(),
     code: d.code.trim(),
     category: d.category,
+    type,
     size: d.size.trim(),
     color: d.color.trim(),
     material: d.material.trim(),
@@ -1217,6 +1283,7 @@ function stockLine(p) {
 
 function telegramCaption(p) {
   const lines = [`🛋 <b>${esc(p.name)}</b>`];
+  if (p.type) lines.push(`🪑 Turi: ${esc(p.type)}`);
   if (p.code) lines.push(`🔖 Kod: ${esc(p.code)}`);
   lines.push(`💰 Narxi: <b>${money(p.salePrice)}</b>`);
   if (p.size) lines.push(`📐 O'lchami: ${esc(p.size)} sm`);
@@ -1226,7 +1293,8 @@ function telegramCaption(p) {
   lines.push(`📦 ${stockLine(p)}`);
   if (p.note) lines.push('', esc(p.note));
   if (db.company.phone) lines.push('', `📞 ${esc(db.company.phone)}`);
-  if (p.category) lines.push(`#${p.category.replace(/[^\p{L}\p{N}]+/gu, '_')}`);
+  const tag = (t) => '#' + t.replace(/[^\p{L}\p{N}]+/gu, '_').replace(/^_+|_+$/g, '');
+  if (p.category || p.type) lines.push([p.category, p.type].filter(Boolean).map(tag).join(' '));
   return lines.join('\n');
 }
 
@@ -1325,7 +1393,7 @@ const SECTIONS = [
   { id: 'parties', icon: 'users', title: 'Kontragentlar', views: [['parties', 'Kontragentlar'], ['debts', 'Qarzlar', 'A']] },
   { id: 'money', icon: 'wallet', title: 'Pul', views: [['payments', "To'lovlar"], ['cash', 'Kassa va hisoblar', 'A']] },
   { id: 'reports', icon: 'chart', title: 'Hisobotlar', admin: true, views: [['profit', 'Foyda va zarar'], ['top', 'Savdo tahlili']] },
-  { id: 'settings', icon: 'settings', title: 'Sozlamalar', admin: true, views: [['users', 'Foydalanuvchilar'], ['server', 'Server'], ['telegram', 'Telegram'], ['company', 'Kompaniya'], ['warehouses', 'Omborlar'], ['categories', 'Kategoriyalar'], ['backup', 'Zaxira nusxa']] },
+  { id: 'settings', icon: 'settings', title: 'Sozlamalar', admin: true, views: [['users', 'Foydalanuvchilar'], ['server', 'Server'], ['telegram', 'Telegram'], ['company', 'Kompaniya'], ['warehouses', 'Omborlar'], ['categories', 'Kategoriya va materiallar'], ['backup', 'Zaxira nusxa']] },
 ];
 
 function viewTitle(v) {
@@ -1508,12 +1576,15 @@ function exportDocs(type) {
 
 function viewProducts() {
   const q = filterVal('products.q').toLowerCase();
-  const cat = filterVal('products.cat');
+  // Kategoriya o'chirilgan yoki nomi o'zgargan bo'lsa, eski filtr ro'yxatni bo'sh qilib qo'ymasin
+  const cat = db.categories.includes(filterVal('products.cat')) ? filterVal('products.cat') : '';
+  const ptype = cat ? filterVal('products.type') : '';
   const arch = filterVal('products.arch') === '1';
   const list = db.products
     .filter((p) => !!p.archived === arch)
     .filter((p) => !cat || p.category === cat)
-    .filter((p) => !q || [p.name, p.code, p.material, p.color, p.origin, p.maker, p.size].join(' ').toLowerCase().includes(q));
+    .filter((p) => !ptype || p.type === ptype)
+    .filter((p) => !q || [p.name, p.code, p.type, p.material, p.color, p.origin, p.maker, p.size].join(' ').toLowerCase().includes(q));
 
   const admin = isAdmin();
   const rows = list.map((p) => {
@@ -1521,7 +1592,7 @@ function viewProducts() {
     const rs = qtyIn(ctx.reserve, p.id);
     return `<tr>
       <td class="thumb">${p.photos?.length ? `<img data-photo="${esc(p.photos[0].thumb)}" alt="" loading="lazy">` : ''}${p.photos?.length > 1 ? `<span class="ph-count">${p.photos.length}</span>` : ''}</td>
-      <td class="click" data-act="editProduct" data-id="${p.id}"><b>${esc(p.name)}</b><div class="muted small">${esc([p.code, p.category].filter(Boolean).join(' · '))}</div></td>
+      <td class="click" data-act="editProduct" data-id="${p.id}"><b>${esc(p.name)}</b><div class="muted small">${esc([p.code, p.category, p.type].filter(Boolean).join(' · '))}</div></td>
       <td>${esc(p.size)}</td>
       <td>${esc([p.color, p.material].filter(Boolean).join(', '))}</td>
       <td>${esc(p.origin)}</td>
@@ -1537,6 +1608,7 @@ function viewProducts() {
 
   return toolbar('products', {
     extra: `<select data-filter="products.cat"><option value="">Barcha kategoriyalar</option>${db.categories.map((c) => `<option ${c === cat ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select>
+      ${cat ? `<select data-filter="products.type"><option value="">Barcha turlar</option>${(db.categoryTypes[cat] || []).map((t) => `<option ${t === ptype ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select>` : ''}
       <select data-filter="products.arch"><option value="">Faol</option><option value="1" ${arch ? 'selected' : ''}>Arxiv</option></select>`,
     buttons: admin ? `<button class="primary" data-act="newProduct">${icon('plus')}Mahsulot</button><button data-act="exportProducts">${icon('download')}CSV</button>` : '',
   }) + `<div class="card"><div class="table-wrap"><table><thead><tr><th></th><th>Nomi</th><th>O'lchami</th><th>Rangi / materiali</th><th>Ishlab chiqarilgan</th>
@@ -1545,8 +1617,8 @@ function viewProducts() {
 }
 
 function exportProducts() {
-  const rows = [['Kod', 'Nomi', 'Kategoriya', "O'lchami", 'Rangi', 'Materiali', 'Ishlab chiqarilgan', 'Ishlab chiqaruvchi', 'Tannarx', 'Sotish narxi', 'Qoldiq', 'Rezerv']];
-  db.products.forEach((p) => rows.push([p.code, p.name, p.category, p.size, p.color, p.material, p.origin, p.maker, Math.round(ctx.cost[p.id]), p.salePrice, qtyIn(ctx.stock, p.id), qtyIn(ctx.reserve, p.id)]));
+  const rows = [['Kod', 'Nomi', 'Kategoriya', 'Turi', "O'lchami", 'Rangi', 'Materiali', 'Ishlab chiqarilgan', 'Ishlab chiqaruvchi', 'Tannarx', 'Sotish narxi', 'Qoldiq', 'Rezerv']];
+  db.products.forEach((p) => rows.push([p.code, p.name, p.category, p.type, p.size, p.color, p.material, p.origin, p.maker, Math.round(ctx.cost[p.id]), p.salePrice, qtyIn(ctx.stock, p.id), qtyIn(ctx.reserve, p.id)]));
   download(`mahsulotlar-${today()}.csv`, toCsv(rows), 'text/csv;charset=utf-8');
 }
 
@@ -1919,10 +1991,33 @@ function deleteWarehouse(id) {
   save();
 }
 
+function editChip(v) {
+  return `<span class="chip on" data-v="${esc(v)}">${esc(v)}<button type="button" class="chip-x" data-act="chipRemove" title="Olib tashlash" aria-label="${esc(v)} — olib tashlash">×</button></span>`;
+}
+
+function chipEditor(values, placeholder) {
+  return `<div class="chips chips-edit">${values.map(editChip).join('')}<input class="chip-add" placeholder="${placeholder}" enterkeyhint="done"></div>`;
+}
+
+function catRow(name, types) {
+  return `<div class="cat-row" data-orig="${esc(name)}">
+    <div class="cat-head"><input class="cat-name" value="${esc(name)}" placeholder="Kategoriya nomi">
+      <button type="button" class="small danger icon-only" data-act="catDel" title="Kategoriyani olib tashlash">${icon('trash')}</button></div>
+    ${chipEditor(types, '+ Tur qo\'shish (Enter)')}
+  </div>`;
+}
+
 function viewCategories() {
-  return `<div class="card narrow"><h3>Mahsulot kategoriyalari</h3><p class="muted">Har bir qatorga bitta kategoriya.</p>
-    <textarea id="catInput" rows="12">${esc(db.categories.join('\n'))}</textarea>
-    <div class="toolbar" style="margin-top:12px"><button class="primary" data-act="catSave">Saqlash</button></div></div>`;
+  return `<div class="card narrow"><h3>${icon('tag')}Kategoriyalar va turlar</h3>
+      <p class="muted">Har bir kategoriyaning turlari mahsulot kartochkasida kategoriya tanlanganda chiqadi. Tur qo'shish uchun nomini yozib Enter bosing.</p>
+      <div id="catRows">${db.categories.map((c) => catRow(c, db.categoryTypes[c] || [])).join('')}</div>
+      <button type="button" data-act="catAdd">${icon('plus')}Kategoriya qo'shish</button>
+    </div>
+    <div class="card narrow"><h3>${icon('box')}Materiallar</h3>
+      <p class="muted">Mahsulot kartochkasida tanlanadigan materiallar ro'yxati.</p>
+      <div id="matEditor">${chipEditor(db.materials, "+ Material qo'shish (Enter)")}</div>
+    </div>
+    <div class="toolbar"><button class="primary" data-act="catSave">${icon('check')}Saqlash</button></div>`;
 }
 
 function viewBackup() {
@@ -2100,6 +2195,12 @@ async function loadDemo() {
     db.products.push(p);
     ps.push(p);
   }
+  ['Yotoqxona to\'plami', 'Burchak divan', 'Stol-stul to\'plami', 'Shkaf-kupe', 'Ortopedik matras'].forEach((t, i) => { ps[i].type = t; });
+  ps[0].material = 'MDF, LDSP';
+  ps[1].material = 'Velyur, Massiv (yog\'och)';
+  ps[2].material = 'Massiv (yog\'och)';
+  ps[3].material = 'LDSP, Oyna';
+  ps[4].material = 'Mato';
   const d0 = new Date();
   const ago = (n) => localDate(new Date(d0 - n * 864e5));
   const wh = db.warehouses[0].id;
@@ -2233,7 +2334,21 @@ const ACTIONS = {
   editWh: (ds) => editWarehouse(ds.id),
   deleteWh: (ds) => deleteWarehouse(ds.id),
   catSave: () => {
-    db.categories = $('#catInput').value.split('\n').map((s) => s.trim()).filter(Boolean);
+    const categories = [];
+    const types = {};
+    const renames = [];
+    $$('#catRows .cat-row').forEach((row) => {
+      const name = $('.cat-name', row).value.trim();
+      if (!name || categories.includes(name)) return;
+      categories.push(name);
+      types[name] = $$('.chip', row).map((c) => c.dataset.v);
+      if (row.dataset.orig && row.dataset.orig !== name) renames.push([row.dataset.orig, name]);
+    });
+    // Nomi o'zgargan kategoriya mahsulotlarda ham yangilanadi
+    renames.forEach(([from, to]) => db.products.forEach((p) => { if (p.category === from) p.category = to; }));
+    db.categories = categories;
+    db.categoryTypes = types;
+    db.materials = $$('#matEditor .chip').map((c) => c.dataset.v);
     save();
     alert('Saqlandi.');
   },
@@ -2246,6 +2361,18 @@ const ACTIONS = {
     save();
   },
   editUser: (ds) => editUser(ds.id),
+  chipToggle: (ds, el) => { el.classList.toggle('on'); syncMaterials(); },
+  chipRemove: (ds, el) => el.closest('.chip').remove(),
+  catAdd: () => {
+    $('#catRows').insertAdjacentHTML('beforeend', catRow('', []));
+    $('#catRows .cat-row:last-child .cat-name').focus();
+  },
+  catDel: (ds, el) => {
+    const row = el.closest('.cat-row');
+    const used = db.products.filter((p) => p.category === row.dataset.orig).length;
+    if (used && !confirm(`"${row.dataset.orig}" kategoriyasida ${used} ta mahsulot bor. Kategoriya ro'yxatdan olib tashlansinmi? (mahsulotlar o'chmaydi)`)) return;
+    row.remove();
+  },
   serverSettings: () => openServerSettings(),
   refreshUsage: () => refreshStorageUsage(),
   migrateLocal: () => migrateLocal(),
@@ -2253,7 +2380,7 @@ const ACTIONS = {
 
 // Sotuvchi tugmani ko'rmasa ham, bu amallarni bajara olmasligi kerak
 const ADMIN_ACTIONS = ['newProduct', 'deleteProduct', 'unarchive', 'exportProducts', 'tgProduct', 'deleteParty', 'deletePayment',
-  'tgSave', 'tgDetect', 'tgTest', 'tgAll', 'coSave', 'editWh', 'deleteWh', 'catSave', 'backup', 'demo', 'reset', 'editUser', 'exportDocs',
+  'tgSave', 'tgDetect', 'tgTest', 'tgAll', 'coSave', 'editWh', 'deleteWh', 'catSave', 'catAdd', 'catDel', 'chipRemove', 'backup', 'demo', 'reset', 'editUser', 'exportDocs',
   'serverSettings', 'refreshUsage', 'migrateLocal'];
 
 document.addEventListener('click', (e) => {
@@ -2261,7 +2388,27 @@ document.addEventListener('click', (e) => {
   if (!el || el.closest('#modal') && !el.closest('#modalBody')) return;
   e.preventDefault();
   if (ADMIN_ACTIONS.includes(el.dataset.act) && !isAdmin()) return;
-  ACTIONS[el.dataset.act]?.(el.dataset);
+  ACTIONS[el.dataset.act]?.(el.dataset, el);
+});
+
+// Teg-katakchalar: Enter bilan yangi qiymat qo'shish (mahsulot materiali va Sozlamalardagi ro'yxatlar)
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter' || !e.target.classList?.contains('chip-add')) return;
+  e.preventDefault();
+  const input = e.target;
+  const v = input.value.trim();
+  if (!v) return;
+  const box = input.closest('.chips');
+  const exists = $$('[data-v]', box).find((c) => c.dataset.v.toLowerCase() === v.toLowerCase());
+  if (exists) {
+    exists.classList.add('on');
+  } else if (box.id === 'matChips') {
+    input.insertAdjacentHTML('beforebegin', `<button type="button" class="chip on" data-act="chipToggle" data-v="${esc(v)}">${esc(v)}</button>`);
+  } else {
+    input.insertAdjacentHTML('beforebegin', editChip(v));
+  }
+  input.value = '';
+  syncMaterials();
 });
 
 $('#authForm').addEventListener('submit', onAuthSubmit);

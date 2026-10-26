@@ -520,3 +520,33 @@ dialog h3 { margin: 0; padding: 18px 22px; border-bottom: 1px solid var(--border
 .dims { display: flex; align-items: center; gap: 6px; }
 .dims .dim { min-width: 0; flex: 1; text-align: center; font-variant-numeric: tabular-nums; }
 .dim-x { color: var(--muted); font-size: 15px; }
+
+/* ---- Teg-katakchalar (materiallar, turlar) ---- */
+.form-grid .field { display: flex; flex-direction: column; gap: 6px; }
+.form-grid .field.full { grid-column: 1 / -1; }
+.field-label { font-size: 13px; color: var(--muted); }
+.chips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--card);
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.3;
+}
+button.chip:hover { border-color: var(--accent); color: var(--accent-dark); }
+.chip.on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-dark); font-weight: 600; }
+button.chip.on::before { content: "✓"; font-size: 12px; }
+.chips-edit .chip { padding-right: 4px; }
+.chip-x { width: 22px; height: 22px; padding: 0; border: none; border-radius: 50%; background: transparent; color: var(--muted); font-size: 16px; line-height: 1; }
+.chip-x:hover { background: var(--danger-soft); color: var(--danger); }
+.chip-add { width: auto; flex: 1 1 160px; min-width: 140px; padding: 5px 10px; border-style: dashed; border-radius: 999px; font-size: 13px; }
+
+.cat-row { display: flex; flex-direction: column; gap: 8px; padding: 12px 0; border-bottom: 1px solid var(--border); }
+.cat-row:last-child { border-bottom: none; margin-bottom: 12px; }
+.cat-head { display: flex; gap: 8px; align-items: center; }
+.cat-name { font-weight: 600; }

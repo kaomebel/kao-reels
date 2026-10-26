@@ -12,7 +12,7 @@
  */
 
 const ENTITY_TABLES = ['warehouses', 'counterparties', 'products', 'docs', 'payments']; // yozish tartibi muhim
-const SETTINGS_KEYS = ['categories', 'company', 'telegram', 'legacyUsers'];
+const SETTINGS_KEYS = ['categories', 'categoryTypes', 'materials', 'company', 'telegram', 'legacyUsers'];
 const SERVER_CONFIG_KEY = 'biznes-tizim-server';
 const LOCAL_DATA_KEY = 'biznes-tizim-v1';
 const LOCAL_SESSION_KEY = 'biznes-tizim-session';
