@@ -16,13 +16,13 @@ const DELIVERY_STATUSES = { pending: 'Yetkazilishi kerak', onway: "Yo'lda", deli
 // stock: ombor qoldig'iga ta'siri; money: kontragent bizga qarzi qanday o'zgaradi;
 // pay: hujjat bo'yicha to'lov yo'nalishi; next: shu hujjat asosida yaratiladigan hujjat.
 const DOC_TYPES = {
-  purchaseOrder: { list: "Ta'minotchiga buyurtmalar", one: "Ta'minotchiga buyurtma", prefix: 'TB', party: 'supplier', price: 'buy', stock: 0, money: 0, statuses: PO_STATUSES, pay: 'out', next: 'receipt' },
-  receipt: { list: 'Qabul qilish', one: 'Qabul qilish', prefix: 'QQ', party: 'supplier', price: 'buy', stock: 1, money: -1, pay: 'out', next: 'purchaseReturn' },
-  purchaseReturn: { list: "Ta'minotchiga qaytarish", one: "Ta'minotchiga qaytarish", prefix: 'TQ', party: 'supplier', price: 'buy', stock: -1, money: 1, pay: 'in' },
+  purchaseOrder: { fx: true, list: "Ta'minotchiga buyurtmalar", one: "Ta'minotchiga buyurtma", prefix: 'TB', party: 'supplier', price: 'buy', stock: 0, money: 0, statuses: PO_STATUSES, pay: 'out', next: 'receipt' },
+  receipt: { fx: true, tgAsk: true, list: 'Qabul qilish', one: 'Qabul qilish', prefix: 'QQ', party: 'supplier', price: 'buy', stock: 1, money: -1, pay: 'out', next: 'purchaseReturn' },
+  purchaseReturn: { fx: true, list: "Ta'minotchiga qaytarish", one: "Ta'minotchiga qaytarish", prefix: 'TQ', party: 'supplier', price: 'buy', stock: -1, money: 1, pay: 'in' },
   order: { list: 'Mijoz buyurtmalari', one: 'Mijoz buyurtmasi', prefix: 'MB', party: 'customer', price: 'sale', stock: 0, money: 0, statuses: ORDER_STATUSES, pay: 'in', delivery: true, next: 'sale' },
   sale: { list: "Jo'natish (sotuv)", one: "Jo'natish", prefix: 'S', party: 'customer', price: 'sale', stock: -1, money: 1, statuses: DELIVERY_STATUSES, pay: 'in', delivery: true, next: 'salesReturn' },
   salesReturn: { list: 'Mijozdan qaytarish', one: 'Mijozdan qaytarish', prefix: 'MQ', party: 'customer', price: 'sale', stock: 1, money: -1, pay: 'out' },
-  enter: { list: 'Kirim qilish', one: 'Kirim qilish', prefix: 'K', price: 'buy', stock: 1, money: 0 },
+  enter: { fx: true, tgAsk: true, list: 'Kirim qilish', one: 'Kirim qilish', prefix: 'K', price: 'buy', stock: 1, money: 0 },
   writeoff: { list: 'Hisobdan chiqarish', one: 'Hisobdan chiqarish', prefix: 'HC', price: 'buy', stock: -1, money: 0 },
   move: { list: "Ko'chirish", one: "Ko'chirish", prefix: 'KO', price: 'buy', stock: 0, money: 0, move: true },
   inventory: { list: 'Inventarizatsiya', one: 'Inventarizatsiya', prefix: 'INV', price: 'buy', stock: 0, money: 0 },
@@ -52,6 +52,8 @@ const DEFAULT_CATEGORY_TYPES = {
   Matras: ['Ortopedik matras', 'Prujinali matras', 'Prujinasiz matras', 'Bolalar matrasi', 'Topper'],
 };
 
+const DEFAULT_COLORS = ['Dub beliy', 'Belaya korona', 'Oq gladkiy', 'Dub votan', 'Dub sonoma', 'Dub kraft', "Yong'oq", 'Venge', 'Kulrang', 'Antratsit', 'Qora', 'Bej', 'Kapuchino', 'Oltin'];
+
 const DEFAULT_MATERIALS = ['LDSP', 'MDF', 'DSP', 'Massiv (yog\'och)', 'Faner', 'Metall', 'Shisha', 'Oyna', 'Velyur', 'Ekokoja', 'Charm', 'Mato', 'Rattan', 'Plastik'];
 
 // ---------- Ma'lumotlar ombori ----------
@@ -66,6 +68,8 @@ function emptyDb() {
     categories: DEFAULT_CATEGORIES.slice(),
     categoryTypes: JSON.parse(JSON.stringify(DEFAULT_CATEGORY_TYPES)),
     materials: DEFAULT_MATERIALS.slice(),
+    colors: DEFAULT_COLORS.slice(),
+    currency: { rate: 0, date: '', source: '', updatedAt: '', manual: false },
     company: { name: 'KAO Mebel', phone: '', address: '' },
     telegram: { token: '', chatId: '', onReceipt: true, onNewProduct: true, showQty: true, log: [] },
     legacyUsers: {},
@@ -161,6 +165,7 @@ async function loadData() {
     await refreshServerStock();
     backend.subscribe(db, scheduleRender);
     if (isAdmin()) refreshStorageUsage();
+    refreshRate();
   } finally {
     showLoading(false);
   }
@@ -277,6 +282,63 @@ const today = () => localDate(new Date());
 const num = (v) => Number(String(v ?? '').replace(/\s/g, '').replace(',', '.')) || 0;
 const fmt = (v) => Math.round(v).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
 const money = (v) => fmt(v) + " so'm";
+// ---------- Valyuta ----------
+// Narxlar so'mda yoki dollarda kiritiladi; dollardagi narx joriy kurs bo'yicha so'mga o'girib ko'rsatiladi.
+const CUR_SIGN = { UZS: "so'm", USD: '$' };
+const usdRate = () => num(db.currency?.rate);
+const toUZS = (amount, cur, rate = usdRate()) => (cur === 'USD' ? amount * rate : amount);
+// Etiketka narxi 1 000 so'mgacha yaxlitlanadi
+const roundSom = (v) => Math.round(v / 1000) * 1000;
+const priceUZS = (p, field) => (p.priceCurrency === 'USD' ? roundSom((p[field] || 0) * usdRate()) : p[field] || 0);
+const salePriceUZS = (p) => priceUZS(p, 'salePrice');
+const minPriceUZS = (p) => priceUZS(p, 'minPrice');
+const fmtUsd = (v) => '$' + (Math.round(v * 100) / 100).toFixed(Number.isInteger(Math.round(v * 100) / 100) ? 0 : 2).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+const fmtRate = (v) => String(Math.round(v * 100) / 100).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+const fmtIn = (v, cur) => (v === '' || v == null ? '' : cur === 'USD' ? String(v).replace(/\B(?=(\d{3})+(?!\d))/g, ' ') : fmt(v));
+// Dollar narxni so'mdagi ko'rinishi; kurs noma'lum bo'lsa — faqat dollar
+const priceLabel = (p, field = 'salePrice') => (p.priceCurrency === 'USD'
+  ? (usdRate() ? money(priceUZS(p, field)) : fmtUsd(p[field] || 0))
+  : money(p[field] || 0));
+
+// Kurs manbalari: avval O'zbekiston Markaziy banki, ishlamasa — ochiq valyuta API
+async function fetchUsdRate() {
+  try {
+    const r = await fetch('https://cbu.uz/uz/arkhiv-kursov-valyut/json/USD/');
+    const x = (await r.json())[0];
+    if (num(x?.Rate) > 0) {
+      const [dd, mm, yy] = String(x.Date || '').split('.');
+      return { rate: num(x.Rate), date: yy ? `${yy}-${mm}-${dd}` : today(), source: "O'zbekiston Markaziy banki" };
+    }
+  } catch (e) { console.warn('CBU kursi:', e); }
+  try {
+    const r = await fetch('https://open.er-api.com/v6/latest/USD');
+    const j = await r.json();
+    if (num(j?.rates?.UZS) > 0) return { rate: num(j.rates.UZS), date: today(), source: 'open.er-api.com' };
+  } catch (e) { console.warn('Zaxira kurs:', e); }
+  return null;
+}
+
+let rateBusy = false;
+async function refreshRate(force = false) {
+  const c = db.currency || {};
+  if (rateBusy || (c.manual && !force)) return;
+  if (!force && c.updatedAt && Date.now() - Date.parse(c.updatedAt) < 3 * 3600e3) return;
+  rateBusy = true;
+  try {
+    const r = await fetchUsdRate();
+    if (!r) {
+      if (force) alert("Kursni olib bo'lmadi (internet yoki manba ishlamayapti). Kursni qo'lda kiritishingiz mumkin.");
+      return;
+    }
+    db.currency = Object.assign({}, r, { updatedAt: new Date().toISOString(), manual: false });
+    // Kurs umumiy sozlama — uni administrator saqlaydi, sotuvchida faqat ko'rinadi
+    if (isAdmin()) await save(); else render();
+  } finally {
+    rateBusy = false;
+  }
+}
+setInterval(() => { if (me) refreshRate(); }, 30 * 60e3);
+
 // O'zbekistonda odatiy sana ko'rinishi: 27.10.2026
 const fmtDate = (iso) => (iso ? `<span class="dt">${esc(String(iso).split('-').reverse().join('.'))}</span>` : '');
 const UZ_MONTHS = ['yanvar', 'fevral', 'mart', 'aprel', 'may', 'iyun', 'iyul', 'avgust', 'sentabr', 'oktabr', 'noyabr', 'dekabr'];
@@ -302,8 +364,13 @@ function nextNo(type) {
 function linesSum(d) {
   return d.items.reduce((s, it) => s + it.qty * it.price, 0);
 }
-function docTotal(d) {
+// Hujjat valyutasidagi summa (dollarda kiritilgan kirim uchun — dollarda)
+function docTotalCur(d) {
   return Math.max(0, linesSum(d) - (d.discount || 0));
+}
+// Hisob-kitoblar so'mda: dollardagi hujjat o'z kunidagi kurs bo'yicha o'giriladi
+function docTotal(d) {
+  return d.currency === 'USD' ? docTotalCur(d) * (d.rate || 0) : docTotalCur(d);
 }
 
 function docPaid(d) {
@@ -391,13 +458,13 @@ function computeCost() {
       if (!it.price) return;
       const a = (acc[it.productId] = acc[it.productId] || { q: 0, s: 0 });
       a.q += it.qty;
-      a.s += it.qty * it.price;
+      a.s += it.qty * (d.currency === 'USD' ? it.price * (d.rate || 0) : it.price);
     });
   });
   const cost = {};
   db.products.forEach((p) => {
     const a = acc[p.id];
-    cost[p.id] = a && a.q ? a.s / a.q : p.buyPrice || 0;
+    cost[p.id] = a && a.q ? a.s / a.q : toUZS(p.buyPrice || 0, p.priceCurrency);
   });
   return cost;
 }
@@ -495,6 +562,66 @@ function textArea(label, name, value = '', cls = 'full') {
   return `<label class="${cls}">${label}<textarea name="${name}" rows="2">${esc(value)}</textarea></label>`;
 }
 
+// Narx katagi: yozish paytida 3 xonadan probel qo'yiladi, yonida valyuta belgisi turadi
+function moneyField(label, name, value, cur = 'UZS', attrs = '', cls = '') {
+  return `<label class="${cls}">${label}<span class="money-wrap"><input name="${name}" class="money" data-cur="${cur}" inputmode="decimal" autocomplete="off" value="${esc(fmtIn(value, cur))}" ${attrs}><span class="cur">${CUR_SIGN[cur]}</span></span></label>`;
+}
+
+function formatMoneyInput(el) {
+  const dec = el.dataset.cur === 'USD';
+  const keep = dec ? /[^\d.]/g : /\D/g;
+  const caret = el.selectionStart ?? el.value.length;
+  const before = el.value.slice(0, caret).replace(',', '.').replace(keep, '').length;
+  let raw = el.value.replace(',', '.').replace(keep, '');
+  if (dec && raw.includes('.')) {
+    const [i, ...rest] = raw.split('.');
+    raw = i + '.' + rest.join('').slice(0, 2);
+  }
+  const [ip, dp] = raw.split('.');
+  const out = ip.replace(/^0+(?=\d)/, '').replace(/\B(?=(\d{3})+(?!\d))/g, ' ') + (dp !== undefined ? '.' + dp : '');
+  if (out === el.value) return;
+  el.value = out;
+  let i = 0;
+  for (let n = 0; i < out.length && n < before; i++) if (out[i] !== ' ') n++;
+  el.setSelectionRange(i, i);
+}
+
+function setMoneyCurrency(el, cur) {
+  el.dataset.cur = cur;
+  const sign = el.parentElement.querySelector('.cur');
+  if (sign) sign.textContent = CUR_SIGN[cur];
+  formatMoneyInput(el);
+}
+
+document.addEventListener('input', (e) => {
+  if (e.target.classList?.contains('money')) formatMoneyInput(e.target);
+}, true);
+
+// Majburiy savol: Telegram guruhga yuborilsinmi? Javobsiz saqlab bo'lmaydi
+function tgQuestion() {
+  return `<div class="field full tg-ask" id="tgAsk">
+    <span class="field-label">${icon('send')} Telegram guruhga yuborilsinmi? <b class="debt">*</b></span>
+    <div class="seg" role="radiogroup">
+      <label><input type="radio" name="tgPost" value="yes"><span>${icon('check')}Ha, yuborilsin</span></label>
+      <label><input type="radio" name="tgPost" value="no"><span>Yo'q, yuborilmasin</span></label>
+    </div>
+    <span class="tg-ask-hint debt small">Iltimos, tanlang: yuborilsinmi yoki yo'qmi.</span>
+  </div>`;
+}
+
+function tgAnswered(d) {
+  if (d.tgPost) return true;
+  const el = $('#tgAsk');
+  el.classList.add('invalid');
+  el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  $('input', el).focus();
+  return false;
+}
+
+document.addEventListener('change', (e) => {
+  if (e.target.name === 'tgPost') $('#tgAsk')?.classList.remove('invalid');
+});
+
 const whOptions = () => db.warehouses.map((w) => [w.id, w.name]);
 
 // ---------- Mahsulotlar ----------
@@ -516,20 +643,60 @@ function productForm(p = {}, readonly = false) {
       ${selectField('Kategoriya', 'category', cats, p.category || '', '', 'id="catSel"')}
       <label>Turi<select name="type" id="typeSel">${typeOptions(p.category, p.type)}</select>
         <input name="typeNew" id="typeNew" placeholder="Yangi tur nomi" hidden></label>
-      ${field('Rangi', 'color', p.color, 'placeholder="Oq, yong\'oq..."')}
-      <div class="field full"><span class="field-label">Materiali</span>${materialChips(p.material)}
-        <input type="hidden" name="material" value="${esc(p.material || '')}"></div>
+      <label>Ishlab chiqaruvchi / ta'minotchi<select name="makerId" id="makerSel">${makerOptions(p)}</select>
+        <input name="makerNew" id="makerNew" placeholder="Fabrika yoki ta'minotchi nomi" hidden></label>
+      <div class="field full"><span class="field-label">Rangi</span>${chipPicker('colorChips', db.colors, p.color, '+ Yangi rang')}
+        <input type="hidden" name="color" value="${esc(p.color || '')}"></div>
       ${field('Ishlab chiqarilgan joyi', 'origin', p.origin, 'placeholder="O\'zbekiston, Toshkent / Turkiya..."')}
-      ${field('Ishlab chiqaruvchi (fabrika)', 'maker', p.maker)}
       ${field("O'lchov birligi", 'unit', p.unit || 'dona')}
-      ${isAdmin() ? field('Kelish narxi', 'buyPrice', p.buyPrice ?? '', 'inputmode="numeric"') : ''}
-      ${field('Sotish narxi *', 'salePrice', p.salePrice ?? '', 'inputmode="numeric" required')}
       ${field('Minimal qoldiq', 'minQty', p.minQty ?? 1, 'type="number" min="0"')}
+      <div class="field full price-block">
+        <span class="field-label">Narxlar valyutasi</span>
+        <div class="seg seg-sm" role="radiogroup">
+          <label><input type="radio" name="priceCurrency" value="UZS" ${p.priceCurrency !== 'USD' ? 'checked' : ''}><span>So'm</span></label>
+          <label><input type="radio" name="priceCurrency" value="USD" ${p.priceCurrency === 'USD' ? 'checked' : ''}><span>Dollar ($)</span></label>
+        </div>
+        <div class="price-grid">
+          ${isAdmin() ? moneyField('Kelish narxi', 'buyPrice', p.buyPrice ?? '', p.priceCurrency || 'UZS') : ''}
+          ${moneyField('Sotish narxi (etiketka) *', 'salePrice', p.salePrice ?? '', p.priceCurrency || 'UZS', 'required')}
+          ${moneyField('Eng kam narx (savdolashish chegarasi)', 'minPrice', p.minPrice ?? '', p.priceCurrency || 'UZS')}
+        </div>
+        <div class="price-preview muted small" id="pricePreview"></div>
+      </div>
       ${p.id ? '' : field("Boshlang'ich qoldiq", 'initQty', 0, 'type="number" min="0"')}
       ${p.id ? '' : selectField('Ombor', 'initWh', whOptions(), db.warehouses[0]?.id)}
       ${textArea('Tavsif', 'note', p.note)}
+      ${!p.id && !readonly ? tgQuestion() : ''}
     </div>
   </div>`;
+}
+
+// Ishlab chiqaruvchi — ta'minotchilar ro'yxatidan (Kontragentlar) tanlanadi yoki shu yerda qo'shiladi
+function makerOptions(p) {
+  const list = db.counterparties.filter((c) => c.kind === 'supplier' || c.kind === 'both').map((c) => [c.id, c.name]);
+  const known = list.some(([id]) => id === p.supplierId);
+  if (p.maker && !known) list.push([p.supplierId || '__keep', p.maker]);
+  const cur = known ? p.supplierId : p.maker ? p.supplierId || '__keep' : '';
+  return [['', '—'], ...list, ...(isAdmin() ? [['__new', "+ Yangi ishlab chiqaruvchi..."]] : [])]
+    .map(([v, t]) => `<option value="${esc(v)}" ${v === cur ? 'selected' : ''}>${esc(t)}</option>`).join('');
+}
+
+function bindPriceBlock() {
+  const radios = $$('#modalBody [name=priceCurrency]');
+  const inputs = ['buyPrice', 'salePrice', 'minPrice'].map((n) => $(`#modalBody [name=${n}]`)).filter(Boolean);
+  const preview = () => {
+    const cur = radios.find((r) => r.checked)?.value || 'UZS';
+    const sale = num($('#modalBody [name=salePrice]').value);
+    const min = num($('#modalBody [name=minPrice]').value);
+    const box = $('#pricePreview');
+    if (cur !== 'USD') { box.textContent = ''; return; }
+    box.innerHTML = usdRate()
+      ? `Joriy kurs: 1 $ = ${fmtRate(usdRate())} so'm → etiketka: <b>${money(roundSom(sale * usdRate()))}</b>${min ? ` · eng kam: <b>${money(roundSom(min * usdRate()))}</b>` : ''}. So'mdagi narx kurs o'zgarishi bilan avtomatik yangilanadi.`
+      : "Dollar kursi hali olinmagan — Sozlamalar → Valyuta kursi.";
+  };
+  radios.forEach((r) => r.addEventListener('change', () => { inputs.forEach((i) => setMoneyCurrency(i, r.value)); preview(); }));
+  inputs.forEach((i) => i.addEventListener('input', preview));
+  preview();
 }
 
 // Kartochkadagi rasmlar: saqlanganlari ({path, thumb}) va hali yuklanmagan yangilari ({file, url})
@@ -611,21 +778,21 @@ function bindTypeField() {
   type.addEventListener('change', toggle);
 }
 
-// Materiallar — bir nechtasini belgilash mumkin, saqlanganda "LDSP, Oyna" ko'rinishida yoziladi
+// Tanlash tugmachalari (rang): bir nechtasini belgilash mumkin, "Dub beliy, Oq gladkiy" ko'rinishida saqlanadi
 const splitList = (str) => String(str || '').split(',').map((x) => x.trim()).filter(Boolean);
 
-function materialChips(value) {
+function chipPicker(id, options, value, addLabel) {
   const selected = splitList(value);
-  const all = [...db.materials, ...selected.filter((m) => !db.materials.includes(m))];
-  return `<div class="chips" id="matChips">
+  const all = [...options, ...selected.filter((m) => !options.includes(m))];
+  return `<div class="chips chips-pick" id="${id}">
     ${all.map((m) => `<button type="button" class="chip ${selected.includes(m) ? 'on' : ''}" data-act="chipToggle" data-v="${esc(m)}">${esc(m)}</button>`).join('')}
-    ${isAdmin() ? '<input class="chip-add" id="matAdd" placeholder="+ Boshqa material" enterkeyhint="done">' : ''}
+    ${isAdmin() ? `<input class="chip-add" placeholder="${addLabel}" enterkeyhint="done">` : ''}
   </div>`;
 }
 
-function syncMaterials() {
-  const hidden = $('#modalBody input[name=material]');
-  if (hidden) hidden.value = $$('#matChips .chip.on').map((c) => c.dataset.v).join(', ');
+function syncChips(box) {
+  const hidden = box?.closest('.field')?.querySelector('input[type=hidden]');
+  if (hidden) hidden.value = $$('.chip.on', box).map((c) => c.dataset.v).join(', ');
 }
 
 function bindProductForm(p, readonly = false) {
@@ -634,6 +801,12 @@ function bindProductForm(p, readonly = false) {
   if (readonly) return;
   bindSizeField();
   bindTypeField();
+  bindPriceBlock();
+  const maker = $('#makerSel');
+  maker.addEventListener('change', () => {
+    $('#makerNew').hidden = maker.value !== '__new';
+    if (maker.value === '__new') $('#makerNew').focus();
+  });
   $('#photoInput').addEventListener('change', (e) => {
     const files = Array.from(e.target.files).slice(0, MAX_PHOTOS - photoEdit.items.length);
     if (e.target.files.length > files.length) alert(`Ko'pi bilan ${MAX_PHOTOS} ta rasm.`);
@@ -686,7 +859,21 @@ function readProduct(d, p) {
     const list = (db.categoryTypes[d.category] = db.categoryTypes[d.category] || []);
     if (!list.includes(type)) list.push(type);
   }
-  splitList(d.material).forEach((m) => { if (!db.materials.includes(m)) db.materials.push(m); });
+  splitList(d.color).forEach((c) => { if (!db.colors.includes(c)) db.colors.push(c); });
+  // Ishlab chiqaruvchi: ro'yxatdan, yangi (ta'minotchi sifatida qo'shiladi) yoki eski yozuv
+  let supplierId = d.makerId;
+  let maker = '';
+  if (d.makerId === '__new' && d.makerNew.trim()) {
+    const c = { id: uid(), name: d.makerNew.trim(), kind: 'supplier', phone: '', address: '', inn: '', note: '', created: today() };
+    db.counterparties.push(c);
+    supplierId = c.id;
+    maker = c.name;
+  } else if (d.makerId === '__keep' || d.makerId === '__new') {
+    supplierId = p.supplierId || '';
+    maker = p.maker || '';
+  } else {
+    maker = party(d.makerId)?.name || '';
+  }
   return Object.assign(p, {
     name: d.name.trim(),
     code: d.code.trim(),
@@ -694,12 +881,15 @@ function readProduct(d, p) {
     type,
     size: d.size.trim(),
     color: d.color.trim(),
-    material: d.material.trim(),
     origin: d.origin.trim(),
-    maker: d.maker.trim(),
+    supplierId: supplierId || '',
+    maker,
     unit: d.unit.trim() || 'dona',
-    buyPrice: num(d.buyPrice),
+    priceCurrency: d.priceCurrency === 'USD' ? 'USD' : 'UZS',
+    // Sotuvchi kelish narxini ko'rmaydi — uning formasida bu maydon yo'q
+    buyPrice: d.buyPrice !== undefined ? num(d.buyPrice) : p.buyPrice || 0,
     salePrice: num(d.salePrice),
+    minPrice: num(d.minPrice),
     minQty: num(d.minQty),
     note: d.note.trim(),
   });
@@ -727,7 +917,7 @@ function newProduct() {
     body: productForm(),
     wide: true,
     onOpen: () => bindProductForm({}),
-    onSubmit: (d) => withPhotos(async (photos) => {
+    onSubmit: (d) => (!tgAnswered(d) ? false : withPhotos(async (photos) => {
       const p = readProduct(d, { id: uid(), created: today(), photos });
       db.products.push(p);
       const qty = num(d.initQty);
@@ -736,13 +926,13 @@ function newProduct() {
         entry = {
           id: uid(), type: 'enter', no: await nextNo('enter'), date: today(), warehouseId: d.initWh, userId: me.id,
           items: [{ productId: p.id, qty, price: p.buyPrice }], note: "Boshlang'ich qoldiq",
+          currency: p.priceCurrency, rate: p.priceCurrency === 'USD' ? usdRate() : undefined,
         };
         db.docs.push(entry);
       }
       await save();
-      if (entry) telegramOnStockIn(entry);
-      else if (db.telegram.onNewProduct) telegramPostProducts([p.id]);
-    }),
+      if (d.tgPost === 'yes') telegramPostProducts([p.id], true);
+    })),
   });
 }
 
@@ -900,14 +1090,15 @@ function partyOptions(kind) {
   return [['', '— tanlang —'], ...list.map((c) => [c.id, c.name + (c.phone ? ` (${c.phone})` : '')])];
 }
 
-function itemRowHtml(t, it = {}) {
+function itemRowHtml(t, it = {}, cur = 'UZS') {
   const opts = db.products.filter((p) => !p.archived || p.id === it.productId).map((p) =>
     `<option value="${p.id}" ${p.id === it.productId ? 'selected' : ''}>${esc(p.name)}${p.code ? ' · ' + esc(p.code) : ''}</option>`).join('');
   return `<tr>
     <td><select class="it-product"><option value="">— mahsulot —</option>${opts}</select></td>
     <td class="it-avail muted num"></td>
     <td><input class="it-qty" type="number" min="1" step="1" value="${it.qty || 1}"></td>
-    <td><input class="it-price" inputmode="numeric" value="${it.price ?? ''}"></td>
+    <td><span class="money-wrap"><input class="it-price money" data-cur="${cur}" inputmode="decimal" value="${esc(fmtIn(it.price ?? '', cur))}"><span class="cur">${CUR_SIGN[cur]}</span></span>
+      <div class="it-min muted small"></div></td>
     <td class="it-sum num"></td>
     <td><button type="button" class="small danger it-remove" title="O'chirish">×</button></td>
   </tr>`;
@@ -924,20 +1115,28 @@ function docForm(type, d) {
   head += selectField(t.move ? 'Qaysi ombordan' : 'Ombor', 'warehouseId', whOptions(), d.warehouseId || db.warehouses[0].id);
   if (t.move) head += selectField('Qaysi omborga', 'toWarehouseId', whOptions(), d.toWarehouseId || (db.warehouses[1] || db.warehouses[0]).id);
   if (t.statuses) head += selectField('Holati', 'status', Object.entries(t.statuses), d.status || Object.keys(t.statuses)[0]);
+  const cur = t.fx && d.currency === 'USD' ? 'USD' : 'UZS';
+  if (t.fx) {
+    head += `<div class="field"><span class="field-label">Valyuta</span><div class="seg seg-sm" role="radiogroup">
+        <label><input type="radio" name="currency" value="UZS" ${cur === 'UZS' ? 'checked' : ''}><span>So'm</span></label>
+        <label><input type="radio" name="currency" value="USD" ${cur === 'USD' ? 'checked' : ''}><span>Dollar ($)</span></label></div></div>
+      <label id="rateField" ${cur === 'USD' ? '' : 'hidden'}>Kurs: 1 $ =<span class="money-wrap"><input name="rate" class="money" data-cur="USD" inputmode="decimal" value="${esc(fmtIn(d.rate || usdRate() || '', 'USD'))}"><span class="cur">so'm</span></span></label>`;
+  }
   if (t.delivery) {
     head += field('Yetkazish sanasi', 'deliveryDate', d.deliveryDate, 'type="date"');
     head += field('Yetkazish manzili', 'address', d.address, '', 'wide2');
   }
 
   let foot = '';
-  if (t.money || type === 'order' || type === 'purchaseOrder') foot += field("Chegirma (so'm)", 'discount', d.discount || 0, 'inputmode="numeric"');
+  if (t.money || type === 'order' || type === 'purchaseOrder') foot += moneyField('Chegirma', 'discount', d.discount || '', cur, 'placeholder="0"');
   if (!d.id && t.pay) {
-    foot += field(t.pay === 'in' ? "Hozir to'landi (so'm)" : "Hozir to'ladik (so'm)", 'payNow', d.payNow ?? '', 'inputmode="numeric" placeholder="0"');
+    foot += moneyField(t.pay === 'in' ? "Hozir to'landi" : "Hozir to'ladik", 'payNow', d.payNow ?? '', 'UZS', 'placeholder="0"');
     foot += selectField("To'lov usuli", 'payMethod', Object.entries(PAY_METHODS), 'cash');
   }
   foot += textArea('Izoh', 'note', d.note);
+  if (!d.id && t.tgAsk) foot += tgQuestion();
 
-  const items = (d.items && d.items.length ? d.items : [{}]).map((it) => itemRowHtml(t, it)).join('');
+  const items = (d.items && d.items.length ? d.items : [{}]).map((it) => itemRowHtml(t, it, cur)).join('');
   return `<div class="form-grid">${head}</div>
     <h4>Mahsulotlar</h4>
     <div class="table-wrap"><table class="items-table">
@@ -955,24 +1154,46 @@ function bindDocForm(type, editingId) {
   const body = $('#itemRows');
   const whSel = $('#modalForm [name=warehouseId]');
   const discount = $('#modalForm [name=discount]');
+  const curRadios = $$('#modalBody [name=currency]');
+  const rateInput = $('#modalBody [name=rate]');
+  const curOf = () => curRadios.find((r) => r.checked)?.value || 'UZS';
+  const rateOf = () => num(rateInput?.value) || usdRate();
+  const round2 = (v) => Math.round(v * 100) / 100;
+
+  // Mahsulot tanlanganda narxni hujjat valyutasida qo'yamiz
+  const defaultPrice = (p) => {
+    if (t.price === 'sale') return salePriceUZS(p);
+    const cur = curOf();
+    if (cur === 'USD' && p.priceCurrency === 'USD' && p.buyPrice) return p.buyPrice;
+    const som = ctx.cost[p.id] || toUZS(p.buyPrice || 0, p.priceCurrency);
+    return cur === 'USD' ? (rateOf() ? round2(som / rateOf()) : 0) : Math.round(som);
+  };
 
   const recalc = () => {
     let sum = 0;
     $$('tr', body).forEach((tr) => {
-      const pid = $('.it-product', tr).value;
-      const line = num($('.it-qty', tr).value) * num($('.it-price', tr).value);
+      const p = product($('.it-product', tr).value);
+      const priceEl = $('.it-price', tr);
+      const line = num($('.it-qty', tr).value) * num(priceEl.value);
       sum += line;
-      $('.it-sum', tr).textContent = pid ? fmt(line) : '';
-      $('.it-avail', tr).textContent = pid ? qtyIn(stock, pid, whSel.value) : '';
+      $('.it-sum', tr).textContent = p ? fmtIn(round2(line), curOf()) : '';
+      $('.it-avail', tr).textContent = p ? qtyIn(stock, p.id, whSel.value) : '';
+      // Savdoda: sotuvchi eng kam narxni ko'radi, undan pastga tushsa ogohlantiriladi
+      const min = p && t.price === 'sale' && type !== 'salesReturn' ? minPriceUZS(p) : 0;
+      $('.it-min', tr).textContent = min ? `eng kami: ${fmt(min)}` : '';
+      priceEl.classList.toggle('below-min', !!min && num(priceEl.value) < min);
     });
-    $('#docTotal').textContent = money(Math.max(0, sum - num(discount?.value)));
+    const total = Math.max(0, sum - num(discount?.value));
+    $('#docTotal').innerHTML = curOf() === 'USD'
+      ? `${fmtUsd(total)} <span class="muted">≈ ${money(total * rateOf())}</span>`
+      : money(total);
   };
 
   body.addEventListener('change', (e) => {
     if (e.target.classList.contains('it-product')) {
       const p = product(e.target.value);
       const price = $('.it-price', e.target.closest('tr'));
-      if (p) price.value = t.price === 'sale' ? p.salePrice : (ctx.cost[p.id] ? Math.round(ctx.cost[p.id]) : p.buyPrice);
+      if (p) { price.value = defaultPrice(p); formatMoneyInput(price); }
     }
     recalc();
   });
@@ -983,7 +1204,20 @@ function bindDocForm(type, editingId) {
     else $('.it-product', e.target.closest('tr')).value = '';
     recalc();
   });
-  $('#addItemRow').addEventListener('click', () => body.insertAdjacentHTML('beforeend', itemRowHtml(t)));
+  $('#addItemRow').addEventListener('click', () => body.insertAdjacentHTML('beforeend', itemRowHtml(t, {}, curOf())));
+  // Valyuta almashtirilsa — narxlar joriy kurs bo'yicha qayta hisoblanadi
+  curRadios.forEach((r) => r.addEventListener('change', () => {
+    const cur = curOf();
+    const rate = rateOf();
+    $('#rateField').hidden = cur !== 'USD';
+    [...$$('.it-price', body), discount].filter(Boolean).forEach((el) => {
+      const v = num(el.value);
+      if (v && rate) el.value = cur === 'USD' ? round2(v / rate) : Math.round(v * rate);
+      setMoneyCurrency(el, cur);
+    });
+    recalc();
+  }));
+  rateInput?.addEventListener('input', recalc);
   whSel.addEventListener('change', recalc);
   if (discount) discount.addEventListener('input', recalc);
   recalc();
@@ -1044,6 +1278,26 @@ async function saveDoc(type, existing, preset, data, stock) {
     alert('Kamida bitta mahsulot tanlang.');
     return false;
   }
+  const currency = t.fx && data.currency === 'USD' ? 'USD' : 'UZS';
+  if (currency === 'USD' && !(num(data.rate) > 0)) {
+    alert('Dollar kursini kiriting.');
+    return false;
+  }
+  if (!existing && t.tgAsk && !tgAnswered(data)) return false;
+
+  // Eng kam narxdan arzon sotish: sotuvchiga ruxsat yo'q, administrator tasdiqlaydi
+  if (t.price === 'sale' && type !== 'salesReturn') {
+    const low = items.map((it) => ({ it, p: product(it.productId) }))
+      .filter(({ it, p }) => p && minPriceUZS(p) && it.price < minPriceUZS(p))
+      .map(({ it, p }) => `${p.name}: ${fmt(it.price)} < eng kami ${fmt(minPriceUZS(p))} so'm`);
+    if (low.length) {
+      if (!isAdmin()) {
+        alert("Narx eng kam narxdan past:\n" + low.join('\n') + "\n\nNarxni oshiring yoki administratorga murojaat qiling.");
+        return false;
+      }
+      if (!confirm("Narx eng kam narxdan past:\n" + low.join('\n') + "\n\nBaribir saqlansinmi?")) return false;
+    }
+  }
   if (t.move && data.warehouseId === data.toWarehouseId) {
     alert('Omborlar har xil bo\'lishi kerak.');
     return false;
@@ -1084,6 +1338,8 @@ async function saveDoc(type, existing, preset, data, stock) {
     discount: num(data.discount),
     note: data.note.trim(),
     items,
+    currency: t.fx ? currency : undefined,
+    rate: currency === 'USD' ? num(data.rate) : undefined,
   });
 
   if (!existing) {
@@ -1101,7 +1357,7 @@ async function saveDoc(type, existing, preset, data, stock) {
     if (base?.type === 'purchaseOrder') base.status = 'received';
   }
   save();
-  if (!existing && (type === 'receipt' || type === 'enter')) telegramOnStockIn(d);
+  if (!existing && t.tgAsk && data.tgPost === 'yes') telegramOnStockIn(d);
 }
 
 function createFrom(id) {
@@ -1114,6 +1370,8 @@ function createFrom(id) {
     address: base.address,
     deliveryDate: base.deliveryDate,
     discount: base.discount,
+    currency: base.currency,
+    rate: base.rate,
     items: base.items.map((it) => ({ ...it })),
     baseId: base.id,
     orderId: base.type === 'order' ? base.id : undefined,
@@ -1141,7 +1399,7 @@ function printDoc(id) {
   const c = party(d.counterpartyId) || {};
   const rows = d.items.map((it, i) => {
     const p = product(it.productId) || {};
-    return `<tr><td>${i + 1}</td><td>${esc(p.name)}${p.code ? ' (' + esc(p.code) + ')' : ''}<br><small>${esc([p.size, p.color, p.material].filter(Boolean).join(', '))}</small></td><td>${it.qty} ${esc(p.unit || '')}</td><td>${fmt(it.price)}</td><td>${fmt(it.qty * it.price)}</td></tr>`;
+    return `<tr><td>${i + 1}</td><td>${esc(p.name)}${p.code ? ' (' + esc(p.code) + ')' : ''}<br><small>${esc([p.size, p.color].filter(Boolean).join(', '))}</small></td><td>${it.qty} ${esc(p.unit || '')}</td><td>${fmtIn(it.price, d.currency)}</td><td>${fmtIn(Math.round(it.qty * it.price * 100) / 100, d.currency)}</td></tr>`;
   }).join('');
   const paid = t.pay ? docPaid(d) : 0;
   const w = window.open('', '_blank');
@@ -1158,7 +1416,7 @@ function printDoc(id) {
     <div>Ombor: ${esc(warehouse(d.warehouseId)?.name)}${t.move ? ' → ' + esc(warehouse(d.toWarehouseId)?.name) : ''}</div>
     ${d.address ? `<div>Yetkazish: ${esc(d.address)} ${esc(d.deliveryDate || '')}</div>` : ''}
     <table><tr><th>№</th><th>Mahsulot</th><th>Soni</th><th>Narxi</th><th>Summa</th></tr>${rows}</table>
-    <div class="r">${d.discount ? `Chegirma: ${fmt(d.discount)}<br>` : ''}<b>Jami: ${money(docTotal(d))}</b>
+    <div class="r">${d.discount ? `Chegirma: ${fmtIn(d.discount, d.currency)}<br>` : ''}${d.currency === 'USD' ? `Jami: ${fmtUsd(docTotalCur(d))} (kurs ${fmtRate(d.rate)})<br>` : ''}<b>Jami: ${money(docTotal(d))}</b>
     ${t.pay ? `<br>To'langan: ${money(paid)}<br>Qoldiq: ${money(Math.max(0, docTotal(d) - paid))}` : ''}</div>
     ${d.note ? `<p>${esc(d.note)}</p>` : ''}
     <p style="margin-top:48px">Topshirdi: ______________ &nbsp;&nbsp;&nbsp; Qabul qildi: ______________</p>
@@ -1285,10 +1543,9 @@ function telegramCaption(p) {
   const lines = [`🛋 <b>${esc(p.name)}</b>`];
   if (p.type) lines.push(`🪑 Turi: ${esc(p.type)}`);
   if (p.code) lines.push(`🔖 Kod: ${esc(p.code)}`);
-  lines.push(`💰 Narxi: <b>${money(p.salePrice)}</b>`);
+  lines.push(`💰 Narxi: <b>${priceLabel(p)}</b>`);
   if (p.size) lines.push(`📐 O'lchami: ${esc(p.size)} sm`);
   if (p.color) lines.push(`🎨 Rangi: ${esc(p.color)}`);
-  if (p.material) lines.push(`🪵 Materiali: ${esc(p.material)}`);
   if (p.origin || p.maker) lines.push(`🏭 Ishlab chiqarilgan: ${esc([p.origin, p.maker].filter(Boolean).join(', '))}`);
   lines.push(`📦 ${stockLine(p)}`);
   if (p.note) lines.push('', esc(p.note));
@@ -1379,7 +1636,7 @@ async function telegramPostProducts(ids, manual = false) {
 }
 
 function telegramOnStockIn(d) {
-  if (db.telegram.onReceipt) telegramPostProducts(d.items.map((it) => it.productId));
+  telegramPostProducts(d.items.map((it) => it.productId), true);
 }
 
 // ---------- Ko'rinishlar (sahifalar) ----------
@@ -1393,7 +1650,7 @@ const SECTIONS = [
   { id: 'parties', icon: 'users', title: 'Kontragentlar', views: [['parties', 'Kontragentlar'], ['debts', 'Qarzlar', 'A']] },
   { id: 'money', icon: 'wallet', title: 'Pul', views: [['payments', "To'lovlar"], ['cash', 'Kassa va hisoblar', 'A']] },
   { id: 'reports', icon: 'chart', title: 'Hisobotlar', admin: true, views: [['profit', 'Foyda va zarar'], ['top', 'Savdo tahlili']] },
-  { id: 'settings', icon: 'settings', title: 'Sozlamalar', admin: true, views: [['users', 'Foydalanuvchilar'], ['server', 'Server'], ['telegram', 'Telegram'], ['company', 'Kompaniya'], ['warehouses', 'Omborlar'], ['categories', 'Kategoriya va materiallar'], ['backup', 'Zaxira nusxa']] },
+  { id: 'settings', icon: 'settings', title: 'Sozlamalar', admin: true, views: [['users', 'Foydalanuvchilar'], ['currency', 'Valyuta kursi'], ['server', 'Server'], ['telegram', 'Telegram'], ['company', 'Kompaniya'], ['warehouses', 'Omborlar'], ['categories', 'Kategoriya va ranglar'], ['backup', 'Zaxira nusxa']] },
 ];
 
 function viewTitle(v) {
@@ -1548,7 +1805,7 @@ function viewDocs(type) {
     return `<tr class="click" data-act="openDoc" data-id="${d.id}">
       <td>${esc(d.no)}</td><td>${fmtDate(d.date)}${d.userId ? `<div class="muted small">${esc(userName(d.userId))}</div>` : ''}</td><td>${where}</td>
       <td class="items-cell">${d.items.slice(0, 3).map((it) => `${esc(product(it.productId)?.name)} × ${it.qty}`).join('<br>')}${d.items.length > 3 ? `<br><span class="muted">yana ${d.items.length - 3} ta</span>` : ''}</td>
-      <td class="num">${type === 'inventory' ? '' : money(docTotal(d))}</td>
+      <td class="num">${type === 'inventory' ? '' : money(docTotal(d))}${d.currency === 'USD' ? `<div class="muted small">${fmtUsd(docTotalCur(d))} · ${fmtRate(d.rate)}</div>` : ''}</td>
       ${t.pay ? `<td class="num">${paid >= docTotal(d) && paid > 0 ? badge("To'langan", 'done') : paid > 0 ? fmt(paid) : badge("To'lanmagan", 'cancel')}</td>` : ''}
       ${t.statuses ? `<td>${badge(t.statuses[d.status] || '', d.status)}</td>` : ''}
     </tr>`;
@@ -1593,11 +1850,11 @@ function viewProducts() {
     return `<tr>
       <td class="thumb">${p.photos?.length ? `<img data-photo="${esc(p.photos[0].thumb)}" alt="" loading="lazy">` : ''}${p.photos?.length > 1 ? `<span class="ph-count">${p.photos.length}</span>` : ''}</td>
       <td class="click" data-act="editProduct" data-id="${p.id}"><b>${esc(p.name)}</b><div class="muted small">${esc([p.code, p.category, p.type].filter(Boolean).join(' · '))}</div></td>
-      <td>${esc(p.size)}</td>
-      <td>${esc([p.color, p.material].filter(Boolean).join(', '))}</td>
-      <td>${esc(p.origin)}</td>
+      <td class="dt">${esc(p.size)}</td>
+      <td>${esc(p.color)}</td>
+      <td>${esc([p.origin, p.maker].filter(Boolean).join(', '))}</td>
       ${admin ? `<td class="num">${money(ctx.cost[p.id])}</td>` : ''}
-      <td class="num">${money(p.salePrice)}</td>
+      <td class="num">${priceLabel(p)}${p.priceCurrency === 'USD' ? `<div class="muted small">${fmtUsd(p.salePrice)}</div>` : ''}${p.minPrice ? `<div class="muted small">eng kami: ${priceLabel(p, 'minPrice')}</div>` : ''}</td>
       <td class="num ${st - rs <= (p.minQty || 0) ? 'debt' : ''}">${st}${rs ? `<div class="muted small">rezerv ${rs}</div>` : ''}</td>
       <td class="actions">${admin ? `
         <button class="small icon-only" data-act="tgProduct" data-id="${p.id}" title="Telegram guruhga yuborish">${icon('send')}</button>
@@ -1611,14 +1868,15 @@ function viewProducts() {
       ${cat ? `<select data-filter="products.type"><option value="">Barcha turlar</option>${(db.categoryTypes[cat] || []).map((t) => `<option ${t === ptype ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select>` : ''}
       <select data-filter="products.arch"><option value="">Faol</option><option value="1" ${arch ? 'selected' : ''}>Arxiv</option></select>`,
     buttons: admin ? `<button class="primary" data-act="newProduct">${icon('plus')}Mahsulot</button><button data-act="exportProducts">${icon('download')}CSV</button>` : '',
-  }) + `<div class="card"><div class="table-wrap"><table><thead><tr><th></th><th>Nomi</th><th>O'lchami</th><th>Rangi / materiali</th><th>Ishlab chiqarilgan</th>
+  }) + `<div class="card"><div class="table-wrap"><table><thead><tr><th></th><th>Nomi</th><th>O'lchami</th><th>Rangi</th><th>Ishlab chiqarilgan</th>
     ${admin ? '<th class="num">Tannarx</th>' : ''}<th class="num">Sotish narxi</th><th class="num">Qoldiq</th><th></th></tr></thead>
     <tbody>${rows || emptyRow(9, "Mahsulot yo'q")}</tbody></table></div></div>`;
 }
 
 function exportProducts() {
-  const rows = [['Kod', 'Nomi', 'Kategoriya', 'Turi', "O'lchami", 'Rangi', 'Materiali', 'Ishlab chiqarilgan', 'Ishlab chiqaruvchi', 'Tannarx', 'Sotish narxi', 'Qoldiq', 'Rezerv']];
-  db.products.forEach((p) => rows.push([p.code, p.name, p.category, p.type, p.size, p.color, p.material, p.origin, p.maker, Math.round(ctx.cost[p.id]), p.salePrice, qtyIn(ctx.stock, p.id), qtyIn(ctx.reserve, p.id)]));
+  const rows = [['Kod', 'Nomi', 'Kategoriya', 'Turi', "O'lchami", 'Rangi', 'Ishlab chiqarilgan', 'Ishlab chiqaruvchi', "Tannarx (so'm)", 'Narx valyutasi', 'Sotish narxi', 'Eng kam narx', "Sotish narxi (so'm)", "Eng kam narx (so'm)", 'Qoldiq', 'Rezerv']];
+  db.products.forEach((p) => rows.push([p.code, p.name, p.category, p.type, p.size, p.color, p.origin, p.maker, Math.round(ctx.cost[p.id]),
+    p.priceCurrency === 'USD' ? 'USD' : "so'm", p.salePrice, p.minPrice || '', salePriceUZS(p), minPriceUZS(p) || '', qtyIn(ctx.stock, p.id), qtyIn(ctx.reserve, p.id)]));
   download(`mahsulotlar-${today()}.csv`, toCsv(rows), 'text/csv;charset=utf-8');
 }
 
@@ -1638,10 +1896,11 @@ function viewStock() {
     .filter((r) => !onlyPos || r.st > 0)
     .map(({ p, st, rs }) => {
       const cost = ctx.cost[p.id];
-      tq += st; tc += st * cost; ts += st * p.salePrice;
+      const sale = salePriceUZS(p);
+      tq += st; tc += st * cost; ts += st * sale;
       return `<tr class="click" data-act="productHistory" data-id="${p.id}"><td>${esc(p.code)}</td><td>${esc(p.name)}</td><td>${esc(p.category)}</td>
         <td class="num ${st - rs <= (p.minQty || 0) ? 'debt' : ''}">${st}</td><td class="num">${rs || ''}</td><td class="num">${st - rs}</td>
-        ${admin ? `<td class="num">${fmt(cost)}</td><td class="num">${fmt(st * cost)}</td>` : ''}<td class="num">${fmt(p.salePrice)}</td><td class="num">${fmt(st * p.salePrice)}</td></tr>`;
+        ${admin ? `<td class="num">${fmt(cost)}</td><td class="num">${fmt(st * cost)}</td>` : ''}<td class="num">${fmt(sale)}</td><td class="num">${fmt(st * sale)}</td></tr>`;
     }).join('');
   return toolbar('stock', {
     extra: `<select data-filter="stock.wh"><option value="">Barcha omborlar</option>${db.warehouses.map((w) => `<option value="${w.id}" ${w.id === wh ? 'selected' : ''}>${esc(w.name)}</option>`).join('')}</select>
@@ -1813,6 +2072,28 @@ function viewTop() {
 
 // --- Sozlamalar ---
 
+function viewCurrency() {
+  const c = db.currency || {};
+  const usdProducts = db.products.filter((p) => p.priceCurrency === 'USD' && !p.archived);
+  return `<div class="card narrow"><h3>${icon('cash')}Dollar kursi</h3>
+      <div class="rate-big">1 $ = <b>${usdRate() ? fmtRate(usdRate()) : '—'}</b> so'm</div>
+      <p class="muted">${c.manual ? "Kurs qo'lda belgilangan." : c.source ? `Manba: ${esc(c.source)}${c.date ? `, ${fmtDate(c.date)} kursi` : ''}.` : "Kurs hali olinmagan."}
+        ${c.updatedAt ? `Yangilangan: ${esc(new Date(c.updatedAt).toLocaleString('ru-RU'))}.` : ''}</p>
+      <p class="muted small">Dastur kursni har 3 soatda O'zbekiston Markaziy bankidan (ishlamasa — zaxira manbadan) o'zi oladi. Dollardagi mahsulotlarning so'mdagi etiketka va eng kam narxi shu kurs bo'yicha avtomatik hisoblanadi va 1 000 so'mgacha yaxlitlanadi.</p>
+      <div class="toolbar"><button class="primary" data-act="rateRefresh">${icon('download')}Hozir yangilash</button></div>
+    </div>
+    <div class="card narrow"><h3>${icon('edit')}Kursni qo'lda belgilash</h3>
+      <p class="muted">Masalan, bozor kursi bilan ishlasangiz. Qo'lda belgilangan kurs avtomatik yangilanmaydi, toki "Avtomatikka qaytarish" bosilmaguncha.</p>
+      <div class="form-grid"><label>1 $ = (so'm)<span class="money-wrap"><input id="rateManual" class="money" data-cur="USD" inputmode="decimal" value="${esc(fmtIn(usdRate() || '', 'USD'))}"><span class="cur">so'm</span></span></label></div>
+      <div class="toolbar" style="margin-top:12px"><button data-act="rateManual">${icon('check')}Qo'lda belgilash</button>${c.manual ? `<button data-act="rateAuto">Avtomatikka qaytarish</button>` : ''}</div>
+    </div>
+    <div class="card narrow"><h3>${icon('tag')}Dollardagi mahsulotlar — ${usdProducts.length} ta</h3>
+      <div class="table-wrap"><table><thead><tr><th>Mahsulot</th><th class="num">Narx ($)</th><th class="num">Etiketka (so'm)</th><th class="num">Eng kami (so'm)</th></tr></thead><tbody>
+      ${usdProducts.map((p) => `<tr><td>${esc(p.name)}</td><td class="num">${fmtUsd(p.salePrice)}</td><td class="num">${fmt(salePriceUZS(p))}</td><td class="num">${p.minPrice ? fmt(minPriceUZS(p)) : '—'}</td></tr>`).join('') || emptyRow(4, "Dollarda narxlangan mahsulot yo'q")}
+      </tbody></table></div>
+    </div>`;
+}
+
 function viewUsers() {
   return `<div class="card narrow"><h3>Foydalanuvchilar</h3>
     <p class="muted"><b>Administrator</b> — hamma bo'limlar. <b>Sotuvchi</b> — faqat savdo (buyurtma, jo'natish, qaytarish), mijozlar, kirim to'lovlari va qoldiqlarni ko'rish; tannarx, foyda, xaridlar va sozlamalar unga ko'rinmaydi, o'zgalar hujjatlarini o'zgartira olmaydi va hech narsani o'chira olmaydi.</p>
@@ -1873,8 +2154,8 @@ function viewTelegram() {
   const tg = db.telegram;
   const sample = db.products.find((p) => p.photos?.length) || db.products[0];
   return `<div class="card narrow">
-    <h3>Telegram guruhga avtomatik e'lon</h3>
-    <p class="muted">Omborga mahsulot kelganda (Qabul qilish yoki Kirim qilish hujjati, yoki boshlang'ich qoldiq bilan yangi mahsulot) uning rasmi va ma'lumotlari guruhga yuboriladi.</p>
+    <h3>Telegram guruhga e'lon</h3>
+    <p class="muted">Yangi mahsulot qo'shishda va omborga kirim (Qabul qilish, Kirim qilish) qilishda dastur har safar "Telegram guruhga yuborilsinmi?" deb so'raydi — "Ha" yoki "Yo'q" tanlamaguncha saqlamaydi. "Ha" tanlansa, mahsulot rasmi va ma'lumotlari guruhga yuboriladi.</p>
     <ol class="muted small">
       <li>Telegramda <b>@BotFather</b> ga yozing → <code>/newbot</code> → bot nomini kiriting → u bergan <b>token</b> ni pastga joylang.</li>
       <li>Botni guruhingizga qo'shing va uni <b>administrator</b> qiling (xabar yuborish huquqi bilan).</li>
@@ -1883,8 +2164,6 @@ function viewTelegram() {
     <div class="form-grid">
       <label class="full">Bot tokeni<input id="tgToken" value="${esc(tg.token)}" placeholder="123456789:AA..." autocomplete="off"></label>
       <label class="full">Guruh / kanal ID<input id="tgChat" value="${esc(tg.chatId)}" placeholder="-1001234567890 yoki @guruh_nomi"></label>
-      <label class="check full"><input type="checkbox" id="tgOnReceipt" ${tg.onReceipt ? 'checked' : ''}> Omborga qabul qilinganda yuborish</label>
-      <label class="check full"><input type="checkbox" id="tgOnNew" ${tg.onNewProduct ? 'checked' : ''}> Yangi mahsulot (qoldiqsiz) yaratilganda ham yuborish</label>
       <label class="check full"><input type="checkbox" id="tgShowQty" ${tg.showQty ? 'checked' : ''}> Ombordagi sonini ko'rsatish (aks holda faqat "bor / yo'q")</label>
     </div>
     <div class="toolbar" style="margin-top:12px">
@@ -1905,8 +2184,6 @@ function tgReadForm() {
   Object.assign(db.telegram, {
     token: $('#tgToken').value.trim(),
     chatId: $('#tgChat').value.trim(),
-    onReceipt: $('#tgOnReceipt').checked,
-    onNewProduct: $('#tgOnNew').checked,
     showQty: $('#tgShowQty').checked,
   });
 }
@@ -2013,9 +2290,9 @@ function viewCategories() {
       <div id="catRows">${db.categories.map((c) => catRow(c, db.categoryTypes[c] || [])).join('')}</div>
       <button type="button" data-act="catAdd">${icon('plus')}Kategoriya qo'shish</button>
     </div>
-    <div class="card narrow"><h3>${icon('box')}Materiallar</h3>
-      <p class="muted">Mahsulot kartochkasida tanlanadigan materiallar ro'yxati.</p>
-      <div id="matEditor">${chipEditor(db.materials, "+ Material qo'shish (Enter)")}</div>
+    <div class="card narrow"><h3>${icon('tag')}Ranglar</h3>
+      <p class="muted">Mahsulot kartochkasida tanlanadigan ranglar (masalan, Dub beliy, Belaya korona, Oq gladkiy).</p>
+      <div id="colorEditor">${chipEditor(db.colors, "+ Rang qo'shish (Enter)")}</div>
     </div>
     <div class="toolbar"><button class="primary" data-act="catSave">${icon('check')}Saqlash</button></div>`;
 }
@@ -2196,18 +2473,19 @@ async function loadDemo() {
     ps.push(p);
   }
   ['Yotoqxona to\'plami', 'Burchak divan', 'Stol-stul to\'plami', 'Shkaf-kupe', 'Ortopedik matras'].forEach((t, i) => { ps[i].type = t; });
-  ps[0].material = 'MDF, LDSP';
-  ps[1].material = 'Velyur, Massiv (yog\'och)';
-  ps[2].material = 'Massiv (yog\'och)';
-  ps[3].material = 'LDSP, Oyna';
-  ps[4].material = 'Mato';
+  // Kurs hali olinmagan bo'lsa (internet yo'q) — namuna uchun taxminiy kurs
+  if (!usdRate()) db.currency = { rate: 12800, date: today(), source: 'Namuna kurs', updatedAt: '', manual: false };
+  ['Dub beliy, Oltin', 'Kulrang', "Yong'oq", 'Dub sonoma', 'Oq gladkiy'].forEach((c, i) => { ps[i].color = c; });
+  // Turkiyadan keladigan to'plam dollarda narxlanadi
+  Object.assign(ps[0], { priceCurrency: 'USD', buyPrice: 1400, salePrice: 1950, minPrice: 1800 });
+  [8500000, 5800000, 5100000, 2450000].forEach((m, i) => { ps[i + 1].minPrice = m; });
   const d0 = new Date();
   const ago = (n) => localDate(new Date(d0 - n * 864e5));
   const wh = db.warehouses[0].id;
   const base = { created: new Date().toISOString(), userId: me.id, warehouseId: wh, note: '', discount: 0 };
-  const rec = { ...base, id: uid(), type: 'receipt', no: await nextNo('receipt'), date: ago(10), counterpartyId: sup.id, items: ps.map((p, i) => ({ productId: p.id, qty: [2, 3, 2, 4, 6][i], price: p.buyPrice })) };
+  const rec = { ...base, id: uid(), type: 'receipt', no: await nextNo('receipt'), date: ago(10), counterpartyId: sup.id, items: ps.map((p, i) => ({ productId: p.id, qty: [2, 3, 2, 4, 6][i], price: toUZS(p.buyPrice, p.priceCurrency) })) };
   const sale = { ...base, id: uid(), type: 'sale', no: await nextNo('sale'), date: ago(2), counterpartyId: cus.id, status: 'pending', deliveryDate: ago(-1), address: cus.address, discount: 200000, items: [{ productId: ps[1].id, qty: 1, price: ps[1].salePrice }, { productId: ps[4].id, qty: 2, price: ps[4].salePrice }] };
-  const order = { ...base, id: uid(), type: 'order', no: await nextNo('order'), date: ago(1), counterpartyId: cus.id, status: 'confirmed', deliveryDate: ago(-5), address: cus.address, items: [{ productId: ps[0].id, qty: 1, price: ps[0].salePrice }] };
+  const order = { ...base, id: uid(), type: 'order', no: await nextNo('order'), date: ago(1), counterpartyId: cus.id, status: 'confirmed', deliveryDate: ago(-5), address: cus.address, items: [{ productId: ps[0].id, qty: 1, price: salePriceUZS(ps[0]) }] };
   db.docs.push(rec, sale, order);
   const pay = async (dir, date, amount, method, purpose, counterpartyId, docId, note = '') => ({
     id: uid(), no: await nextNo(dir === 'in' ? 'payIn' : 'payOut'), dir, date, amount, method, purpose, counterpartyId, docId, note, userId: me.id,
@@ -2228,7 +2506,7 @@ const VIEWS = {
   dashboard: viewDashboard, products: viewProducts, stock: viewStock, parties: viewParties, debts: viewDebts,
   payments: viewPayments, cash: viewCash, profit: viewProfit, top: viewTop, users: viewUsers,
   telegram: viewTelegram, company: viewCompany, warehouses: viewWarehouses, categories: viewCategories, backup: viewBackup,
-  server: viewServer,
+  server: viewServer, currency: viewCurrency,
 };
 
 function render() {
@@ -2248,6 +2526,7 @@ function render() {
   me = Object.assign(me, db.users.find((u) => u.id === me.id));
   $('#authForm').innerHTML = '';
   $('#userName').innerHTML = `<b>${esc(me.name)}</b><span>${ROLES[me.role]}</span>`;
+  $('#rateBox').innerHTML = usdRate() ? `${icon('cash')}<span>1 $ = <b>${fmtRate(usdRate())}</b> so'm</span>` : '';
   $('#syncBanner').hidden = !syncState.offline;
   refreshCtx();
   const { section, view } = currentRoute();
@@ -2348,7 +2627,7 @@ const ACTIONS = {
     renames.forEach(([from, to]) => db.products.forEach((p) => { if (p.category === from) p.category = to; }));
     db.categories = categories;
     db.categoryTypes = types;
-    db.materials = $$('#matEditor .chip').map((c) => c.dataset.v);
+    db.colors = $$('#colorEditor .chip').map((c) => c.dataset.v);
     save();
     alert('Saqlandi.');
   },
@@ -2361,7 +2640,7 @@ const ACTIONS = {
     save();
   },
   editUser: (ds) => editUser(ds.id),
-  chipToggle: (ds, el) => { el.classList.toggle('on'); syncMaterials(); },
+  chipToggle: (ds, el) => { el.classList.toggle('on'); syncChips(el.closest('.chips')); },
   chipRemove: (ds, el) => el.closest('.chip').remove(),
   catAdd: () => {
     $('#catRows').insertAdjacentHTML('beforeend', catRow('', []));
@@ -2374,6 +2653,17 @@ const ACTIONS = {
     row.remove();
   },
   serverSettings: () => openServerSettings(),
+  rateRefresh: () => refreshRate(true),
+  rateManual: () => {
+    const v = num($('#rateManual').value);
+    if (!(v > 0)) return alert('Kursni kiriting.');
+    db.currency = { rate: v, date: today(), source: "Qo'lda", updatedAt: new Date().toISOString(), manual: true };
+    save();
+  },
+  rateAuto: () => {
+    db.currency = Object.assign({}, db.currency, { manual: false, updatedAt: '' });
+    refreshRate(true);
+  },
   refreshUsage: () => refreshStorageUsage(),
   migrateLocal: () => migrateLocal(),
 };
@@ -2381,7 +2671,7 @@ const ACTIONS = {
 // Sotuvchi tugmani ko'rmasa ham, bu amallarni bajara olmasligi kerak
 const ADMIN_ACTIONS = ['newProduct', 'deleteProduct', 'unarchive', 'exportProducts', 'tgProduct', 'deleteParty', 'deletePayment',
   'tgSave', 'tgDetect', 'tgTest', 'tgAll', 'coSave', 'editWh', 'deleteWh', 'catSave', 'catAdd', 'catDel', 'chipRemove', 'backup', 'demo', 'reset', 'editUser', 'exportDocs',
-  'serverSettings', 'refreshUsage', 'migrateLocal'];
+  'serverSettings', 'refreshUsage', 'migrateLocal', 'rateRefresh', 'rateManual', 'rateAuto'];
 
 document.addEventListener('click', (e) => {
   const el = e.target.closest('[data-act]');
@@ -2402,13 +2692,13 @@ document.addEventListener('keydown', (e) => {
   const exists = $$('[data-v]', box).find((c) => c.dataset.v.toLowerCase() === v.toLowerCase());
   if (exists) {
     exists.classList.add('on');
-  } else if (box.id === 'matChips') {
+  } else if (box.classList.contains('chips-pick')) {
     input.insertAdjacentHTML('beforebegin', `<button type="button" class="chip on" data-act="chipToggle" data-v="${esc(v)}">${esc(v)}</button>`);
   } else {
     input.insertAdjacentHTML('beforebegin', editChip(v));
   }
   input.value = '';
-  syncMaterials();
+  syncChips(box);
 });
 
 $('#authForm').addEventListener('submit', onAuthSubmit);

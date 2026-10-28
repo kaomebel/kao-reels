@@ -550,3 +550,75 @@ button.chip.on::before { content: "✓"; font-size: 12px; }
 .cat-row:last-child { border-bottom: none; margin-bottom: 12px; }
 .cat-head { display: flex; gap: 8px; align-items: center; }
 .cat-name { font-weight: 600; }
+
+/* ---- Narx kataklari: valyuta belgisi doim ko'rinib turadi ---- */
+.money-wrap { position: relative; display: flex; align-items: center; }
+.money-wrap input { padding-right: 46px; text-align: right; font-variant-numeric: tabular-nums; }
+.money-wrap .cur { position: absolute; right: 10px; color: var(--muted); font-size: 13px; pointer-events: none; }
+.items-table .money-wrap { width: 160px; }
+.items-table .money-wrap input { width: 100%; }
+input.below-min { border-color: var(--danger); background: var(--danger-soft); }
+.it-min { margin-top: 2px; text-align: right; }
+
+/* ---- Tanlov tugmalari (Ha/Yo'q, So'm/$) ---- */
+.seg { display: inline-flex; flex-wrap: wrap; gap: 6px; }
+.seg label { cursor: pointer; }
+.seg input { position: absolute; opacity: 0; width: 1px; height: 1px; pointer-events: none; }
+.seg span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 9px 16px;
+  border: 1.5px solid var(--border-strong);
+  border-radius: 10px;
+  background: var(--card);
+  color: var(--text);
+  font-weight: 600;
+}
+.seg span .ic { width: 16px; height: 16px; }
+.seg label:hover span { border-color: var(--accent); }
+.seg input:focus-visible + span { outline: 3px solid var(--focus); }
+.seg input:checked + span { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.seg-sm span { padding: 6px 12px; font-weight: 500; font-size: 14px; }
+
+.tg-ask { padding: 12px 14px; border: 1.5px dashed var(--border-strong); border-radius: 12px; background: var(--card-2); }
+.tg-ask .field-label { display: flex; align-items: center; gap: 6px; color: var(--text); font-size: 14px; font-weight: 600; }
+.tg-ask .tg-ask-hint { display: none; }
+.tg-ask.invalid { border-color: var(--danger); background: var(--danger-soft); }
+.tg-ask.invalid .tg-ask-hint { display: block; }
+
+.price-block { padding: 12px 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--card-2); }
+.price-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; }
+.price-grid label { display: flex; flex-direction: column; gap: 5px; font-size: 13px; color: var(--muted); }
+.price-preview:empty { display: none; }
+
+/* ---- Dollar kursi ---- */
+.rate-box {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: auto;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: rgba(240, 201, 154, .1);
+  color: var(--side-text);
+  font-size: 13px;
+  text-decoration: none;
+}
+.rate-box b { color: #fff6ea; }
+.rate-box .ic { color: var(--side-active); }
+.rate-box:empty { display: none; }
+.rate-box:not(:empty) + .side-foot { margin-top: 8px; }
+.rate-big { font-size: 28px; margin: 4px 0 8px; font-variant-numeric: tabular-nums; }
+
+@media (max-width: 900px) {
+  .sidebar { grid-template-columns: 1fr auto auto; }
+  .rate-box { grid-row: 1; grid-column: 2; margin: 0 6px 0 0; padding: 6px 10px; font-size: 12px; }
+  .side-foot { grid-column: 3; }
+}
+@media (max-width: 420px) {
+  .rate-box .ic { display: none; }
+}
+@media (max-width: 900px) {
+  .rate-box:not(:empty) + .side-foot { margin-top: 0; }
+}
