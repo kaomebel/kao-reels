@@ -4,4 +4,6 @@
 window.BT_CONFIG = {
   supabaseUrl: '',
   supabaseAnonKey: '',
+  // Dastur joylangan sayt — "Telefonga o'rnatish" sahifasidagi QR-kod shu manzilni ochadi
+  siteUrl: 'https://kaomebel.github.io/kao-reels/',
 };

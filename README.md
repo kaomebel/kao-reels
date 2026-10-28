@@ -101,3 +101,4 @@ Supabase rejimida token serverda saqlanadi va faqat administratorga ko'rinadi.
 - `android/`, `capacitor.config.json` — Android ilovasi (Capacitor)
 - `scripts/build-web.js` — ilovalar uchun veb-fayllarni `www/` ga yig'adi
 - `.github/workflows/apps.yml` — ilovalarni avtomatik yig'ish
+- `.github/workflows/pages.yml` — saytni https://kaomebel.github.io/kao-reels/ ga joylash (gh-pages branch)

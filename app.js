@@ -1761,6 +1761,7 @@ const SECTIONS = [
   { id: 'parties', icon: 'users', title: 'Kontragentlar', views: [['parties', 'Kontragentlar'], ['debts', 'Qarzlar', 'A']] },
   { id: 'money', icon: 'wallet', title: 'Pul', views: [['payments', "To'lovlar"], ['cash', 'Kassa va hisoblar', 'A']] },
   { id: 'reports', icon: 'chart', title: 'Hisobotlar', admin: true, views: [['profit', 'Foyda va zarar'], ['top', 'Savdo tahlili']] },
+  { id: 'install', icon: 'phone', title: "Telefonga o'rnatish", hideInNav: true },
   { id: 'settings', icon: 'settings', title: 'Sozlamalar', admin: true, views: [['users', 'Foydalanuvchilar'], ['currency', 'Valyuta kursi'], ['server', 'Server'], ['telegram', 'Telegram'], ['company', 'Kompaniya'], ['warehouses', 'Omborlar'], ['categories', 'Kategoriya va ranglar'], ['backup', 'Zaxira nusxa']] },
 ];
 
@@ -2188,6 +2189,59 @@ function viewTop() {
 }
 
 // --- Sozlamalar ---
+
+// ---------- Telefonga o'rnatish ----------
+
+const isIOS = () => /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const isStandalone = () => window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+const hostedUrl = () => (location.protocol === 'https:' && !/claude\.ai|claudeusercontent/.test(location.host) ? location.origin + location.pathname : '');
+const siteUrl = () => hostedUrl() || window.BT_CONFIG?.siteUrl || '';
+
+// Android Chrome "o'rnatish" oynasini keyinroq tugma bilan chaqirish uchun saqlab qo'yamiz
+let installPrompt = null;
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  installPrompt = e;
+  if (currentRoute().view === 'install') render();
+});
+
+function qrSvg(text) {
+  if (!window.qrcode || !text) return '';
+  const qr = window.qrcode(0, 'M');
+  qr.addData(text);
+  qr.make();
+  return qr.createSvgTag({ cellSize: 6, margin: 3, scalable: true });
+}
+
+function viewInstall() {
+  const url = siteUrl();
+  const step = (ic, html) => `<li><span class="step-ic">${icon(ic)}</span><span>${html}</span></li>`;
+  return `<div class="install-grid">
+    <div class="card install-qr">
+      <h3>${icon('phone')}Telefon kamerasi bilan skanerlang</h3>
+      ${url ? `<div class="qr">${qrSvg(url)}</div><div class="install-url"><code>${esc(url)}</code></div>`
+        : '<p class="muted">Dastur hali internet saytga joylanmagan.</p>'}
+      ${isStandalone() ? `<p class="ok">${icon('check')} Dastur shu qurilmada ilova sifatida ochilgan.</p>` : ''}
+    </div>
+    <div class="card">
+      <h3>${icon('share')}iPhone / iPad</h3>
+      <ol class="install-steps">
+        ${step('camera', 'Kamerani QR-kodga qarating va chiqqan havolani bosing — sayt <b>Safari</b>da ochiladi.')}
+        ${step('share', "Pastdagi <b>Ulashish</b> tugmasini bosing (strelkali kvadrat).")}
+        ${step('homeAdd', "Ro'yxatni pastga suring va <b>«Bosh ekranga qo'shish»</b> (Add to Home Screen) ni tanlang.")}
+        ${step('check', "<b>Qo'shish</b> ni bosing — bosh ekranda divan belgili <b>Biznes Tizim</b> paydo bo'ladi.")}
+      </ol>
+      <p class="muted small">Faqat Safari orqali o'rnatiladi (iPhone'dagi Chrome buni qila olmaydi).</p>
+    </div>
+    <div class="card">
+      <h3>${icon('download')}Android</h3>
+      ${installPrompt ? `<button class="primary" data-act="installApp">${icon('download')}Hozir o'rnatish</button>` : `<ol class="install-steps">
+        ${step('camera', 'QR-kodni skanerlang — sayt <b>Chrome</b>da ochiladi.')}
+        ${step('more', "Yuqoridagi <b>⋮</b> menyu → <b>«Ilovani o'rnatish»</b> (yoki «Bosh ekranga qo'shish»).")}
+      </ol>`}
+    </div>
+  </div>`;
+}
 
 function viewCurrency() {
   const c = db.currency || {};
@@ -2623,10 +2677,14 @@ const VIEWS = {
   dashboard: viewDashboard, products: viewProducts, stock: viewStock, parties: viewParties, debts: viewDebts,
   payments: viewPayments, cash: viewCash, profit: viewProfit, top: viewTop, users: viewUsers,
   telegram: viewTelegram, company: viewCompany, warehouses: viewWarehouses, categories: viewCategories, backup: viewBackup,
-  server: viewServer, currency: viewCurrency,
+  server: viewServer, currency: viewCurrency, install: viewInstall,
 };
 
 function render() {
+  // iPhone Safari'da (hali o'rnatilmagan bo'lsa) — qanday o'rnatishni ko'rsatamiz
+  let hintOff = false;
+  try { hintOff = localStorage.getItem('biznes-tizim-ios-hint') === '1'; } catch (e) { /* xotira yopiq */ }
+  $('#iosHint').hidden = !(isIOS() && !isStandalone() && hostedUrl() && !hintOff);
   // Hisob bloklangan yoki o'chirilgan bo'lsa (boshqa qurilmadan) — tizimdan chiqaramiz
   if (me && db.users.length && !db.users.some((u) => u.id === me.id && u.active !== false)) {
     me = null;
@@ -2647,7 +2705,7 @@ function render() {
   $('#syncBanner').hidden = !syncState.offline;
   refreshCtx();
   const { section, view } = currentRoute();
-  $('#sections').innerHTML = visibleSections().map((s) => `<a href="#${s.id}" class="${s === section ? 'active' : ''}">${icon(s.icon)}<span>${s.title}</span></a>`).join('');
+  $('#sections').innerHTML = visibleSections().filter((s) => !s.hideInNav).map((s) => `<a href="#${s.id}" class="${s === section ? 'active' : ''}">${icon(s.icon)}<span>${s.title}</span></a>`).join('');
   const sub = section.views && visibleViews(section).find((v) => v[0] === view);
   $('#pageHead').innerHTML = `<h1>${icon(section.icon)}${esc(sub && section.id !== 'dashboard' ? viewTitle(sub) : section.title)}</h1>
     ${section.id === 'dashboard' ? `<span class="date">${longDate(new Date())}</span>` : ''}`;
@@ -2781,6 +2839,17 @@ const ACTIONS = {
   },
   serverSettings: () => openServerSettings(),
   rateRefresh: () => refreshRate(true),
+  installApp: async () => {
+    if (!installPrompt) return;
+    installPrompt.prompt();
+    await installPrompt.userChoice.catch(() => {});
+    installPrompt = null;
+    render();
+  },
+  dismissIosHint: () => {
+    try { localStorage.setItem('biznes-tizim-ios-hint', '1'); } catch (e) { /* xotira yopiq */ }
+    $('#iosHint').hidden = true;
+  },
   rateManual: () => {
     const v = num($('#rateManual').value);
     if (!(v > 0)) return alert('Kursni kiriting.');
@@ -2831,6 +2900,8 @@ document.addEventListener('keydown', (e) => {
 $('#authForm').addEventListener('submit', onAuthSubmit);
 $('#logoutBtn').addEventListener('click', logout);
 $('#logoutBtn').innerHTML = icon('logout');
+$('#installBtn').innerHTML = icon('phone');
+$('#iosShareIc').innerHTML = icon('share');
 $('#brandMark').innerHTML = icon('sofa');
 $('#authLogo').innerHTML = icon('sofa');
 

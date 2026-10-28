@@ -651,3 +651,38 @@ td.click { min-width: 200px; }
 .party-hint .ok { display: inline-flex; align-items: center; gap: 6px; }
 .party-pick { cursor: pointer; }
 input.phone { font-variant-numeric: tabular-nums; letter-spacing: .3px; }
+
+/* ---- Telefonga o'rnatish ---- */
+.side-foot a.side-btn { text-decoration: none; }
+.install-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; align-items: start; }
+.install-grid > * { min-width: 0; }
+.install-qr { text-align: center; }
+.install-qr h3 { justify-content: flex-start; text-align: left; }
+.qr { width: min(260px, 100%); margin: 8px auto 12px; padding: 10px; background: #fff; border-radius: 14px; border: 1px solid var(--border); }
+.qr svg { display: block; width: 100%; height: auto; }
+.qr svg rect[fill="#ffffff"], .qr svg rect[fill="white"] { fill: #fff; }
+.install-url code { font-size: 13px; word-break: break-all; }
+.install-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px; counter-reset: st; }
+.install-steps li { display: grid; grid-template-columns: 36px 1fr; gap: 10px; align-items: start; }
+.step-ic { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 10px; background: var(--accent-soft); color: var(--accent); }
+.step-ic .ic { width: 19px; height: 19px; }
+
+.ios-hint {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px max(16px, env(safe-area-inset-right, 0px)) calc(12px + env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px));
+  background: var(--side);
+  color: var(--side-text);
+  font-size: 14px;
+  box-shadow: 0 -6px 20px rgba(0, 0, 0, .2);
+}
+.ios-hint b { color: #fff6ea; }
+.ios-share { display: inline-grid; place-items: center; vertical-align: -4px; color: var(--side-active); }
+.ios-hint button { background: transparent; color: var(--side-text); border-color: rgba(255, 255, 255, .25); }

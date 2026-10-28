@@ -33,6 +33,7 @@
       <a href="#settings/currency" class="rate-box" id="rateBox" title="Dollar kursi"></a>
       <div class="side-foot">
         <a href="#" id="userName" class="side-user" title="Profil va parol"></a>
+        <a href="#install" class="side-btn" id="installBtn" title="Telefonga o'rnatish"></a>
         <button type="button" id="themeBtn" class="side-btn" title="Mavzuni almashtirish"></button>
         <button type="button" id="logoutBtn" class="side-btn" title="Chiqish"></button>
       </div>
@@ -43,6 +44,11 @@
       <nav id="subnav" class="subnav"></nav>
       <main id="view"></main>
     </div>
+  </div>
+
+  <div id="iosHint" class="ios-hint" hidden>
+    <div><b>Ilova qilib o'rnating:</b> pastdagi <span class="ios-share" id="iosShareIc"></span> <b>Ulashish</b> → <b>«Bosh ekranga qo'shish»</b></div>
+    <button type="button" class="small" data-act="dismissIosHint">Yopish</button>
   </div>
 
   <div id="loading" class="loading" hidden><div class="spinner"></div><div id="loadingText">Yuklanmoqda...</div></div>
@@ -63,6 +69,7 @@
 
   <script src="config.js"></script>
   <script src="vendor/supabase.js"></script>
+  <script src="vendor/qrcode.js"></script>
   <script src="icons.js"></script>
   <script src="backend.js"></script>
   <script src="app.js"></script>
