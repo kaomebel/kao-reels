@@ -1850,8 +1850,8 @@ function viewProducts() {
     return `<tr>
       ${thumbCell(p)}
       <td class="click" data-act="editProduct" data-id="${p.id}"><b>${esc(p.name)}</b><div class="muted small">${esc([p.code, p.category, p.type].filter(Boolean).join(' · '))}</div>
-        ${p.size || p.color ? `<div class="prod-meta">${p.size ? `<span class="dt">${esc(p.size)} sm</span>` : ''}${p.color ? `<span>${esc(p.color)}</span>` : ''}</div>` : ''}</td>
-      <td>${esc([p.origin, p.maker].filter(Boolean).join(', '))}</td>
+        ${p.size || p.color ? `<div class="prod-meta">${p.size ? `<span class="dt">${esc(p.size)} sm</span>` : ''}${p.color ? `<span>${esc(p.color)}</span>` : ''}</div>` : ''}
+        ${p.origin || p.maker ? `<div class="muted small prod-origin">${icon('warehouse')}${esc([p.maker, p.origin].filter(Boolean).join(', '))}</div>` : ''}</td>
       ${admin ? `<td class="num">${money(ctx.cost[p.id])}</td>` : ''}
       <td class="num">${priceLabel(p)}${p.priceCurrency === 'USD' ? `<div class="muted small">${fmtUsd(p.salePrice)}</div>` : ''}${p.minPrice ? `<div class="muted small">eng kami: ${priceLabel(p, 'minPrice')}</div>` : ''}</td>
       <td class="num ${st - rs <= (p.minQty || 0) ? 'debt' : ''}">${st}${rs ? `<div class="muted small">rezerv ${rs}</div>` : ''}</td>
@@ -1867,9 +1867,9 @@ function viewProducts() {
       ${cat ? `<select data-filter="products.type"><option value="">Barcha turlar</option>${(db.categoryTypes[cat] || []).map((t) => `<option ${t === ptype ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select>` : ''}
       <select data-filter="products.arch"><option value="">Faol</option><option value="1" ${arch ? 'selected' : ''}>Arxiv</option></select>`,
     buttons: admin ? `<button class="primary" data-act="newProduct">${icon('plus')}Mahsulot</button><button data-act="exportProducts">${icon('download')}CSV</button>` : '',
-  }) + `<div class="card"><div class="table-wrap"><table><thead><tr><th></th><th>Nomi</th><th>Ishlab chiqarilgan</th>
+  }) + `<div class="card"><div class="table-wrap"><table><thead><tr><th></th><th>Mahsulot</th>
     ${admin ? '<th class="num">Tannarx</th>' : ''}<th class="num">Sotish narxi</th><th class="num">Qoldiq</th><th></th></tr></thead>
-    <tbody>${rows || emptyRow(7, "Mahsulot yo'q")}</tbody></table></div></div>`;
+    <tbody>${rows || emptyRow(6, "Mahsulot yo'q")}</tbody></table></div></div>`;
 }
 
 // Ro'yxatlardagi mahsulot rasmi: bosilsa barcha rasmlari katta ochiladi

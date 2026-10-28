@@ -288,8 +288,9 @@ tr.empty td { color: var(--muted); text-align: center; padding: 24px; }
 tr.click, td.click { cursor: pointer; }
 tr.click:hover td, tr:hover td.click { background: var(--card-2); }
 .items-cell { font-size: 13px; }
-td.thumb { position: relative; width: 112px; padding: 8px; }
-td.thumb img, .thumb-empty { width: 96px; height: 96px; object-fit: cover; border-radius: 10px; display: block; background: var(--card-2); }
+/* Rasm ustuni qat'iy: jadval tor bo'lsa ham rasm siqilib kichraymaydi */
+td.thumb { position: relative; width: 112px; min-width: 112px; padding: 8px; }
+td.thumb img, .thumb-empty { width: 96px; min-width: 96px; max-width: none; height: 96px; object-fit: cover; border-radius: 10px; display: block; background: var(--card-2); }
 .thumb-btn { position: relative; display: block; padding: 0; border: 1px solid var(--border); border-radius: 11px; background: none; overflow: hidden; cursor: zoom-in; }
 .thumb-btn:hover { border-color: var(--accent); }
 .thumb-btn img { transition: transform .2s; }
@@ -300,8 +301,8 @@ td.thumb img, .thumb-empty { width: 96px; height: 96px; object-fit: cover; borde
 .gallery img { width: 100%; max-width: 100%; aspect-ratio: 4 / 3; object-fit: contain; border-radius: 12px; background: var(--card-2); border: 1px solid var(--border); }
 .gallery img:first-child { grid-column: 1 / -1; aspect-ratio: 16 / 10; }
 @media (max-width: 700px) {
-  td.thumb { width: 84px; padding: 6px; }
-  td.thumb img, .thumb-empty { width: 72px; height: 72px; }
+  td.thumb { width: 84px; min-width: 84px; padding: 6px; }
+  td.thumb img, .thumb-empty { width: 72px; min-width: 72px; height: 72px; }
 }
 @media (prefers-reduced-motion: reduce) { .thumb-btn img { transition: none; } }
 
@@ -640,3 +641,6 @@ input.below-min { border-color: var(--danger); background: var(--danger-soft); }
 .prod-meta { display: flex; flex-wrap: wrap; gap: 4px 6px; margin-top: 6px; }
 .prod-meta span { padding: 1px 8px; border-radius: 6px; background: var(--card-2); color: var(--text); font-size: 12px; }
 td.click b { font-size: 15px; }
+td.click { min-width: 200px; }
+.prod-origin { display: flex; align-items: center; gap: 5px; margin-top: 6px; }
+.prod-origin .ic { width: 14px; height: 14px; }
