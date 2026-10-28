@@ -1848,9 +1848,7 @@ function viewProducts() {
     const st = qtyIn(ctx.stock, p.id);
     const rs = qtyIn(ctx.reserve, p.id);
     return `<tr>
-      <td class="thumb">${p.photos?.length
-        ? `<button type="button" class="thumb-btn" data-act="photoView" data-id="${p.id}" title="Rasmlarni kattalashtirish"><img data-photo="${esc(p.photos[0].thumb)}" alt="${esc(p.name)}" loading="lazy">${p.photos.length > 1 ? `<span class="ph-count">${p.photos.length}</span>` : ''}</button>`
-        : `<span class="thumb-empty">${icon('camera')}</span>`}</td>
+      ${thumbCell(p)}
       <td class="click" data-act="editProduct" data-id="${p.id}"><b>${esc(p.name)}</b><div class="muted small">${esc([p.code, p.category, p.type].filter(Boolean).join(' · '))}</div>
         ${p.size || p.color ? `<div class="prod-meta">${p.size ? `<span class="dt">${esc(p.size)} sm</span>` : ''}${p.color ? `<span>${esc(p.color)}</span>` : ''}</div>` : ''}</td>
       <td>${esc([p.origin, p.maker].filter(Boolean).join(', '))}</td>
@@ -1872,6 +1870,13 @@ function viewProducts() {
   }) + `<div class="card"><div class="table-wrap"><table><thead><tr><th></th><th>Nomi</th><th>Ishlab chiqarilgan</th>
     ${admin ? '<th class="num">Tannarx</th>' : ''}<th class="num">Sotish narxi</th><th class="num">Qoldiq</th><th></th></tr></thead>
     <tbody>${rows || emptyRow(7, "Mahsulot yo'q")}</tbody></table></div></div>`;
+}
+
+// Ro'yxatlardagi mahsulot rasmi: bosilsa barcha rasmlari katta ochiladi
+function thumbCell(p) {
+  return `<td class="thumb">${p.photos?.length
+    ? `<button type="button" class="thumb-btn" data-act="photoView" data-id="${p.id}" title="Rasmlarni kattalashtirish"><img data-photo="${esc(p.photos[0].thumb)}" alt="${esc(p.name)}" loading="lazy">${p.photos.length > 1 ? `<span class="ph-count">${p.photos.length}</span>` : ''}</button>`
+    : `<span class="thumb-empty">${icon('camera')}</span>`}</td>`;
 }
 
 function exportProducts() {
@@ -1899,7 +1904,7 @@ function viewStock() {
       const cost = ctx.cost[p.id];
       const sale = salePriceUZS(p);
       tq += st; tc += st * cost; ts += st * sale;
-      return `<tr class="click" data-act="productHistory" data-id="${p.id}"><td>${esc(p.code)}</td><td>${esc(p.name)}</td><td>${esc(p.category)}</td>
+      return `<tr class="click" data-act="productHistory" data-id="${p.id}">${thumbCell(p)}<td><b>${esc(p.name)}</b><div class="muted small">${esc([p.code, p.category, p.type].filter(Boolean).join(' · '))}</div></td>
         <td class="num ${st - rs <= (p.minQty || 0) ? 'debt' : ''}">${st}</td><td class="num">${rs || ''}</td><td class="num">${st - rs}</td>
         ${admin ? `<td class="num">${fmt(cost)}</td><td class="num">${fmt(st * cost)}</td>` : ''}<td class="num">${fmt(sale)}</td><td class="num">${fmt(st * sale)}</td></tr>`;
     }).join('');
@@ -1908,10 +1913,10 @@ function viewStock() {
       <select data-filter="stock.cat"><option value="">Barcha kategoriyalar</option>${db.categories.map((c) => `<option ${c === cat ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select>
       <select data-filter="stock.pos"><option value="">Hammasi</option><option value="1" ${onlyPos ? 'selected' : ''}>Faqat bor</option></select>`,
     buttons: `<button data-act="print">${icon('print')}Chop etish</button>`,
-  }) + `<div class="card"><div class="table-wrap"><table><thead><tr><th>Kod</th><th>Nomi</th><th>Kategoriya</th><th class="num">Qoldiq</th><th class="num">Rezerv</th><th class="num">Mavjud</th>
+  }) + `<div class="card"><div class="table-wrap"><table><thead><tr><th></th><th>Nomi</th><th class="num">Qoldiq</th><th class="num">Rezerv</th><th class="num">Mavjud</th>
     ${admin ? '<th class="num">Tannarx</th><th class="num">Tannarx summa</th>' : ''}<th class="num">Sotish narxi</th><th class="num">Sotish summa</th></tr></thead>
-    <tbody>${rows || emptyRow(10, "Ma'lumot yo'q")}</tbody>
-    <tfoot><tr><td colspan="3">Jami</td><td class="num">${tq}</td><td colspan="2"></td>${admin ? `<td></td><td class="num">${fmt(tc)}</td>` : ''}<td></td><td class="num">${fmt(ts)}</td></tr></tfoot></table></div></div>`;
+    <tbody>${rows || emptyRow(9, "Ma'lumot yo'q")}</tbody>
+    <tfoot><tr><td colspan="2">Jami</td><td class="num">${tq}</td><td colspan="2"></td>${admin ? `<td></td><td class="num">${fmt(tc)}</td>` : ''}<td></td><td class="num">${fmt(ts)}</td></tr></tfoot></table></div></div>`;
 }
 
 // --- Kontragentlar ---
