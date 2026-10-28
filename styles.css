@@ -288,8 +288,22 @@ tr.empty td { color: var(--muted); text-align: center; padding: 24px; }
 tr.click, td.click { cursor: pointer; }
 tr.click:hover td, tr:hover td.click { background: var(--card-2); }
 .items-cell { font-size: 13px; }
-td.thumb { position: relative; width: 60px; padding: 6px; }
-td.thumb img { width: 48px; height: 48px; object-fit: cover; border-radius: 8px; display: block; background: var(--card-2); }
+td.thumb { position: relative; width: 112px; padding: 8px; }
+td.thumb img, .thumb-empty { width: 96px; height: 96px; object-fit: cover; border-radius: 10px; display: block; background: var(--card-2); }
+.thumb-btn { position: relative; display: block; padding: 0; border: 1px solid var(--border); border-radius: 11px; background: none; overflow: hidden; cursor: zoom-in; }
+.thumb-btn:hover { border-color: var(--accent); }
+.thumb-btn img { transition: transform .2s; }
+.thumb-btn:hover img { transform: scale(1.05); }
+.thumb-empty { display: grid; place-items: center; border: 1px dashed var(--border-strong); color: var(--border-strong); }
+.thumb-empty .ic { width: 26px; height: 26px; }
+.gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; margin-bottom: 12px; }
+.gallery img { width: 100%; max-width: 100%; aspect-ratio: 4 / 3; object-fit: contain; border-radius: 12px; background: var(--card-2); border: 1px solid var(--border); }
+.gallery img:first-child { grid-column: 1 / -1; aspect-ratio: 16 / 10; }
+@media (max-width: 700px) {
+  td.thumb { width: 84px; padding: 6px; }
+  td.thumb img, .thumb-empty { width: 72px; height: 72px; }
+}
+@media (prefers-reduced-motion: reduce) { .thumb-btn img { transition: none; } }
 
 .bar { height: 10px; border-radius: 5px; background: linear-gradient(90deg, var(--accent), var(--accent-dark)); }
 
@@ -458,7 +472,7 @@ dialog h3 { margin: 0; padding: 18px 22px; border-bottom: 1px solid var(--border
 .photo-list .ph-del { position: absolute; right: 6px; top: 6px; width: 26px; height: 26px; padding: 0; border-radius: 50%; background: var(--card); color: var(--danger); }
 .photo-empty { grid-column: 1 / -1; aspect-ratio: 1; max-width: 100%; display: flex; flex-direction: column; gap: 6px; align-items: center; justify-content: center; border: 1.5px dashed var(--border-strong); border-radius: 10px; color: var(--muted); }
 .photo-empty .ic { width: 32px; height: 32px; }
-.ph-count { position: absolute; right: 4px; bottom: 4px; background: rgba(58, 41, 29, .85); color: #fff6ea; font-size: 10px; padding: 0 5px; border-radius: 5px; }
+.ph-count { position: absolute; right: 6px; bottom: 6px; background: rgba(58, 41, 29, .85); color: #fff6ea; font-size: 10px; padding: 0 5px; border-radius: 5px; }
 
 /* ---- Telefon va planshet ---- */
 @media (max-width: 900px) {
@@ -622,3 +636,7 @@ input.below-min { border-color: var(--danger); background: var(--danger-soft); }
 @media (max-width: 900px) {
   .rate-box:not(:empty) + .side-foot { margin-top: 0; }
 }
+
+.prod-meta { display: flex; flex-wrap: wrap; gap: 4px 6px; margin-top: 6px; }
+.prod-meta span { padding: 1px 8px; border-radius: 6px; background: var(--card-2); color: var(--text); font-size: 12px; }
+td.click b { font-size: 15px; }

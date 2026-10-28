@@ -1848,10 +1848,11 @@ function viewProducts() {
     const st = qtyIn(ctx.stock, p.id);
     const rs = qtyIn(ctx.reserve, p.id);
     return `<tr>
-      <td class="thumb">${p.photos?.length ? `<img data-photo="${esc(p.photos[0].thumb)}" alt="" loading="lazy">` : ''}${p.photos?.length > 1 ? `<span class="ph-count">${p.photos.length}</span>` : ''}</td>
-      <td class="click" data-act="editProduct" data-id="${p.id}"><b>${esc(p.name)}</b><div class="muted small">${esc([p.code, p.category, p.type].filter(Boolean).join(' · '))}</div></td>
-      <td class="dt">${esc(p.size)}</td>
-      <td>${esc(p.color)}</td>
+      <td class="thumb">${p.photos?.length
+        ? `<button type="button" class="thumb-btn" data-act="photoView" data-id="${p.id}" title="Rasmlarni kattalashtirish"><img data-photo="${esc(p.photos[0].thumb)}" alt="${esc(p.name)}" loading="lazy">${p.photos.length > 1 ? `<span class="ph-count">${p.photos.length}</span>` : ''}</button>`
+        : `<span class="thumb-empty">${icon('camera')}</span>`}</td>
+      <td class="click" data-act="editProduct" data-id="${p.id}"><b>${esc(p.name)}</b><div class="muted small">${esc([p.code, p.category, p.type].filter(Boolean).join(' · '))}</div>
+        ${p.size || p.color ? `<div class="prod-meta">${p.size ? `<span class="dt">${esc(p.size)} sm</span>` : ''}${p.color ? `<span>${esc(p.color)}</span>` : ''}</div>` : ''}</td>
       <td>${esc([p.origin, p.maker].filter(Boolean).join(', '))}</td>
       ${admin ? `<td class="num">${money(ctx.cost[p.id])}</td>` : ''}
       <td class="num">${priceLabel(p)}${p.priceCurrency === 'USD' ? `<div class="muted small">${fmtUsd(p.salePrice)}</div>` : ''}${p.minPrice ? `<div class="muted small">eng kami: ${priceLabel(p, 'minPrice')}</div>` : ''}</td>
@@ -1868,9 +1869,9 @@ function viewProducts() {
       ${cat ? `<select data-filter="products.type"><option value="">Barcha turlar</option>${(db.categoryTypes[cat] || []).map((t) => `<option ${t === ptype ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select>` : ''}
       <select data-filter="products.arch"><option value="">Faol</option><option value="1" ${arch ? 'selected' : ''}>Arxiv</option></select>`,
     buttons: admin ? `<button class="primary" data-act="newProduct">${icon('plus')}Mahsulot</button><button data-act="exportProducts">${icon('download')}CSV</button>` : '',
-  }) + `<div class="card"><div class="table-wrap"><table><thead><tr><th></th><th>Nomi</th><th>O'lchami</th><th>Rangi</th><th>Ishlab chiqarilgan</th>
+  }) + `<div class="card"><div class="table-wrap"><table><thead><tr><th></th><th>Nomi</th><th>Ishlab chiqarilgan</th>
     ${admin ? '<th class="num">Tannarx</th>' : ''}<th class="num">Sotish narxi</th><th class="num">Qoldiq</th><th></th></tr></thead>
-    <tbody>${rows || emptyRow(9, "Mahsulot yo'q")}</tbody></table></div></div>`;
+    <tbody>${rows || emptyRow(7, "Mahsulot yo'q")}</tbody></table></div></div>`;
 }
 
 function exportProducts() {
@@ -2640,6 +2641,16 @@ const ACTIONS = {
     save();
   },
   editUser: (ds) => editUser(ds.id),
+  photoView: (ds) => {
+    const p = product(ds.id);
+    openModal({
+      title: p.name,
+      wide: true,
+      body: `<div class="gallery">${p.photos.map((ph) => `<img data-photo="${esc(ph.path)}" alt="${esc(p.name)}">`).join('')}</div>
+        <p class="muted">${esc([p.size && p.size + ' sm', p.color, priceLabel(p)].filter(Boolean).join(' · '))}</p>`,
+      extra: isAdmin() ? [{ label: 'Kartochkani ochish', onClick: () => editProduct(p.id) }] : [],
+    });
+  },
   chipToggle: (ds, el) => { el.classList.toggle('on'); syncChips(el.closest('.chips')); },
   chipRemove: (ds, el) => el.closest('.chip').remove(),
   catAdd: () => {
