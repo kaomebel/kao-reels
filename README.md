@@ -8,7 +8,7 @@ Mebel do'koni uchun ombor, savdo va pul hisobi dasturi (MoySklad uslubida), o'zb
 |---|---|
 | **Ko'rsatkichlar** | Bugungi va oylik savdo, foyda, pul qoldig'i, qarzlar, yaqin yetkazishlar, kam qolgan tovarlar |
 | **Xaridlar** | Ta'minotchiga buyurtma → Qabul qilish → Ta'minotchiga qaytarish |
-| **Savdo** | Mijoz buyurtmasi (rezerv bilan) → Jo'natish (sotuv) → Mijozdan qaytarish; yetkazish sanasi va manzili, chek chop etish |
+| **Savdo** | Mijoz buyurtmasi (rezerv bilan) → Sotuv → Mijozdan qaytarish; mijozni telefon raqami bo'yicha avtomatik topish; yetkazish sanasi va manzili, chek chop etish |
 | **Tovarlar** | Mahsulot kartochkasi (5 tagacha rasm, o'lcham, rang, material, ishlab chiqarilgan joyi), omborlar bo'yicha qoldiqlar, kirim qilish, hisobdan chiqarish, ko'chirish, inventarizatsiya |
 | **Kontragentlar** | Mijozlar va ta'minotchilar, o'zaro hisob-kitob (akt sverka), qarzlar |
 | **Pul** | Kirim/chiqim to'lovlari (naqd, karta, hisob raqam), xarajat moddalari, kassa qoldig'i |

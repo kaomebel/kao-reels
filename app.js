@@ -3,13 +3,13 @@
 /*
  * Biznes Tizim — mebel do'koni uchun ombor va savdo hisobi.
  * Hisob hujjatlarga asoslangan: tovar qoldig'i va kontragent qarzlari
- * saqlanmaydi, balki hujjatlar (qabul qilish, jo'natish, qaytarish...)
+ * saqlanmaydi, balki hujjatlar (qabul qilish, sotuv, qaytarish...)
  * va to'lovlardan har safar hisoblab chiqiladi.
  */
 
 // ---------- Ma'lumotnomalar ----------
 
-const ORDER_STATUSES = { new: 'Yangi', confirmed: 'Tasdiqlandi', making: 'Tayyorlanmoqda', shipped: "Jo'natildi", cancel: 'Bekor qilindi' };
+const ORDER_STATUSES = { new: 'Yangi', confirmed: 'Tasdiqlandi', making: 'Tayyorlanmoqda', shipped: 'Sotildi', cancel: 'Bekor qilindi' };
 const PO_STATUSES = { new: 'Yangi', sent: 'Yuborildi', received: 'Qabul qilindi', cancel: 'Bekor qilindi' };
 const DELIVERY_STATUSES = { pending: 'Yetkazilishi kerak', onway: "Yo'lda", delivered: 'Yetkazildi' };
 
@@ -20,7 +20,7 @@ const DOC_TYPES = {
   receipt: { fx: true, tgAsk: true, list: 'Qabul qilish', one: 'Qabul qilish', prefix: 'QQ', party: 'supplier', price: 'buy', stock: 1, money: -1, pay: 'out', next: 'purchaseReturn' },
   purchaseReturn: { fx: true, list: "Ta'minotchiga qaytarish", one: "Ta'minotchiga qaytarish", prefix: 'TQ', party: 'supplier', price: 'buy', stock: -1, money: 1, pay: 'in' },
   order: { list: 'Mijoz buyurtmalari', one: 'Mijoz buyurtmasi', prefix: 'MB', party: 'customer', price: 'sale', stock: 0, money: 0, statuses: ORDER_STATUSES, pay: 'in', delivery: true, next: 'sale' },
-  sale: { list: "Jo'natish (sotuv)", one: "Jo'natish", prefix: 'S', party: 'customer', price: 'sale', stock: -1, money: 1, statuses: DELIVERY_STATUSES, pay: 'in', delivery: true, next: 'salesReturn' },
+  sale: { list: 'Sotuv', one: 'Sotuv', add: 'Sotish', prefix: 'S', party: 'customer', price: 'sale', stock: -1, money: 1, statuses: DELIVERY_STATUSES, pay: 'in', delivery: true, next: 'salesReturn' },
   salesReturn: { list: 'Mijozdan qaytarish', one: 'Mijozdan qaytarish', prefix: 'MQ', party: 'customer', price: 'sale', stock: 1, money: -1, pay: 'out' },
   enter: { fx: true, tgAsk: true, list: 'Kirim qilish', one: 'Kirim qilish', prefix: 'K', price: 'buy', stock: 1, money: 0 },
   writeoff: { list: 'Hisobdan chiqarish', one: 'Hisobdan chiqarish', prefix: 'HC', price: 'buy', stock: -1, money: 0 },
@@ -374,7 +374,7 @@ function docTotal(d) {
 }
 
 function docPaid(d) {
-  // Buyurtma bo'yicha oldindan to'lov uning asosidagi jo'natishga ham tegishli
+  // Buyurtma bo'yicha oldindan to'lov uning asosidagi sotuvga ham tegishli
   const ids = new Set([d.id]);
   if (d.orderId) ids.add(d.orderId);
   db.docs.forEach((x) => { if (x.orderId === d.id) ids.add(x.id); });
@@ -595,6 +595,48 @@ function setMoneyCurrency(el, cur) {
 
 document.addEventListener('input', (e) => {
   if (e.target.classList?.contains('money')) formatMoneyInput(e.target);
+}, true);
+
+// ---------- Telefon raqami ----------
+// O'zbekiston raqami: +998 dan keyin 9 ta raqam (operator kodi + abonent): +998 90 123 45 67
+const phoneDigits = (s) => String(s || '').replace(/\D/g, '');
+const phoneKey = (s) => {
+  let d = phoneDigits(s);
+  if (d.length > 9 && d.startsWith('998')) d = d.slice(3);
+  return d.slice(-9);
+};
+
+function fmtPhone(d) {
+  const parts = [d.slice(0, 2), d.slice(2, 5), d.slice(5, 7), d.slice(7, 9)].filter(Boolean);
+  return ['+998', ...parts].join(' ');
+}
+
+// Katakdagi raqamning +998 dan keyingi qismi. "+998 " turgan katakka butun raqam
+// ("+998 90 123 45 67") joylansa, takrorlangan 998 ham olib tashlanadi.
+function fieldPhoneDigits(value) {
+  let d = phoneDigits(value);
+  if (d.startsWith('998')) d = d.slice(3);
+  if (d.length > 9 && d.startsWith('998')) d = d.slice(3);
+  return d.slice(0, 9);
+}
+
+function formatPhoneInput(el) {
+  const d = fieldPhoneDigits(el.value);
+  el.value = fmtPhone(d) + (d.length ? '' : ' ');
+}
+
+function phoneField(label, name, value = '', attrs = '', cls = '') {
+  return `<label class="${cls}">${label}<input name="${name}" class="phone" type="tel" inputmode="tel" autocomplete="off" placeholder="+998 90 123 45 67" value="${esc(value)}" ${attrs}></label>`;
+}
+
+document.addEventListener('focusin', (e) => {
+  if (e.target.classList?.contains('phone') && !e.target.value) e.target.value = '+998 ';
+});
+document.addEventListener('focusout', (e) => {
+  if (e.target.classList?.contains('phone') && phoneDigits(e.target.value) === '998') e.target.value = '';
+});
+document.addEventListener('input', (e) => {
+  if (e.target.classList?.contains('phone')) formatPhoneInput(e.target);
 }, true);
 
 // Majburiy savol: Telegram guruhga yuborilsinmi? Javobsiz saqlab bo'lmaydi
@@ -1005,14 +1047,25 @@ function partyForm(c = {}) {
   return `<div class="form-grid">
     ${field('Nomi / F.I.O. *', 'name', c.name, 'required', 'full')}
     ${selectField('Turi', 'kind', isAdmin() ? Object.entries(KINDS) : [['customer', KINDS.customer]], c.kind || 'customer')}
-    ${field('Telefon', 'phone', c.phone, 'placeholder="+998 90 123 45 67"')}
+    ${phoneField('Telefon', 'phone', c.phone)}
     ${field('STIR (INN)', 'inn', c.inn)}
     ${field('Manzil', 'address', c.address, '', 'full')}
     ${textArea('Izoh', 'note', c.note)}
   </div>`;
 }
 
+// Qidiruvda raqam "90 111", "901112233" yoki "+998..." ko'rinishida yozilsa ham topiladi
+const phoneMatch = (phone, q) => phoneDigits(q).length >= 3 && phoneDigits(phone).includes(phoneKey(q));
+
+// Shu raqamli boshqa kontragent bormi
+function phoneTaken(phone, exceptId) {
+  const key = phoneKey(phone);
+  return key.length === 9 && db.counterparties.find((c) => c.id !== exceptId && phoneKey(c.phone) === key);
+}
+
 function readParty(d, c) {
+  if (fieldPhoneDigits(d.phone).length === 9) d.phone = fmtPhone(fieldPhoneDigits(d.phone));
+  else if (phoneDigits(d.phone) === '998') d.phone = '';
   return Object.assign(c, { name: d.name.trim(), kind: d.kind, phone: d.phone.trim(), inn: d.inn.trim(), address: d.address.trim(), note: d.note.trim() });
 }
 
@@ -1021,6 +1074,8 @@ function newParty(kind) {
     title: 'Yangi kontragent',
     body: partyForm({ kind }),
     onSubmit: (d) => {
+      const dup = phoneTaken(d.phone);
+      if (dup && !confirm(`Bu raqam bilan kontragent allaqachon bor: ${dup.name}. Baribir yangisini qo'shilsinmi?`)) return false;
       db.counterparties.push(readParty(d, { id: uid(), created: today() }));
       save();
     },
@@ -1108,9 +1163,13 @@ function docForm(type, d) {
   const t = DOC_TYPES[type];
   let head = field('Sana', 'date', d.date, 'type="date" required');
   if (t.party) {
-    head += selectField(t.party === 'supplier' ? "Ta'minotchi *" : 'Mijoz *', 'counterpartyId', partyOptions(t.party), d.counterpartyId || (t.party === 'customer' ? 'retail' : ''));
-    head += field(`yoki yangi ${t.party === 'supplier' ? "ta'minotchi" : 'mijoz'}`, 'newPartyName', '', 'placeholder="Nomi"');
-    head += field('Telefoni', 'newPartyPhone', '');
+    // Telefon yozilsa — saqlangan mijoz avtomatik topiladi; topilmasa, yangi mijoz ismi so'raladi
+    const who = t.party === 'supplier' ? "ta'minotchi" : 'mijoz';
+    const cur = party(d.counterpartyId);
+    head += phoneField('Telefon raqami', 'partyPhone', cur && cur.id !== 'retail' ? cur.phone : '', 'id="partyPhone"');
+    head += selectField(t.party === 'supplier' ? "Ta'minotchi *" : 'Mijoz *', 'counterpartyId', [...partyOptions(t.party), ['__new', `+ Yangi ${who}...`]], d.counterpartyId || (t.party === 'customer' ? 'retail' : ''), '', 'id="partySel"');
+    head += `<label class="new-party" hidden>Yangi ${who} ismi *<input name="newPartyName" id="newPartyName" placeholder="Ism familiya" autocomplete="off"></label>`;
+    head += `<div class="full party-hint" id="partyHint"></div>`;
   }
   head += selectField(t.move ? 'Qaysi ombordan' : 'Ombor', 'warehouseId', whOptions(), d.warehouseId || db.warehouses[0].id);
   if (t.move) head += selectField('Qaysi omborga', 'toWarehouseId', whOptions(), d.toWarehouseId || (db.warehouses[1] || db.warehouses[0]).id);
@@ -1148,8 +1207,55 @@ function docForm(type, d) {
     <div class="total-line">Jami: <b id="docTotal">0</b></div>`;
 }
 
+function bindPartyLookup(kind) {
+  const phone = $('#partyPhone');
+  const sel = $('#partySel');
+  const nameField = $('#newPartyName').closest('label');
+  const hint = $('#partyHint');
+  const list = () => db.counterparties.filter((c) => c.id !== 'retail' && (c.kind === kind || c.kind === 'both'));
+  const pick = (c) => {
+    sel.value = c.id;
+    phone.value = c.phone || '';
+    if (c.phone) formatPhoneInput(phone);
+    nameField.hidden = true;
+    hint.innerHTML = `<span class="ok">${icon('check')} Topildi: <b>${esc(c.name)}</b>${c.address ? ` · ${esc(c.address)}` : ''}</span>`;
+  };
+  const lookup = () => {
+    const key = fieldPhoneDigits(phone.value);
+    nameField.hidden = true;
+    if (key.length < 3) { hint.innerHTML = ''; return; }
+    const found = list().filter((c) => phoneKey(c.phone).includes(key));
+    if (key.length === 9) {
+      const exact = found.find((c) => phoneKey(c.phone) === key);
+      if (exact) return pick(exact);
+      // Yangi raqam — yangi mijoz
+      sel.value = '__new';
+      nameField.hidden = false;
+      hint.innerHTML = `<span class="muted">Bu raqam bilan ${kind === 'supplier' ? "ta'minotchi" : 'mijoz'} topilmadi — ismini yozing, saqlanganda yangi ${kind === 'supplier' ? "ta'minotchi" : 'mijoz'} qo'shiladi.</span>`;
+      return;
+    }
+    hint.innerHTML = found.length
+      ? found.slice(0, 6).map((c) => `<button type="button" class="chip party-pick" data-id="${c.id}">${esc(c.name)} · ${esc(c.phone)}</button>`).join('')
+      : '<span class="muted">Mos keladigan raqam yo\'q</span>';
+  };
+  phone.addEventListener('input', lookup);
+  hint.addEventListener('click', (e) => {
+    const b = e.target.closest('.party-pick');
+    if (b) pick(party(b.dataset.id));
+  });
+  sel.addEventListener('change', () => {
+    const c = party(sel.value);
+    nameField.hidden = sel.value !== '__new';
+    if (c && c.id !== 'retail') pick(c);
+    else if (sel.value === '__new') { hint.innerHTML = ''; $('#newPartyName').focus(); }
+    else { phone.value = ''; hint.innerHTML = ''; }
+  });
+  if (party(sel.value) && sel.value !== 'retail') pick(party(sel.value));
+}
+
 function bindDocForm(type, editingId) {
   const t = DOC_TYPES[type];
+  if (t.party) bindPartyLookup(t.party);
   const stock = computeStock(editingId);
   const body = $('#itemRows');
   const whSel = $('#modalForm [name=warehouseId]');
@@ -1303,17 +1409,22 @@ async function saveDoc(type, existing, preset, data, stock) {
     return false;
   }
 
-  let counterpartyId = data.counterpartyId || null;
+  let counterpartyId = data.counterpartyId && data.counterpartyId !== '__new' ? data.counterpartyId : null;
   if (t.party) {
-    if (data.newPartyName.trim()) {
-      const c = { id: uid(), name: data.newPartyName.trim(), kind: t.party, phone: data.newPartyPhone.trim(), address: data.address?.trim() || '', inn: '', note: '', created: today() };
+    const phone = fieldPhoneDigits(data.partyPhone).length === 9 ? fmtPhone(fieldPhoneDigits(data.partyPhone)) : '';
+    if (!counterpartyId && data.newPartyName.trim()) {
+      const c = { id: uid(), name: data.newPartyName.trim(), kind: t.party, phone, address: data.address?.trim() || '', inn: '', note: '', created: today() };
       db.counterparties.push(c);
       counterpartyId = c.id;
     }
     if (!counterpartyId) {
-      alert(t.party === 'supplier' ? "Ta'minotchini tanlang." : 'Mijozni tanlang.');
+      alert(phone ? `Yangi ${t.party === 'supplier' ? "ta'minotchi" : 'mijoz'} ismini kiriting.` : (t.party === 'supplier' ? "Ta'minotchini tanlang." : 'Mijozni tanlang yoki telefon raqamini kiriting.'));
+      $('#newPartyName')?.focus();
       return false;
     }
+    // Tanlangan mijozning raqami bo'lmasa — kiritilgan raqamni unga yozib qo'yamiz
+    const chosen = party(counterpartyId);
+    if (phone && chosen && chosen.id !== 'retail' && !chosen.phone) chosen.phone = phone;
   }
 
   // Ombordan chiqarishda yetarli qoldiq borligini tekshiramiz
@@ -1720,8 +1831,8 @@ function viewDashboard() {
 
   const mySales = sales.filter((d) => d.date.startsWith(month) && d.userId === me.id);
   const cards = isAdmin() ? [
-    ['Bugungi savdo', money(daySales), `${sales.filter((d) => d.date === t).length} ta jo'natish`],
-    ['Shu oy savdosi', money(monthTotal), `${monthSales.length} ta jo'natish`],
+    ['Bugungi savdo', money(daySales), `${sales.filter((d) => d.date === t).length} ta sotuv`],
+    ['Shu oy savdosi', money(monthTotal), `${monthSales.length} ta sotuv`],
     ['Shu oy yalpi foydasi', money(gross), 'savdo − tannarx'],
     ['Pul qoldig\'i', money(cash.cash + cash.card + cash.bank), `kassa ${fmt(cash.cash)} · karta ${fmt(cash.card)} · hisob ${fmt(cash.bank)}`],
     ['Bizga qarzlar', money(receivable), 'debitorlik', 'debt'],
@@ -1729,13 +1840,13 @@ function viewDashboard() {
     ['Ombordagi tovar', money(stockValue), `${db.products.length} xil mahsulot`],
     ['Faol buyurtmalar', activeOrders.length, `${money(sumOf(activeOrders))}`],
   ] : [
-    ['Bugungi savdo', money(daySales), `${sales.filter((d) => d.date === t).length} ta jo'natish`],
-    ['Mening savdom (shu oy)', money(sumOf(mySales)), `${mySales.length} ta jo'natish`],
+    ['Bugungi savdo', money(daySales), `${sales.filter((d) => d.date === t).length} ta sotuv`],
+    ['Mening savdom (shu oy)', money(sumOf(mySales)), `${mySales.length} ta sotuv`],
     ['Faol buyurtmalar', activeOrders.length, `${money(sumOf(activeOrders))}`],
     ['Mijozlar qarzi', money(receivable), 'undirilishi kerak', 'debt'],
   ];
   const quick = [
-    ['sale', 'Sotuv', 'bag', 'primary'], ['order', 'Buyurtma', 'receipt'],
+    ['sale', 'Sotish', 'bag', 'primary'], ['order', 'Buyurtma', 'receipt'],
     ...(isAdmin() ? [['receipt', 'Qabul qilish', 'truck']] : []),
   ].map(([type, label, ic, cls]) => `<button class="${cls || ''}" data-act="newDoc" data-type="${type}">${icon(ic)}${label}</button>`).join('') +
     (isAdmin() ? `<button data-act="newProduct">${icon('sofa')}Mahsulot</button>` : '') +
@@ -1788,7 +1899,7 @@ function viewDocs(type) {
   const list = db.docs.filter((d) => d.type === type)
     .filter((d) => inPeriod(type, d.date))
     .filter((d) => !st || d.status === st)
-    .filter((d) => !q || [d.no, party(d.counterpartyId)?.name, party(d.counterpartyId)?.phone, d.note, ...d.items.map((it) => product(it.productId)?.name)].join(' ').toLowerCase().includes(q))
+    .filter((d) => !q || [d.no, party(d.counterpartyId)?.name, party(d.counterpartyId)?.phone, d.note, ...d.items.map((it) => product(it.productId)?.name)].join(' ').toLowerCase().includes(q) || phoneMatch(party(d.counterpartyId)?.phone, q))
     .sort((a, b) => b.date.localeCompare(a.date) || b.no.localeCompare(a.no));
 
   const statusFilter = t.statuses
@@ -1813,7 +1924,7 @@ function viewDocs(type) {
 
   return toolbar(type, {
     extra: periodInputs(type) + statusFilter,
-    buttons: `<button class="primary" data-act="newDoc" data-type="${type}">${icon('plus')}${esc(t.one)}</button>${isAdmin() ? `<button data-act="exportDocs" data-type="${type}">${icon('download')}CSV</button>` : ''}`,
+    buttons: `<button class="primary" data-act="newDoc" data-type="${type}">${icon('plus')}${esc(t.add || t.one)}</button>${isAdmin() ? `<button data-act="exportDocs" data-type="${type}">${icon('download')}CSV</button>` : ''}`,
   }) + `<div class="card"><div class="table-wrap"><table><thead><tr>${cols.map((c, i) => `<th class="${i === 4 || i === 5 ? 'num' : ''}">${c}</th>`).join('')}</tr></thead>
     <tbody>${rows || emptyRow(cols.length, "Tanlangan davrda hujjat yo'q")}</tbody>
     ${list.length && type !== 'inventory' ? `<tfoot><tr><td colspan="4">Jami: ${list.length} ta</td><td class="num">${money(total)}</td><td colspan="${cols.length - 5}"></td></tr></tfoot>` : ''}
@@ -1926,7 +2037,7 @@ function viewParties() {
   const kind = isAdmin() ? filterVal('parties.kind') : 'customer';
   const list = db.counterparties
     .filter((c) => !kind || c.kind === kind || c.kind === 'both')
-    .filter((c) => !q || [c.name, c.phone, c.address, c.inn].join(' ').toLowerCase().includes(q));
+    .filter((c) => !q || [c.name, c.phone, c.address, c.inn].join(' ').toLowerCase().includes(q) || phoneMatch(c.phone, q));
   const rows = list.map((c) => {
     const b = partyBalance(c.id);
     return `<tr class="click" data-act="editParty" data-id="${c.id}"><td><b>${esc(c.name)}</b>${c.note ? `<div class="muted small">${esc(c.note)}</div>` : ''}</td><td>${esc(KINDS[c.kind])}</td>
@@ -2060,7 +2171,7 @@ function viewTop() {
     s.sum += (d.type === 'sale' ? 1 : -1) * docTotal(d);
   });
   return toolbar('top', { search: false, extra: periodInputs('top') }) + `
-    <div class="card"><h3>Sotuvchilar bo'yicha</h3><table><thead><tr><th>Sotuvchi</th><th class="num">Jo'natishlar</th><th class="num">Savdo summasi</th></tr></thead><tbody>
+    <div class="card"><h3>Sotuvchilar bo'yicha</h3><table><thead><tr><th>Sotuvchi</th><th class="num">Sotuvlar</th><th class="num">Savdo summasi</th></tr></thead><tbody>
       ${Object.entries(sellers).sort((a, b) => b[1].sum - a[1].sum).map(([id, s]) => `<tr><td>${esc(userName(id) || "Noma'lum")}</td><td class="num">${s.count}</td><td class="num">${money(s.sum)}</td></tr>`).join('') || emptyRow(3, "Davrda savdo yo'q")}
     </tbody></table></div>
     <div class="card"><h3>Eng ko'p sotilgan mahsulotlar</h3><table><thead><tr><th>Mahsulot</th><th class="num">Soni</th><th class="num">Tushum</th><th style="width:40%"></th></tr></thead><tbody>
@@ -2102,7 +2213,7 @@ function viewCurrency() {
 
 function viewUsers() {
   return `<div class="card narrow"><h3>Foydalanuvchilar</h3>
-    <p class="muted"><b>Administrator</b> — hamma bo'limlar. <b>Sotuvchi</b> — faqat savdo (buyurtma, jo'natish, qaytarish), mijozlar, kirim to'lovlari va qoldiqlarni ko'rish; tannarx, foyda, xaridlar va sozlamalar unga ko'rinmaydi, o'zgalar hujjatlarini o'zgartira olmaydi va hech narsani o'chira olmaydi.</p>
+    <p class="muted"><b>Administrator</b> — hamma bo'limlar. <b>Sotuvchi</b> — faqat savdo (buyurtma, sotuv, qaytarish), mijozlar, kirim to'lovlari va qoldiqlarni ko'rish; tannarx, foyda, xaridlar va sozlamalar unga ko'rinmaydi, o'zgalar hujjatlarini o'zgartira olmaydi va hech narsani o'chira olmaydi.</p>
     <table><thead><tr><th>Ism</th><th>Login</th><th>Roli</th><th>Holati</th><th></th></tr></thead><tbody>
     ${db.users.map((u) => `<tr><td>${esc(u.name)}${u.id === me.id ? ' <span class="muted small">(siz)</span>' : ''}</td><td>${esc(u.login)}</td>
       <td>${badge(ROLES[u.role], u.role === 'admin' ? 'admin' : '')}</td><td>${u.active === false ? badge('Bloklangan', 'cancel') : badge('Faol', 'done')}</td>
@@ -2241,7 +2352,7 @@ function viewCompany() {
   return `<div class="card narrow"><h3>Kompaniya ma'lumotlari</h3><p class="muted">Chop etiladigan hujjatlarda va Telegram xabarlarida ko'rsatiladi.</p>
     <div class="form-grid">
       <label class="full">Nomi<input id="coName" value="${esc(c.name)}"></label>
-      <label>Telefon<input id="coPhone" value="${esc(c.phone)}"></label>
+      <label>Telefon<input id="coPhone" class="phone" type="tel" inputmode="tel" placeholder="+998 90 123 45 67" value="${esc(c.phone)}"></label>
       <label>Manzil<input id="coAddress" value="${esc(c.address)}"></label>
     </div><div class="toolbar" style="margin-top:12px"><button class="primary" data-act="coSave">Saqlash</button></div></div>`;
 }
