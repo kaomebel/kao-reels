@@ -727,3 +727,31 @@ input.phone { font-variant-numeric: tabular-nums; letter-spacing: .3px; }
 .form-grid .party-hint { grid-column: 1 / -1; }
 .wh-qty { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 10px; }
 .wh-qty label { display: flex; flex-direction: column; gap: 5px; font-size: 13px; color: var(--muted); }
+
+/* ---- Pastga tortib yangilash ---- */
+.ptr {
+  position: fixed;
+  top: calc(-44px + env(safe-area-inset-top, 0px));
+  left: 50%;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: var(--side);
+  color: var(--side-text);
+  font-size: 13px;
+  white-space: nowrap;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, .25);
+  transform: translate(-50%, 0);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .15s;
+}
+.ptr.show { opacity: 1; }
+.ptr .ic { width: 16px; height: 16px; color: var(--side-active); transition: transform .2s; }
+.ptr.ready .ic { transform: rotate(180deg); }
+.ptr.busy .ic { animation: spin .8s linear infinite; }
+/* O'rnatilgan ilovada brauzerning o'z "tortish"i bilan to'qnashmasin */
+@media (display-mode: standalone) { html, body { overscroll-behavior-y: contain; } }

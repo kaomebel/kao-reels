@@ -2376,6 +2376,7 @@ function viewInstall() {
       ${url ? `<div class="qr">${qrSvg(url)}</div><div class="install-url"><code>${esc(url)}</code></div>`
         : '<p class="muted">Dastur hali internet saytga joylanmagan.</p>'}
       ${isStandalone() ? `<p class="ok">${icon('check')} Dastur shu qurilmada ilova sifatida ochilgan.</p>` : ''}
+      <p class="muted small">Versiya: <b>${esc(APP_VERSION)}</b>. Yangilash: ekranni pastga torting yoki ilovani qayta oching.</p>
     </div>
     <div class="card">
       <h3>${icon('share')}iPhone / iPad</h3>
@@ -3099,7 +3100,78 @@ async function start() {
 
 start();
 
+// ---------- Yangilanish ----------
+// Har bir yangi versiyada sw.js o'zgaradi. Ilova ochilganda / fondan qaytganda tekshiriladi;
+// yangisi topilsa — sahifa o'zi qayta yuklanadi (ochiq oyna bo'lsa, u yopilgach).
+const APP_VERSION = window.BT_VERSION || 'dev';
+let swReg = null;
+let reloadPending = false;
+
+function reloadForUpdate() {
+  if ($('#modal').open) { reloadPending = true; return; }
+  location.reload();
+}
+
+async function checkForUpdate() {
+  try { await swReg?.update(); } catch (e) { /* internet yo'q */ }
+}
+
 // Telefon ilovasi (Capacitor) o'z fayllarini o'zi beradi — service worker faqat brauzer uchun
 if ('serviceWorker' in navigator && location.protocol.startsWith('http') && !window.Capacitor) {
-  navigator.serviceWorker.register('sw.js').catch((e) => console.warn('Service worker:', e));
+  const hadController = !!navigator.serviceWorker.controller;
+  navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' })
+    .then((reg) => { swReg = reg; checkForUpdate(); })
+    .catch((e) => console.warn('Service worker:', e));
+  let reloading = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    // Birinchi o'rnatilishda emas, faqat yangi versiya kelganda
+    if (!hadController || reloading) return;
+    reloading = true;
+    reloadForUpdate();
+  });
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') checkForUpdate(); });
+  setInterval(checkForUpdate, 20 * 60e3);
 }
+$('#modal').addEventListener('close', () => { if (reloadPending) location.reload(); });
+
+// Ekranni pastga tortib yangilash (o'rnatilgan ilovada brauzerning o'z "tortish"i yo'q)
+(function pullToRefresh() {
+  const el = $('#ptr');
+  const text = $('#ptrText');
+  $('#ptrIc').innerHTML = icon('download');
+  const LIMIT = 80;
+  let startY = null;
+  let dist = 0;
+  const reset = () => {
+    startY = null;
+    dist = 0;
+    el.classList.remove('show', 'ready');
+    el.style.transform = '';
+  };
+  document.addEventListener('touchstart', (e) => {
+    if (window.scrollY > 0 || $('#modal').open || e.touches.length > 1) return;
+    if (e.target.closest('input, textarea, select, .table-wrap, .party-suggest, .subnav, #sections')) return;
+    startY = e.touches[0].clientY;
+  }, { passive: true });
+  document.addEventListener('touchmove', (e) => {
+    if (startY === null) return;
+    dist = e.touches[0].clientY - startY;
+    if (dist <= 0 || window.scrollY > 0) { reset(); return; }
+    const d = Math.min(dist, LIMIT * 1.5);
+    el.classList.add('show');
+    el.classList.toggle('ready', d >= LIMIT);
+    el.style.transform = `translate(-50%, ${d * 0.6}px)`;
+    text.textContent = d >= LIMIT ? "Qo'yib yuboring — yangilanadi" : 'Yangilash uchun torting';
+  }, { passive: true });
+  document.addEventListener('touchend', async () => {
+    if (startY === null) return;
+    if (dist >= LIMIT) {
+      text.textContent = 'Yangilanmoqda...';
+      el.classList.add('busy');
+      await checkForUpdate();
+      location.reload();
+      return;
+    }
+    reset();
+  });
+})();
