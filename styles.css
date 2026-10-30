@@ -686,3 +686,6 @@ input.phone { font-variant-numeric: tabular-nums; letter-spacing: .3px; }
 .ios-hint b { color: #fff6ea; }
 .ios-share { display: inline-grid; place-items: center; vertical-align: -4px; color: var(--side-active); }
 .ios-hint button { background: transparent; color: var(--side-text); border-color: rgba(255, 255, 255, .25); }
+.install-card { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; background: var(--accent-soft); border-color: var(--accent); }
+.install-card > .ic { width: 28px; height: 28px; color: var(--accent); }
+.install-card > div { flex: 1 1 260px; min-width: 0; }

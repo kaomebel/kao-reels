@@ -1872,7 +1872,13 @@ function viewDashboard() {
     'Bizga qarzlar': 'arrowIn', 'Bizning qarzlar': 'arrowOut', 'Ombordagi tovar': 'box', 'Faol buyurtmalar': 'bag',
     'Mening savdom (shu oy)': 'user', 'Mijozlar qarzi': 'arrowIn',
   };
-  return usageWarn + `<div class="stats">${cards.map(([l, v, h, cls]) => `<div class="stat">
+  // Brauzer ilova qilib o'rnatishni taklif qilsa — bosh sahifada bitta tugma
+  const installCard = installPrompt && !isStandalone()
+    ? `<div class="card install-card">${icon('download')}<div><b>Biznes Tizim'ni kompyuterga ilova qilib o'rnating</b>
+        <div class="muted small">Ish stolida ikonka paydo bo'ladi, dastur alohida oynada ochiladi.</div></div>
+        <button class="primary" data-act="installApp">${icon('download')}O'rnatish</button></div>` : '';
+
+  return installCard + usageWarn + `<div class="stats">${cards.map(([l, v, h, cls]) => `<div class="stat">
       <div class="stat-ic ${cls || ''}">${icon(cardIcon[l] || 'chart')}</div>
       <div class="label">${l}</div><div class="value ${cls || ''}">${v}</div><div class="muted small">${h}</div></div>`).join('')}</div>
     <div class="quick">${quick}</div>
@@ -2202,8 +2208,9 @@ let installPrompt = null;
 window.addEventListener('beforeinstallprompt', (e) => {
   e.preventDefault();
   installPrompt = e;
-  if (currentRoute().view === 'install') render();
+  if (me) render();
 });
+window.addEventListener('appinstalled', () => { installPrompt = null; if (me) render(); });
 
 function qrSvg(text) {
   if (!window.qrcode || !text) return '';
@@ -2233,9 +2240,12 @@ function viewInstall() {
       </ol>
       <p class="muted small">Faqat Safari orqali o'rnatiladi (iPhone'dagi Chrome buni qila olmaydi).</p>
     </div>
+    ${installPrompt ? `<div class="card"><h3>${icon('download')}Shu qurilmaga o'rnatish</h3>
+      <p class="muted">Bitta tugma — dastur ilova bo'lib o'rnatiladi.</p>
+      <button class="primary" data-act="installApp">${icon('download')}Hozir o'rnatish</button></div>` : ''}
     <div class="card">
       <h3>${icon('download')}Android</h3>
-      ${installPrompt ? `<button class="primary" data-act="installApp">${icon('download')}Hozir o'rnatish</button>` : `<ol class="install-steps">
+      ${installPrompt ? `<p class="muted">Yuqoridagi "Hozir o'rnatish" tugmasini bosing.</p>` : `<ol class="install-steps">
         ${step('camera', 'QR-kodni skanerlang — sayt <b>Chrome</b>da ochiladi.')}
         ${step('more', "Yuqoridagi <b>⋮</b> menyu → <b>«Ilovani o'rnatish»</b> (yoki «Bosh ekranga qo'shish»).")}
       </ol>`}

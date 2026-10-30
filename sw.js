@@ -1,6 +1,6 @@
 // Ilova fayllarini keshlaydi — internet bo'lmasa ham dastur ochiladi.
 // Fayllar o'zgarganda CACHE versiyasini oshiring.
-const CACHE = 'biznes-tizim-v4';
+const CACHE = 'biznes-tizim-v5';
 const FILES = ['./', './index.html', './styles.css', './config.js', './vendor/supabase.js', './vendor/qrcode.js', './icons.js', './backend.js', './app.js', './manifest.webmanifest', './icons/icon.svg', './icons/icon-192.png', './icons/icon-512.png'];
 
 self.addEventListener('install', (e) => {
