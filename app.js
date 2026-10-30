@@ -709,8 +709,8 @@ function productForm(p = {}, readonly = false) {
         </div>
         <div class="price-preview muted small" id="pricePreview"></div>
       </div>
-      ${p.id ? '' : field("Boshlang'ich qoldiq", 'initQty', 0, 'type="number" min="0"')}
-      ${p.id ? '' : selectField('Ombor', 'initWh', whOptions(), db.warehouses[0]?.id)}
+      ${p.id ? '' : `<div class="field full"><span class="field-label">Boshlang'ich qoldiq — har bir omborda nechta bor</span>
+        <div class="wh-qty">${db.warehouses.map((w) => `<label>${esc(w.name)}<input type="number" min="0" step="1" name="initQty_${esc(w.id)}" value="0" inputmode="numeric"></label>`).join('')}</div></div>`}
       ${textArea('Tavsif', 'note', p.note)}
       ${!p.id && !readonly ? tgQuestion() : ''}
     </div>
@@ -966,15 +966,15 @@ function newProduct() {
     onSubmit: (d) => (!tgAnswered(d) ? false : withPhotos(async (photos) => {
       const p = readProduct(d, { id: uid(), created: today(), photos });
       db.products.push(p);
-      const qty = num(d.initQty);
-      let entry = null;
-      if (qty > 0) {
-        entry = {
-          id: uid(), type: 'enter', no: await nextNo('enter'), date: today(), warehouseId: d.initWh, userId: me.id,
+      // Har bir ombor uchun alohida kirim hujjati
+      for (const w of db.warehouses) {
+        const qty = Math.max(0, Math.floor(num(d[`initQty_${w.id}`])));
+        if (!qty) continue;
+        db.docs.push({
+          id: uid(), type: 'enter', no: await nextNo('enter'), date: today(), warehouseId: w.id, userId: me.id,
           items: [{ productId: p.id, qty, price: p.buyPrice }], note: "Boshlang'ich qoldiq",
           currency: p.priceCurrency, rate: p.priceCurrency === 'USD' ? usdRate() : undefined,
-        };
-        db.docs.push(entry);
+        });
       }
       await save();
       if (d.tgPost === 'yes') telegramPostProducts([p.id], true);
@@ -1891,12 +1891,12 @@ const SECTIONS = [
   { id: 'dashboard', icon: 'dashboard', title: "Ko'rsatkichlar" },
   { id: 'purchases', icon: 'truck', title: 'Xaridlar', admin: true, views: [['purchaseOrder'], ['receipt'], ['purchaseReturn']] },
   { id: 'sales', icon: 'bag', title: 'Savdo', views: [['order'], ['sale'], ['salesReturn']] },
-  { id: 'goods', icon: 'sofa', title: 'Tovarlar', views: [['products', 'Mahsulotlar'], ['stock', 'Qoldiqlar'], ['enter', '', 'A'], ['writeoff', '', 'A'], ['move', '', 'A'], ['inventory', '', 'A']] },
+  { id: 'goods', icon: 'sofa', title: 'Tovarlar', views: [['products', 'Mahsulotlar'], ['stock', 'Qoldiqlar'], ['enter', '', 'A'], ['writeoff', '', 'A'], ['move', '', 'A'], ['inventory', '', 'A'], ['warehouses', 'Omborlar', 'A']] },
   { id: 'parties', icon: 'users', title: 'Kontragentlar', views: [['parties', 'Kontragentlar'], ['debts', 'Qarzlar', 'A']] },
   { id: 'money', icon: 'wallet', title: 'Pul', views: [['payments', "To'lovlar"], ['cash', 'Kassa va hisoblar', 'A']] },
   { id: 'reports', icon: 'chart', title: 'Hisobotlar', admin: true, views: [['profit', 'Foyda va zarar'], ['top', 'Savdo tahlili']] },
   { id: 'install', icon: 'phone', title: "Telefonga o'rnatish", hideInNav: true },
-  { id: 'settings', icon: 'settings', title: 'Sozlamalar', admin: true, views: [['users', 'Foydalanuvchilar'], ['currency', 'Valyuta kursi'], ['server', 'Server'], ['telegram', 'Telegram'], ['company', 'Kompaniya'], ['warehouses', 'Omborlar'], ['categories', "Ro'yxatlar"], ['backup', 'Zaxira nusxa']] },
+  { id: 'settings', icon: 'settings', title: 'Sozlamalar', admin: true, views: [['users', 'Foydalanuvchilar'], ['currency', 'Valyuta kursi'], ['server', 'Server'], ['telegram', 'Telegram'], ['company', 'Kompaniya'], ['categories', "Ro'yxatlar"], ['backup', 'Zaxira nusxa']] },
 ];
 
 function viewTitle(v) {
@@ -2569,7 +2569,8 @@ function viewCompany() {
 }
 
 function viewWarehouses() {
-  return `<div class="card narrow"><h3>Omborlar va do'konlar</h3><table><thead><tr><th>Nomi</th><th>Manzil</th><th class="num">Tovar soni</th><th></th></tr></thead><tbody>
+  return `<div class="card narrow"><h3>${icon('warehouse')}Omborlar va do'konlar — ${db.warehouses.length} ta</h3>
+    <p class="muted">Omborlarni faqat administrator qo'sha, o'zgartira va o'chira oladi. Kirim, sotuv va ko'chirishda kerakli ombor tanlanadi; qoldiqlar har bir ombor bo'yicha alohida hisoblanadi.</p><table><thead><tr><th>Nomi</th><th>Manzil</th><th class="num">Tovar soni</th><th></th></tr></thead><tbody>
     ${db.warehouses.map((w) => `<tr><td>${esc(w.name)}</td><td>${esc(w.address)}</td><td class="num">${db.products.reduce((s, p) => s + qtyIn(ctx.stock, p.id, w.id), 0)}</td>
       <td class="actions"><button class="small" data-act="editWh" data-id="${w.id}">${icon('edit')}Tahrirlash</button><button class="small danger icon-only" data-act="deleteWh" data-id="${w.id}" title="O'chirish">${icon('trash')}</button></td></tr>`).join('')}
     </tbody></table><div class="toolbar" style="margin-top:12px"><button class="primary" data-act="editWh">${icon('plus')}Ombor</button></div></div>`;
