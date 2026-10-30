@@ -689,3 +689,39 @@ input.phone { font-variant-numeric: tabular-nums; letter-spacing: .3px; }
 .install-card { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; background: var(--accent-soft); border-color: var(--accent); }
 .install-card > .ic { width: 28px; height: 28px; color: var(--accent); }
 .install-card > div { flex: 1 1 260px; min-width: 0; }
+
+/* ---- Mijoz ismi: mos mijozlar ro'yxati ---- */
+.party-name { position: relative; }
+.party-suggest {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 20;
+  margin-top: 4px;
+  max-height: 300px;
+  overflow-y: auto;
+  background: var(--card);
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+}
+.suggest-row {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  padding: 8px 12px;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  white-space: normal;
+}
+.suggest-row:hover, .suggest-row:focus-visible { background: var(--accent-soft); color: var(--text); }
+.suggest-row span { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.suggest-more { padding: 8px 12px; }
+.form-grid .party-hint { grid-column: 1 / -1; }

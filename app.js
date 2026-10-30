@@ -54,6 +54,9 @@ const DEFAULT_CATEGORY_TYPES = {
 
 const DEFAULT_COLORS = ['Dub beliy', 'Belaya korona', 'Oq gladkiy', 'Dub votan', 'Dub sonoma', 'Dub kraft', "Yong'oq", 'Venge', 'Kulrang', 'Antratsit', 'Qora', 'Bej', 'Kapuchino', 'Oltin'];
 
+// Mijoz turlari (Sozlamalarda o'zgartiriladi)
+const DEFAULT_CUSTOMER_TYPES = ['Chakana xaridor', 'Mebelchi', 'Domchi', "Do'konchi", 'Optomchi', "Uy to'ldiruvchi"];
+
 const DEFAULT_MATERIALS = ['LDSP', 'MDF', 'DSP', 'Massiv (yog\'och)', 'Faner', 'Metall', 'Shisha', 'Oyna', 'Velyur', 'Ekokoja', 'Charm', 'Mato', 'Rattan', 'Plastik'];
 
 // ---------- Ma'lumotlar ombori ----------
@@ -69,6 +72,7 @@ function emptyDb() {
     categoryTypes: JSON.parse(JSON.stringify(DEFAULT_CATEGORY_TYPES)),
     materials: DEFAULT_MATERIALS.slice(),
     colors: DEFAULT_COLORS.slice(),
+    customerTypes: DEFAULT_CUSTOMER_TYPES.slice(),
     currency: { rate: 0, date: '', source: '', updatedAt: '', manual: false },
     company: { name: 'KAO Mebel', phone: '', address: '' },
     telegram: { token: '', chatId: '', onReceipt: true, onNewProduct: true, showQty: true, log: [] },
@@ -1048,6 +1052,7 @@ function partyForm(c = {}) {
     ${field('Nomi / F.I.O. *', 'name', c.name, 'required', 'full')}
     ${selectField('Turi', 'kind', isAdmin() ? Object.entries(KINDS) : [['customer', KINDS.customer]], c.kind || 'customer')}
     ${phoneField('Telefon', 'phone', c.phone)}
+    ${customerTypeField(c.ctype, 'Mijoz turi')}
     ${field('STIR (INN)', 'inn', c.inn)}
     ${field('Manzil', 'address', c.address, '', 'full')}
     ${textArea('Izoh', 'note', c.note)}
@@ -1066,7 +1071,7 @@ function phoneTaken(phone, exceptId) {
 function readParty(d, c) {
   if (fieldPhoneDigits(d.phone).length === 9) d.phone = fmtPhone(fieldPhoneDigits(d.phone));
   else if (phoneDigits(d.phone) === '998') d.phone = '';
-  return Object.assign(c, { name: d.name.trim(), kind: d.kind, phone: d.phone.trim(), inn: d.inn.trim(), address: d.address.trim(), note: d.note.trim() });
+  return Object.assign(c, { name: d.name.trim(), kind: d.kind, ctype: d.kind === 'supplier' ? '' : readCustomerType(d), phone: d.phone.trim(), inn: d.inn.trim(), address: d.address.trim(), note: d.note.trim() });
 }
 
 function newParty(kind) {
@@ -1162,7 +1167,20 @@ function itemRowHtml(t, it = {}, cur = 'UZS') {
 function docForm(type, d) {
   const t = DOC_TYPES[type];
   let head = field('Sana', 'date', d.date, 'type="date" required');
-  if (t.party) {
+  if (t.party === 'customer') {
+    // Mijoz: telefon → ism (ostida mos mijozlar ro'yxati) → mijoz turi.
+    // Ism va telefon bo'sh qolsa — "Chakana xaridor".
+    const cur = party(d.counterpartyId);
+    const known = cur && cur.id !== 'retail' ? cur : null;
+    head += phoneField('Telefon raqami', 'partyPhone', known ? known.phone : '', 'id="partyPhone"');
+    head += `<label class="party-name">Mijoz ismi
+        <input name="partyName" id="partyName" autocomplete="off" placeholder="Ism familiya" value="${esc(known ? known.name : '')}">
+        <div class="party-suggest" id="partySuggest" hidden></div>
+      </label>
+      <input type="hidden" name="counterpartyId" id="partyId" value="${esc(known ? known.id : '')}">`;
+    head += customerTypeField(known ? known.ctype : '');
+    head += `<div class="full party-hint" id="partyHint"></div>`;
+  } else if (t.party) {
     // Telefon yozilsa — saqlangan mijoz avtomatik topiladi; topilmasa, yangi mijoz ismi so'raladi
     const who = t.party === 'supplier' ? "ta'minotchi" : 'mijoz';
     const cur = party(d.counterpartyId);
@@ -1253,9 +1271,104 @@ function bindPartyLookup(kind) {
   if (party(sel.value) && sel.value !== 'retail') pick(party(sel.value));
 }
 
+function customerTypeField(value, label = 'Mijoz turi') {
+  const types = db.customerTypes.slice();
+  if (value && !types.includes(value)) types.push(value);
+  const cur = value || types[0] || '';
+  return `<label>${label}<select name="customerType" class="ctype-sel">${[...types.map((x) => [x, x]), ['__new', '+ Yangi tur...']]
+    .map(([v, x]) => `<option value="${esc(v)}" ${v === cur ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select>
+    <input name="ctypeNew" class="ctype-new" placeholder="Yangi mijoz turi" hidden></label>`;
+}
+
+// "+ Yangi tur..." tanlansa — nom yoziladigan katak chiqadi
+document.addEventListener('change', (e) => {
+  if (!e.target.classList?.contains('ctype-sel')) return;
+  const fresh = e.target.parentElement.querySelector('.ctype-new');
+  fresh.hidden = e.target.value !== '__new';
+  if (!fresh.hidden) fresh.focus();
+});
+
+function readCustomerType(d) {
+  const v = d.customerType === '__new' ? (d.ctypeNew || '').trim() : d.customerType;
+  if (v && !db.customerTypes.includes(v)) db.customerTypes.push(v);
+  return v || '';
+}
+
+function bindCustomerLookup() {
+  const phone = $('#partyPhone');
+  const name = $('#partyName');
+  const idInput = $('#partyId');
+  const box = $('#partySuggest');
+  const hint = $('#partyHint');
+  const typeSel = $('#modalBody [name=customerType]');
+  const customers = () => db.counterparties.filter((c) => c.id !== 'retail' && (c.kind === 'customer' || c.kind === 'both'));
+
+  const status = () => {
+    const c = party(idInput.value);
+    if (c) hint.innerHTML = `<span class="ok">${icon('check')} Saqlangan mijoz: <b>${esc(c.name)}</b>${c.ctype ? ` · ${esc(c.ctype)}` : ''}${c.address ? ` · ${esc(c.address)}` : ''}</span>`;
+    else if (name.value.trim()) hint.innerHTML = '<span class="muted">Yangi mijoz — saqlanganda bazaga qo\'shiladi.</span>';
+    else if (fieldPhoneDigits(phone.value)) hint.innerHTML = '<span class="muted">Mijoz ismini yozing yoki ro\'yxatdan tanlang.</span>';
+    else hint.innerHTML = '<span class="muted">Ism va telefon bo\'sh qolsa — Chakana xaridor.</span>';
+  };
+
+  const pick = (c) => {
+    idInput.value = c.id;
+    name.value = c.name;
+    phone.value = c.phone || '';
+    if (c.phone) formatPhoneInput(phone);
+    if (c.ctype) {
+      if (![...typeSel.options].some((o) => o.value === c.ctype)) typeSel.insertAdjacentHTML('afterbegin', `<option>${esc(c.ctype)}</option>`);
+      typeSel.value = c.ctype;
+    }
+    box.hidden = true;
+    status();
+  };
+
+  // Ro'yxat: telefon raqamining boshidan mos keladiganlar va/yoki ismida yozilgan so'z borlar
+  const suggest = () => {
+    const digits = fieldPhoneDigits(phone.value);
+    const q = name.value.trim().toLowerCase();
+    if (!digits && !q) { box.hidden = true; return; }
+    const list = customers().filter((c) => (!digits || phoneKey(c.phone).startsWith(digits)) && (!q || c.name.toLowerCase().includes(q)));
+    box.innerHTML = list.length
+      ? list.slice(0, 8).map((c) => `<button type="button" class="suggest-row" data-id="${c.id}"><b>${esc(c.name)}</b>
+          <span>${esc(c.phone || '—')}${c.ctype ? ` · ${esc(c.ctype)}` : ''}</span></button>`).join('')
+        + (list.length > 8 ? `<div class="suggest-more muted small">yana ${list.length - 8} ta — raqamni davom ettiring</div>` : '')
+      : '<div class="suggest-more muted small">Mos mijoz yo\'q — yangi mijoz sifatida saqlanadi</div>';
+    box.hidden = false;
+  };
+
+  phone.addEventListener('input', () => {
+    const digits = fieldPhoneDigits(phone.value);
+    const exact = digits.length === 9 && customers().find((c) => phoneKey(c.phone) === digits);
+    if (exact) { pick(exact); return; }
+    // Raqam o'zgarib, tanlangan mijozga mos kelmay qolsa — tanlov bekor
+    const c = party(idInput.value);
+    if (c && !phoneKey(c.phone).startsWith(digits)) idInput.value = '';
+    suggest();
+    status();
+  });
+  name.addEventListener('input', () => {
+    idInput.value = '';
+    suggest();
+    status();
+  });
+  name.addEventListener('focus', suggest);
+  box.addEventListener('mousedown', (e) => e.preventDefault()); // bosilganda ro'yxat yopilib qolmasin
+  box.addEventListener('click', (e) => {
+    const row = e.target.closest('.suggest-row');
+    if (row) pick(party(row.dataset.id));
+  });
+  [phone, name].forEach((el) => el.addEventListener('blur', () => setTimeout(() => {
+    if (![phone, name].includes(document.activeElement)) box.hidden = true;
+  }, 150)));
+  status();
+}
+
 function bindDocForm(type, editingId) {
   const t = DOC_TYPES[type];
-  if (t.party) bindPartyLookup(t.party);
+  if (t.party === 'customer') bindCustomerLookup();
+  else if (t.party) bindPartyLookup(t.party);
   const stock = computeStock(editingId);
   const body = $('#itemRows');
   const whSel = $('#modalForm [name=warehouseId]');
@@ -1410,7 +1523,28 @@ async function saveDoc(type, existing, preset, data, stock) {
   }
 
   let counterpartyId = data.counterpartyId && data.counterpartyId !== '__new' ? data.counterpartyId : null;
-  if (t.party) {
+  if (t.party === 'customer') {
+    const digits = fieldPhoneDigits(data.partyPhone);
+    const phone = digits.length === 9 ? fmtPhone(digits) : '';
+    const name = (data.partyName || '').trim();
+    const ctype = readCustomerType(data);
+    let c = counterpartyId && party(counterpartyId);
+    if (!c && phone) c = db.counterparties.find((x) => x.id !== 'retail' && phoneKey(x.phone) === digits);
+    if (c && c.id !== 'retail') {
+      if (phone && !c.phone) c.phone = phone;
+      if (ctype && c.ctype !== ctype) c.ctype = ctype;
+    } else if (name) {
+      c = { id: uid(), name, kind: 'customer', ctype, phone, address: data.address?.trim() || '', inn: '', note: '', created: today() };
+      db.counterparties.push(c);
+    } else if (digits) {
+      alert('Mijoz ismini kiriting.');
+      $('#partyName')?.focus();
+      return false;
+    } else {
+      c = party('retail');
+    }
+    counterpartyId = c.id;
+  } else if (t.party) {
     const phone = fieldPhoneDigits(data.partyPhone).length === 9 ? fmtPhone(fieldPhoneDigits(data.partyPhone)) : '';
     if (!counterpartyId && data.newPartyName.trim()) {
       const c = { id: uid(), name: data.newPartyName.trim(), kind: t.party, phone, address: data.address?.trim() || '', inn: '', note: '', created: today() };
@@ -1762,7 +1896,7 @@ const SECTIONS = [
   { id: 'money', icon: 'wallet', title: 'Pul', views: [['payments', "To'lovlar"], ['cash', 'Kassa va hisoblar', 'A']] },
   { id: 'reports', icon: 'chart', title: 'Hisobotlar', admin: true, views: [['profit', 'Foyda va zarar'], ['top', 'Savdo tahlili']] },
   { id: 'install', icon: 'phone', title: "Telefonga o'rnatish", hideInNav: true },
-  { id: 'settings', icon: 'settings', title: 'Sozlamalar', admin: true, views: [['users', 'Foydalanuvchilar'], ['currency', 'Valyuta kursi'], ['server', 'Server'], ['telegram', 'Telegram'], ['company', 'Kompaniya'], ['warehouses', 'Omborlar'], ['categories', 'Kategoriya va ranglar'], ['backup', 'Zaxira nusxa']] },
+  { id: 'settings', icon: 'settings', title: 'Sozlamalar', admin: true, views: [['users', 'Foydalanuvchilar'], ['currency', 'Valyuta kursi'], ['server', 'Server'], ['telegram', 'Telegram'], ['company', 'Kompaniya'], ['warehouses', 'Omborlar'], ['categories', "Ro'yxatlar"], ['backup', 'Zaxira nusxa']] },
 ];
 
 function viewTitle(v) {
@@ -2042,17 +2176,20 @@ function viewStock() {
 function viewParties() {
   const q = filterVal('parties.q').toLowerCase();
   const kind = isAdmin() ? filterVal('parties.kind') : 'customer';
+  const ctype = filterVal('parties.ctype');
   const list = db.counterparties
     .filter((c) => !kind || c.kind === kind || c.kind === 'both')
+    .filter((c) => !ctype || c.ctype === ctype)
     .filter((c) => !q || [c.name, c.phone, c.address, c.inn].join(' ').toLowerCase().includes(q) || phoneMatch(c.phone, q));
   const rows = list.map((c) => {
     const b = partyBalance(c.id);
-    return `<tr class="click" data-act="editParty" data-id="${c.id}"><td><b>${esc(c.name)}</b>${c.note ? `<div class="muted small">${esc(c.note)}</div>` : ''}</td><td>${esc(KINDS[c.kind])}</td>
-      <td>${esc(c.phone)}</td><td>${esc(c.address)}</td><td class="num ${b > 0 ? 'debt' : b < 0 ? 'warn' : ''}">${b ? money(b) : '—'}</td>
+    return `<tr class="click" data-act="editParty" data-id="${c.id}"><td><b>${esc(c.name)}</b>${c.note ? `<div class="muted small">${esc(c.note)}</div>` : ''}</td><td>${esc(KINDS[c.kind])}${c.ctype ? `<div class="muted small">${esc(c.ctype)}</div>` : ''}</td>
+      <td class="dt">${esc(c.phone)}</td><td>${esc(c.address)}</td><td class="num ${b > 0 ? 'debt' : b < 0 ? 'warn' : ''}">${b ? money(b) : '—'}</td>
       <td class="actions"><button class="small" data-act="statement" data-id="${c.id}">${icon('receipt')}Hisob-kitob</button>${isAdmin() ? `<button class="small danger icon-only" data-act="deleteParty" data-id="${c.id}" title="O'chirish">${icon('trash')}</button>` : ''}</td></tr>`;
   }).join('');
   return toolbar('parties', {
-    extra: !isAdmin() ? '' : `<select data-filter="parties.kind"><option value="">Hammasi</option><option value="customer" ${kind === 'customer' ? 'selected' : ''}>Mijozlar</option><option value="supplier" ${kind === 'supplier' ? 'selected' : ''}>Ta'minotchilar</option></select>`,
+    extra: (!isAdmin() ? '' : `<select data-filter="parties.kind"><option value="">Hammasi</option><option value="customer" ${kind === 'customer' ? 'selected' : ''}>Mijozlar</option><option value="supplier" ${kind === 'supplier' ? 'selected' : ''}>Ta'minotchilar</option></select>`)
+      + `<select data-filter="parties.ctype"><option value="">Barcha mijoz turlari</option>${db.customerTypes.map((x) => `<option ${x === ctype ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select>`,
     buttons: `<button class="primary" data-act="newParty">${icon('plus')}Kontragent</button>`,
   }) + `<div class="card"><div class="table-wrap"><table><thead><tr><th>Nomi</th><th>Turi</th><th>Telefon</th><th>Manzil</th><th class="num">Balans</th><th></th></tr></thead>
     <tbody>${rows || emptyRow(6, "Kontragent yo'q")}</tbody></table></div>
@@ -2171,6 +2308,13 @@ function viewTop() {
   const custs = {};
   db.docs.filter((d) => d.type === 'sale' && inPeriod('top', d.date)).forEach((d) => { custs[d.counterpartyId] = (custs[d.counterpartyId] || 0) + docTotal(d); });
   const topC = Object.entries(custs).sort((a, b) => b[1] - a[1]).slice(0, 10);
+  const byCtype = {};
+  db.docs.filter((d) => (d.type === 'sale' || d.type === 'salesReturn') && inPeriod('top', d.date)).forEach((d) => {
+    const k = party(d.counterpartyId)?.ctype || (d.counterpartyId === 'retail' ? 'Chakana xaridor' : 'Turi belgilanmagan');
+    const x = (byCtype[k] = byCtype[k] || { count: 0, sum: 0 });
+    if (d.type === 'sale') x.count++;
+    x.sum += (d.type === 'sale' ? 1 : -1) * docTotal(d);
+  });
   const sellers = {};
   db.docs.filter((d) => (d.type === 'sale' || d.type === 'salesReturn') && inPeriod('top', d.date)).forEach((d) => {
     const s = (sellers[d.userId || ''] = sellers[d.userId || ''] || { count: 0, sum: 0 });
@@ -2178,6 +2322,9 @@ function viewTop() {
     s.sum += (d.type === 'sale' ? 1 : -1) * docTotal(d);
   });
   return toolbar('top', { search: false, extra: periodInputs('top') }) + `
+    <div class="card"><h3>${icon('users')}Mijoz turlari bo'yicha</h3><table><thead><tr><th>Mijoz turi</th><th class="num">Sotuvlar</th><th class="num">Savdo summasi</th></tr></thead><tbody>
+      ${Object.entries(byCtype).sort((a, b) => b[1].sum - a[1].sum).map(([k, x]) => `<tr><td>${esc(k)}</td><td class="num">${x.count}</td><td class="num">${money(x.sum)}</td></tr>`).join('') || emptyRow(3, "Davrda savdo yo'q")}
+    </tbody></table></div>
     <div class="card"><h3>Sotuvchilar bo'yicha</h3><table><thead><tr><th>Sotuvchi</th><th class="num">Sotuvlar</th><th class="num">Savdo summasi</th></tr></thead><tbody>
       ${Object.entries(sellers).sort((a, b) => b[1].sum - a[1].sum).map(([id, s]) => `<tr><td>${esc(userName(id) || "Noma'lum")}</td><td class="num">${s.count}</td><td class="num">${money(s.sum)}</td></tr>`).join('') || emptyRow(3, "Davrda savdo yo'q")}
     </tbody></table></div>
@@ -2475,6 +2622,10 @@ function viewCategories() {
       <p class="muted">Mahsulot kartochkasida tanlanadigan ranglar (masalan, Dub beliy, Belaya korona, Oq gladkiy).</p>
       <div id="colorEditor">${chipEditor(db.colors, "+ Rang qo'shish (Enter)")}</div>
     </div>
+    <div class="card narrow"><h3>${icon('users')}Mijoz turlari</h3>
+      <p class="muted">Savdoda mijoz turi shu ro'yxatdan tanlanadi (Mebelchi, Domchi, Optomchi...).</p>
+      <div id="ctypeEditor">${chipEditor(db.customerTypes, "+ Mijoz turi qo'shish (Enter)")}</div>
+    </div>
     <div class="toolbar"><button class="primary" data-act="catSave">${icon('check')}Saqlash</button></div>`;
 }
 
@@ -2637,7 +2788,7 @@ async function migrateLocal() {
 async function loadDemo() {
   if (db.products.length && !confirm("Namuna ma'lumotlar mavjud ma'lumotlarga qo'shiladi. Davom etilsinmi?")) return;
   const sup = { id: uid(), name: '"Mebel Lux" MChJ', kind: 'supplier', phone: '+998 71 200 00 00', address: 'Toshkent, Chilonzor', inn: '301234567', note: '' };
-  const cus = { id: uid(), name: 'Aliyev Jamshid', kind: 'customer', phone: '+998 90 111 22 33', address: "Toshkent, Yunusobod 4-kvartal", inn: '', note: '' };
+  const cus = { id: uid(), name: 'Aliyev Jamshid', kind: 'customer', ctype: 'Mebelchi', phone: '+998 90 111 22 33', address: "Toshkent, Yunusobod 4-kvartal", inn: '', note: '' };
   db.counterparties.push(sup, cus);
   const mk = (name, category, size, color, material, origin, buyPrice, salePrice) =>
     ({ id: uid(), name, code: 'A' + String(db.products.length + 101), category, size, color, material, origin, maker: '', unit: 'dona', buyPrice, salePrice, minQty: 1, note: '', photos: [] });
@@ -2813,6 +2964,7 @@ const ACTIONS = {
     db.categories = categories;
     db.categoryTypes = types;
     db.colors = $$('#colorEditor .chip').map((c) => c.dataset.v);
+    db.customerTypes = $$('#ctypeEditor .chip').map((c) => c.dataset.v);
     save();
     alert('Saqlandi.');
   },
