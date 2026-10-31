@@ -409,7 +409,7 @@ dialog h3 { margin: 0; padding: 18px 22px; border-bottom: 1px solid var(--border
 
 .items-table td { padding: 4px; vertical-align: middle; }
 .items-table input, .items-table select { padding: 7px 9px; }
-.items-table .it-qty { width: 80px; }
+.items-table .it-qty { width: 52px; }
 .items-table .it-price { width: 140px; }
 .items-table .inv-fact { width: 100px; }
 .total-line { text-align: right; margin-top: 12px; font-size: 17px; }
@@ -911,8 +911,8 @@ input::-webkit-date-and-time-value { text-align: left; }
   .table-wrap:has(> .doc-items) { overflow: visible; }
   .doc-items tr {
     display: grid;
-    grid-template-columns: 80px minmax(0, 1fr) 44px;
-    grid-template-areas: "pick pick pick" "qty price rm" "avail sum sum";
+    grid-template-columns: 136px minmax(0, 1fr) 46px;
+    grid-template-areas: "pick pick rm" "qty price price" "avail sum sum";
     gap: 8px;
     padding: 12px 0;
     border-bottom: 1px solid var(--border);
@@ -926,7 +926,9 @@ input::-webkit-date-and-time-value { text-align: left; }
   .doc-items td:nth-child(6) { grid-area: rm; }
   .doc-items .it-avail:not(:empty)::before { content: 'Omborda: '; }
   .doc-items .it-sum:not(:empty)::before { content: 'Summa: '; font-weight: 400; color: var(--muted); }
-  .doc-items .it-qty, .doc-items .money-wrap, .doc-items .it-remove { width: 100%; }
+  .doc-items .money-wrap, .doc-items .it-remove { width: 100%; }
+  .doc-items .qty-step { width: 100%; }
+  .doc-items .qty-step input { flex: 1; width: auto; }
   .doc-items td:nth-child(6) { align-self: start; }
   .doc-items .it-remove { min-height: 46px; font-size: 18px; }
 
@@ -1105,9 +1107,27 @@ button.primary:active:not(:disabled) { background: var(--accent-dark); }
 @media (max-width: 700px) {
   .kit-table thead { display: none; }
   .kit-table, .kit-table tbody { display: block; }
-  .kit-table tr { display: grid; grid-template-columns: 76px 1fr 44px; gap: 6px 8px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--line, rgba(0,0,0,.08)); }
-  .kit-table td { display: block; padding: 0; border: none; }
+  .table-wrap:has(> .kit-table) { overflow: visible; }
+  .kit-table { width: 100%; table-layout: fixed; }
+  .kit-table tr { display: grid; grid-template-columns: 150px minmax(0, 1fr) 46px; gap: 6px 8px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--line, rgba(0,0,0,.08)); }
+  .kit-table td { display: block; padding: 0; border: none; min-width: 0; }
+  .kit-table .it-search { width: 100%; }
   .kit-table td:first-child { grid-column: 1 / -1; min-width: 0; }
-  .kit-table .kit-qty { width: 100%; }
+  .kit-table .qty-step { width: 100%; }
+  .kit-table .qty-step input { flex: 1; width: auto; }
   .kit-table .kit-del { width: 44px; min-height: 44px; }
+}
+
+/* Son: −/+ tugmalar (barmoq bilan bosishga qulay) */
+.qty-step { display: inline-flex; align-items: stretch; border: 1px solid var(--border-strong); border-radius: 10px; overflow: hidden; background: var(--input); }
+.qty-step input { width: 52px; min-width: 0; border: none; border-radius: 0; text-align: center; padding: 6px 2px; background: transparent; -moz-appearance: textfield; appearance: textfield; }
+.qty-step input::-webkit-outer-spin-button, .qty-step input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.qty-step .qs { min-width: 36px; min-height: 40px; padding: 0; border: none; border-radius: 0; background: transparent; font-size: 20px; line-height: 1; color: var(--accent, inherit); box-shadow: none; }
+.qty-step .qs:active { background: rgba(0, 0, 0, .06); }
+fieldset[disabled] .qty-step .qs { opacity: .35; }
+@media (max-width: 700px) { .qty-step .qs { min-width: 44px; min-height: 44px; } .qty-step input { width: 56px; } }
+
+/* Telefonda matn ichidagi havolalar ham barmoq bilan oson bosilsin */
+@media (max-width: 700px) {
+  td a:not(.btn):not(.side-btn), .card p a, .warn-card a { display: inline-block; padding: 9px 2px; margin: -9px -2px; }
 }

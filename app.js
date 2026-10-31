@@ -854,7 +854,7 @@ function productForm(p = {}, readonly = false) {
       <div class="field full feat-wrap" id="featBlock">${featureBlock(p.category, p.type, p)}</div>
       ${field('Ishlab chiqarilgan joyi', 'origin', p.origin, 'placeholder="O\'zbekiston, Toshkent / Turkiya..."')}
       ${field("O'lchov birligi", 'unit', p.unit || 'dona')}
-      ${field('Minimal qoldiq', 'minQty', p.minQty ?? 1, 'type="number" min="0"')}
+      ${field('Minimal qoldiq', 'minQty', p.minQty ?? 1, 'type="number" inputmode="numeric" min="0"')}
       <div class="field full price-block">
         <span class="field-label">Narxlar valyutasi</span>
         <div class="seg seg-sm" role="radiogroup">
@@ -1308,8 +1308,10 @@ const KIT_CATEGORY = 'Komplektlar';
 function kitPartRow(c = {}) {
   const p = product(c.productId);
   return `<tr>
-    <td><input class="kit-prod" list="kitProducts" autocomplete="off" placeholder="Artikul yoki nomi" value="${esc(productLabel(p))}"></td>
-    <td><input class="kit-qty" type="number" min="1" step="1" value="${c.qty || 1}"></td>
+    <td class="it-pick"><input type="hidden" class="it-product" value="${esc(p ? p.id : '')}">
+      <input class="it-search" autocomplete="off" placeholder="Artikul yoki nomi — yoki tanlang" value="${esc(productLabel(p))}">
+      <div class="it-path muted small">${p ? esc(productPath(p)) : ''}</div></td>
+    <td>${qtyStepper('kit-qty', c.qty || 1)}</td>
     <td class="kit-line num muted"></td>
     <td><button type="button" class="small danger kit-del" title="O'chirish">×</button></td>
   </tr>`;
@@ -1317,14 +1319,12 @@ function kitPartRow(c = {}) {
 
 function kitForm(k = {}) {
   const parts = k.kit?.length ? k.kit : [{}, {}];
-  const opts = activeProducts().filter((p) => !isKit(p)).map((p) => `<option value="${esc(productLabel(p))}"></option>`).join('');
   return `<div class="form-grid">
       ${field('Komplekt nomi *', 'name', k.name, 'required placeholder="Masalan: Yotoqxona to\'plami «Milano»"', 'full')}
       ${field('Artikul', 'code', k.code)}
       ${selectField('Kategoriya', 'category', [[KIT_CATEGORY, KIT_CATEGORY], ...db.categories.filter((c) => c !== KIT_CATEGORY).map((c) => [c, c])], k.category || KIT_CATEGORY)}
     </div>
     <h4 class="kit-h">Tarkibi</h4>
-    <datalist id="kitProducts">${opts}</datalist>
     <div class="table-wrap"><table class="kit-table"><thead><tr><th>Mahsulot</th><th class="num">Soni</th><th class="num">Narxi</th><th></th></tr></thead>
       <tbody id="kitRows">${parts.map(kitPartRow).join('')}</tbody></table></div>
     <button type="button" class="small" id="kitAdd">${icon('plus')}Mahsulot qo'shish</button>
@@ -1337,13 +1337,10 @@ function kitForm(k = {}) {
 }
 
 function readKitParts() {
-  const byLabel = new Map(activeProducts().filter((p) => !isKit(p)).map((p) => [productLabel(p), p]));
   const parts = [];
   for (const tr of $$('#kitRows tr')) {
-    const label = $('.kit-prod', tr).value.trim();
-    if (!label) continue;
-    const p = byLabel.get(label) || activeProducts().find((x) => !isKit(x) && (x.code && x.code === label || x.name === label));
-    if (!p) return { error: `«${label}» topilmadi — ro'yxatdan tanlang.` };
+    const p = product($('.it-product', tr).value);
+    if (!p || isKit(p)) continue;
     const qty = Math.max(1, Math.round(num($('.kit-qty', tr).value)));
     const same = parts.find((c) => c.productId === p.id);
     if (same) same.qty += qty; else parts.push({ productId: p.id, qty });
@@ -1352,6 +1349,7 @@ function readKitParts() {
 }
 
 function bindKitForm(k) {
+  pickKits = false; // komplekt ichiga komplekt qo'shilmaydi
   const rows = $('#kitRows');
   const price = $('#modalBody [name=salePrice]');
   let touched = !!k.salePrice;
@@ -1359,7 +1357,7 @@ function bindKitForm(k) {
   const refresh = () => {
     const { parts = [] } = readKitParts();
     $$('#kitRows tr').forEach((tr) => {
-      const p = activeProducts().find((x) => productLabel(x) === $('.kit-prod', tr).value.trim());
+      const p = product($('.it-product', tr).value);
       $('.kit-line', tr).textContent = p ? money(salePriceUZS(p) * Math.max(1, num($('.kit-qty', tr).value))) : '';
     });
     const sum = parts.reduce((s, c) => s + salePriceUZS(product(c.productId)) * c.qty, 0);
@@ -1379,7 +1377,7 @@ function bindKitForm(k) {
   });
   $('#kitAdd').addEventListener('click', () => {
     rows.insertAdjacentHTML('beforeend', kitPartRow());
-    $('#kitRows tr:last-child .kit-prod').focus();
+    $('#kitRows tr:last-child .it-search').focus();
   });
   refresh();
 }
@@ -1580,6 +1578,21 @@ function partyOptions(kind) {
 const productLabel = (p) => (p ? p.name + (p.code ? ' · ' + p.code : '') : '');
 const productPath = (p) => [p.category || 'Kategoriyasiz', p.type].filter(Boolean).join(' › ');
 
+// Son kiritish: telefonda raqamli klaviatura va katta −/+ tugmalar
+function qtyStepper(cls, value, min = 1) {
+  return `<span class="qty-step"><button type="button" class="qs" data-d="-1" tabindex="-1" aria-label="Kamaytirish">−</button><input class="${cls}" type="number" inputmode="numeric" min="${min}" step="1" value="${value}"><button type="button" class="qs" data-d="1" tabindex="-1" aria-label="Ko'paytirish">+</button></span>`;
+}
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('.qty-step .qs');
+  if (!b) return;
+  const input = b.parentElement.querySelector('input');
+  if (input.disabled || input.closest('fieldset[disabled]')) return;
+  const min = num(input.min) || 0;
+  input.value = Math.max(min, Math.round(num(input.value)) + Number(b.dataset.d));
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  input.dispatchEvent(new Event('change', { bubbles: true }));
+});
+
 function itemRowHtml(t, it = {}, cur = 'UZS') {
   const p = product(it.productId);
   const kit = it.kitId ? ` data-kit-id="${esc(it.kitId)}" data-kit-name="${esc(it.kitName || '')}" data-kit-qty="${it.kitQty || ''}"` : '';
@@ -1588,7 +1601,7 @@ function itemRowHtml(t, it = {}, cur = 'UZS') {
       <input class="it-search" autocomplete="off" placeholder="Artikul yoki nomi — yoki tanlang" value="${esc(productLabel(p))}">
       <div class="it-path muted small">${p ? esc(productPath(p)) : ''}${it.kitName ? ` · <b>Komplekt: ${esc(it.kitName)}</b>` : ''}</div></td>
     <td class="it-avail muted num"></td>
-    <td><input class="it-qty" type="number" min="1" step="1" value="${it.qty || 1}"></td>
+    <td>${qtyStepper('it-qty', it.qty || 1)}</td>
     <td><span class="money-wrap"><input class="it-price money" data-cur="${cur}" inputmode="decimal" value="${esc(fmtIn(it.price ?? '', cur))}"><span class="cur">${CUR_SIGN[cur]}</span></span>
       <div class="it-min muted small"></div></td>
     <td class="it-sum num"></td>
@@ -1716,7 +1729,7 @@ function docForm(type, d) {
         ${field('Buyurtma nomi *', 'cName', ci.name, 'placeholder="Masalan: Oshxona garnituri, 3.2 m"', 'full')}
         ${field("O'lchami (sm)", 'cSize', ci.size, 'placeholder="320 × 60 × 220"')}
         ${field('Rangi', 'cColor', ci.color, 'placeholder="Oq gladkiy / Dub votan"')}
-        ${field('Soni', 'cQty', ci.qty || 1, 'type="number" min="1"')}
+        ${field('Soni', 'cQty', ci.qty || 1, 'type="number" inputmode="numeric" min="1"')}
         ${moneyField('Narxi (donasi)', 'cPrice', ci.price ?? '', 'UZS')}
         ${textArea('Tavsifi: material, furnitura, qo\'shimcha talablar', 'cSpec', ci.spec)}
       </div>
@@ -2097,7 +2110,8 @@ document.addEventListener('focusout', (e) => {
   if (!e.target.classList?.contains('it-search')) return;
   setTimeout(() => {
     if (document.activeElement !== e.target) {
-      closePicker();
+      // Boshqa mahsulot maydoniga o'tilgan bo'lsa, uning ro'yxati ochiq qolsin
+      if (!document.activeElement?.classList?.contains('it-search')) closePicker();
       // Tanlanmagan matn qolsa — avvalgi tanlovni qaytaramiz
       const p = product(e.target.parentElement.querySelector('.it-product').value);
       e.target.value = productLabel(p);
@@ -2645,7 +2659,7 @@ function openInventory(existing) {
     return db.products.filter((p) => !p.archived).map((p) => {
       const q = qtyIn(st, p.id, wh);
       return `<tr data-pid="${p.id}" data-exp="${q}"><td>${esc(p.name)} <span class="muted">${esc(p.code)}</span></td><td class="num">${q}</td>
-        <td><input class="inv-fact" type="number" min="0" value="${q}"></td><td class="num inv-diff">0</td></tr>`;
+        <td><input class="inv-fact" type="number" inputmode="numeric" min="0" value="${q}"></td><td class="num inv-diff">0</td></tr>`;
     }).join('') || emptyRow(4, "Mahsulot yo'q");
   };
   openModal({
@@ -4514,7 +4528,7 @@ function quickLabel(id) {
   openModal({
     title: 'Etiketka: ' + p.name,
     body: `<div class="lbl-quick"><div class="lbl-view">${labelHtml(p, labelTpl())}</div>
-      <div class="form-grid"><label>Nechta nusxa<input name="n" type="number" min="1" step="1" value="1" required></label>
+      <div class="form-grid"><label>Nechta nusxa<input name="n" type="number" inputmode="numeric" min="1" step="1" value="1" required></label>
       <label>Printer${labelModeSelect()}</label></div>
       ${st ? `<button type="button" class="small" id="lqAll">Omborda borcha (${st})</button>` : ''}</div>`,
     submitText: 'Chop etish',
@@ -4535,7 +4549,7 @@ function docLabels(id) {
   openModal({
     title: `Etiketkalar: ${DOC_TYPES[d.type].one} ${d.no}`,
     body: `<div class="table-wrap"><table><thead><tr><th>Mahsulot</th><th class="num">Nusxa</th></tr></thead><tbody>
-      ${items.map((x, i) => `<tr><td>${esc(productLabel(x.p))}</td><td class="num"><input class="lq-in" type="number" min="0" step="1" name="n${i}" value="${x.n}"></td></tr>`).join('')}
+      ${items.map((x, i) => `<tr><td>${esc(productLabel(x.p))}</td><td class="num"><input class="lq-in" type="number" inputmode="numeric" min="0" step="1" name="n${i}" value="${x.n}"></td></tr>`).join('')}
       </tbody></table></div><div class="form-grid" style="margin-top:12px"><label>Printer${labelModeSelect()}</label></div>`,
     submitText: 'Chop etish',
     onSubmit: (data) => {
@@ -4565,7 +4579,7 @@ function viewLabels() {
     return `<tr>${thumbCell(p)}
       <td><b>${esc(p.name)}</b><div class="muted small">${esc([p.code, productPath(p)].filter(Boolean).join(' · '))}</div></td>
       <td class="num">${priceLabel(p)}</td><td class="num">${st}</td>
-      <td class="num"><div class="lq"><button type="button" class="small icon-only" data-act="lqStep" data-id="${p.id}" data-d="-1">−</button><input class="lq-in" type="number" min="0" step="1" data-lq="${p.id}" value="${labelQty[p.id] || ''}" placeholder="0"><button type="button" class="small icon-only" data-act="lqStep" data-id="${p.id}" data-d="1">+</button></div></td>
+      <td class="num"><div class="lq"><button type="button" class="small icon-only" data-act="lqStep" data-id="${p.id}" data-d="-1">−</button><input class="lq-in" type="number" inputmode="numeric" min="0" step="1" data-lq="${p.id}" value="${labelQty[p.id] || ''}" placeholder="0"><button type="button" class="small icon-only" data-act="lqStep" data-id="${p.id}" data-d="1">+</button></div></td>
     </tr>`;
   }).join('');
   return toolbar('labels', {
@@ -4637,8 +4651,8 @@ function viewLabelDesign() {
     <div class="card ld-stage">
       <div class="toolbar">
         <label class="inline">O'lcham <select id="ldSize">${LABEL_SIZES.map(([w, h]) => `<option value="${w}x${h}" ${preset && preset[0] === w && preset[1] === h ? 'selected' : ''}>${w} × ${h} mm</option>`).join('')}<option value="custom" ${preset ? '' : 'selected'}>Boshqa o'lcham</option></select></label>
-        <label class="inline">Eni <input class="ld-num" type="number" min="15" max="200" step="1" data-ld="w" value="${t.w}"> mm</label>
-        <label class="inline">Bo'yi <input class="ld-num" type="number" min="10" max="200" step="1" data-ld="h" value="${t.h}"> mm</label>
+        <label class="inline">Eni <input class="ld-num" type="number" inputmode="numeric" min="15" max="200" step="1" data-ld="w" value="${t.w}"> mm</label>
+        <label class="inline">Bo'yi <input class="ld-num" type="number" inputmode="numeric" min="10" max="200" step="1" data-ld="h" value="${t.h}"> mm</label>
         <label class="inline">Namuna <select id="ldSample">${activeProducts().slice(0, 500).map((p) => `<option value="${p.id}" ${p === sample ? 'selected' : ''}>${esc(productLabel(p))}</option>`).join('')}</select></label>
       </div>
       <div class="ld-canvas"><div class="ld-wrap" id="ldWrap"></div></div>
@@ -4656,7 +4670,7 @@ function viewLabelDesign() {
         <button class="danger" data-act="ldReset">Standart</button>
       </div>
       <div class="form-grid"><label>Printer (shu qurilmada)${labelModeSelect()}</label>
-        <label>A4 da oraliq, mm<input class="ld-num" type="number" min="0" max="20" step="0.5" data-ld="gap" value="${t.gap}"></label></div>
+        <label>A4 da oraliq, mm<input class="ld-num" type="number" inputmode="decimal" min="0" max="20" step="0.5" data-ld="gap" value="${t.gap}"></label></div>
     </div>
   </div>`;
 }
@@ -4665,7 +4679,7 @@ function ldProps() {
   const k = labelSel;
   const e = labelDraft.els[k];
   const f = LABEL_FIELDS[k];
-  const field = (key, label, min, max, step) => `<label>${label}<div class="ld-range"><input type="range" min="${min}" max="${max}" step="${step}" data-lde="${key}" value="${e[key]}"><input class="ld-num" type="number" min="${min}" max="${max}" step="${step}" data-lde="${key}" value="${e[key]}"></div></label>`;
+  const field = (key, label, min, max, step) => `<label>${label}<div class="ld-range"><input type="range" min="${min}" max="${max}" step="${step}" data-lde="${key}" value="${e[key]}"><input class="ld-num" type="number" inputmode="numeric" min="${min}" max="${max}" step="${step}" data-lde="${key}" value="${e[key]}"></div></label>`;
   const text = !f.kind;
   return `<h3>${esc(f.title)}</h3>${e.on ? '' : '<p class="muted small">Bu element yashirilgan — yuqorida belgilang.</p>'}
     <div class="ld-props">
