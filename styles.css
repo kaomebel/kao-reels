@@ -1131,3 +1131,32 @@ fieldset[disabled] .qty-step .qs { opacity: .35; }
 @media (max-width: 700px) {
   td a:not(.btn):not(.side-btn), .card p a, .warn-card a { display: inline-block; padding: 9px 2px; margin: -9px -2px; }
 }
+
+/* Rasmni to'liq ekranda ko'rish */
+.lightbox { position: fixed; inset: 0; width: 100vw; height: 100vh; height: 100dvh; max-width: none; max-height: none; margin: 0; padding: 0; border: none; border-radius: 0; background: #0d0a08; color: #fff; overflow: hidden; }
+.lightbox::backdrop { background: #0d0a08; }
+.lb-stage { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; overflow: hidden; touch-action: pan-y; }
+.lb-img { max-width: 100%; max-height: 100%; width: auto; height: auto; object-fit: contain; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; cursor: zoom-in; }
+.lightbox.zoomed .lb-stage { display: block; overflow: auto; touch-action: pan-x pan-y; -webkit-overflow-scrolling: touch; }
+.lightbox.zoomed .lb-img { max-width: none; max-height: none; width: 250%; cursor: zoom-out; }
+@media (orientation: landscape) { .lightbox.zoomed .lb-img { width: 200%; } }
+.lb-top { position: absolute; left: 0; right: 0; top: 0; display: flex; align-items: center; gap: 8px; padding: max(10px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) 10px max(14px, env(safe-area-inset-left)); background: linear-gradient(rgba(0, 0, 0, .55), transparent); }
+.lb-count { font-size: 15px; opacity: .9; }
+.lb-gap { flex: 1; }
+.lb-btn { min-width: 46px; min-height: 46px; padding: 0 12px; border-radius: 23px; border: none; background: rgba(255, 255, 255, .14); color: #fff; font-size: 26px; line-height: 1; box-shadow: none; }
+.lb-btn:active { background: rgba(255, 255, 255, .28); }
+.lb-zoom { font-size: 18px; }
+.lb-nav { position: absolute; top: 50%; transform: translateY(-50%); font-size: 34px; }
+.lb-prev { left: max(10px, env(safe-area-inset-left)); }
+.lb-next { right: max(10px, env(safe-area-inset-right)); }
+.lightbox.zoomed .lb-nav { display: none; }
+.lb-loading { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); opacity: 0; pointer-events: none; transition: opacity .2s; }
+.lightbox.loading .lb-loading { opacity: .8; }
+@media (hover: hover) { .lb-btn:hover { background: rgba(255, 255, 255, .24); } }
+
+.photo-list img[data-i] { cursor: zoom-in; }
+.photo-list .ph-star { position: absolute; left: 6px; bottom: 6px; min-height: 0; padding: 3px 8px; border-radius: 6px; font-size: 11px; background: rgba(58, 41, 29, .85); color: #fff6ea; border: none; }
+@media (max-width: 700px) {
+  .photo-list .ph-del { width: 34px; height: 34px; font-size: 18px; }
+  .photo-list .ph-star { padding: 6px 9px; font-size: 12px; }
+}

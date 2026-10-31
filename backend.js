@@ -89,11 +89,11 @@ function canvasToBlob(img, max, type, quality) {
 // Katta (kartochka uchun) va kichik (ro'yxat uchun) nusxa. WebP qo'llanmasa — JPEG.
 async function preparePhoto(blob) {
   const img = await loadImage(blob);
-  let full = await canvasToBlob(img, 1200, 'image/webp', 0.8);
+  let full = await canvasToBlob(img, 2000, 'image/webp', 0.85);
   let type = 'image/webp';
   if (!full || full.type !== 'image/webp') {
     type = 'image/jpeg';
-    full = await canvasToBlob(img, 1200, type, 0.8);
+    full = await canvasToBlob(img, 2000, type, 0.85);
   }
   const thumb = await canvasToBlob(img, 240, type, 0.7);
   return { full, thumb, ext: type === 'image/webp' ? 'webp' : 'jpg' };

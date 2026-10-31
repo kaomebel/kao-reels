@@ -840,7 +840,7 @@ function productForm(p = {}, readonly = false) {
     <div class="photo-box">
       <div class="photo-list" id="photoList"></div>
       ${readonly ? '' : `<label class="filebtn">${icon('camera')}Rasm qo'shish<input type="file" id="photoInput" accept="image/*" multiple hidden></label>
-      <div class="muted small">${MAX_PHOTOS} tagacha. Birinchisi — asosiy (Telegram va ro'yxatda). Asosiy qilish uchun rasm ustiga bosing.</div>`}
+      <div class="muted small">${MAX_PHOTOS} tagacha. Birinchisi — asosiy (Telegram va ro'yxatda). Rasm ustiga bosilsa — to'liq ekranda ochiladi; «★ Asosiy qilish» — asosiy rasm qiladi.</div>`}
     </div>
     <div class="form-grid">
       ${field('Nomi *', 'name', p.name, 'required', 'full')}
@@ -911,9 +911,9 @@ function renderPhotoList(readonly) {
   const box = $('#photoList');
   if (!box) return;
   box.innerHTML = photoEdit.items.length ? photoEdit.items.map((ph, i) => `<div class="ph ${i === 0 ? 'main' : ''}">
-      <img ${ph.file ? `src="${ph.url}"` : `data-photo="${esc(ph.thumb)}"`} data-i="${i}" alt="">
-      ${i === 0 ? '<span class="ph-main">Asosiy</span>' : ''}
-      ${readonly ? '' : `<button type="button" class="ph-del" data-i="${i}" title="Olib tashlash">×</button>`}
+      <img ${ph.file ? `src="${ph.url}"` : `data-photo="${esc(i === 0 ? ph.path : ph.thumb)}"`} data-i="${i}" alt="" title="Kattalashtirish">
+      ${i === 0 ? '<span class="ph-main">Asosiy</span>' : readonly ? '' : `<button type="button" class="ph-star" data-i="${i}" title="Asosiy rasm qilish">★ Asosiy qilish</button>`}
+      ${readonly ? '' : `<button type="button" class="ph-del" data-i="${i}" title="O'chirish">×</button>`}
     </div>`).join('') : `<div class="photo-empty">${icon('camera')}<span>Rasm yo'q</span></div>`;
   hydratePhotos(box);
 }
@@ -1125,14 +1125,18 @@ function bindProductForm(p, readonly = false) {
   });
   $('#photoList').addEventListener('click', (e) => {
     const del = e.target.closest('.ph-del');
+    const star = e.target.closest('.ph-star');
     const img = e.target.closest('img[data-i]');
     if (del) {
+      if (!confirm("Rasm o'chirilsinmi?\n\n(Kartochka saqlangandan keyin o'chadi — «Yopish» bosilsa, rasm joyida qoladi.)")) return;
       const [ph] = photoEdit.items.splice(+del.dataset.i, 1);
       if (ph.file) URL.revokeObjectURL(ph.url);
       else photoEdit.removed.push(ph.path, ph.thumb);
-    } else if (img && +img.dataset.i > 0) {
-      const [ph] = photoEdit.items.splice(+img.dataset.i, 1);
+    } else if (star) {
+      const [ph] = photoEdit.items.splice(+star.dataset.i, 1);
       photoEdit.items.unshift(ph);
+    } else if (img) {
+      return openLightbox(photoEdit.items, +img.dataset.i);
     } else return;
     renderPhotoList();
   });
@@ -1151,6 +1155,93 @@ async function uploadPendingPhotos() {
     URL.revokeObjectURL(ph.url);
   }
   return out;
+}
+
+// ---------- Rasmni to'liq ekranda ko'rish ----------
+// Barmoq bilan chapga/o'ngga surib almashtiriladi, ikki marta bosilsa (yoki 🔍) kattalashadi.
+function openLightbox(items, start = 0) {
+  const list = (items || []).filter((ph) => ph && (ph.path || ph.url));
+  if (!list.length) return;
+  let i = Math.min(Math.max(0, start), list.length - 1);
+  let lb = $('#lightbox');
+  if (!lb) {
+    lb = document.createElement('dialog');
+    lb.id = 'lightbox';
+    lb.className = 'lightbox';
+    lb.innerHTML = `<div class="lb-stage"><img class="lb-img" alt=""></div>
+      <div class="lb-top"><span class="lb-count"></span><span class="lb-gap"></span>
+        <button type="button" class="lb-btn lb-zoom" title="Kattalashtirish">🔍</button>
+        <button type="button" class="lb-btn lb-close" title="Yopish">×</button></div>
+      <button type="button" class="lb-btn lb-nav lb-prev" title="Oldingi">‹</button>
+      <button type="button" class="lb-btn lb-nav lb-next" title="Keyingi">›</button>
+      <div class="lb-loading">Yuklanmoqda...</div>`;
+    document.body.appendChild(lb);
+  }
+  const img = $('.lb-img', lb);
+  const stage = $('.lb-stage', lb);
+  const setZoom = (on, cx, cy) => {
+    lb.classList.toggle('zoomed', on);
+    if (on && cx != null) {
+      // Bosilgan joy markazga kelsin
+      requestAnimationFrame(() => {
+        stage.scrollLeft = cx * img.offsetWidth - stage.clientWidth / 2;
+        stage.scrollTop = cy * img.offsetHeight - stage.clientHeight / 2;
+      });
+    }
+  };
+  const show = async () => {
+    setZoom(false);
+    const ph = list[i];
+    $('.lb-count', lb).textContent = list.length > 1 ? `${i + 1} / ${list.length}` : '';
+    $('.lb-prev', lb).hidden = $('.lb-next', lb).hidden = list.length < 2;
+    lb.classList.add('loading');
+    img.removeAttribute('src');
+    const url = ph.url || await backend.photoUrl(ph.path).catch(() => null) || (ph.thumb && await backend.photoUrl(ph.thumb).catch(() => null));
+    if (list[i] !== ph) return;
+    if (url) img.src = url;
+    img.onload = img.onerror = () => lb.classList.remove('loading');
+  };
+  const go = (d) => { i = (i + d + list.length) % list.length; show(); };
+  lb.onclick = (e) => {
+    if (e.target.closest('.lb-close')) return lb.close();
+    if (e.target.closest('.lb-prev')) return go(-1);
+    if (e.target.closest('.lb-next')) return go(1);
+    if (e.target.closest('.lb-zoom')) return setZoom(!lb.classList.contains('zoomed'), 0.5, 0.5);
+    if (e.target === stage && !lb.classList.contains('zoomed')) lb.close(); // rasm atrofidagi bo'sh joy
+  };
+  img.ondblclick = (e) => {
+    const r = img.getBoundingClientRect();
+    setZoom(!lb.classList.contains('zoomed'), (e.clientX - r.left) / r.width, (e.clientY - r.top) / r.height);
+  };
+  // Telefonda: surish — boshqa rasm, ikki marta tegish — kattalashtirish
+  let t0 = null;
+  let lastTap = 0;
+  stage.ontouchstart = (e) => { t0 = e.touches.length === 1 ? { x: e.touches[0].clientX, y: e.touches[0].clientY, at: Date.now() } : null; };
+  stage.ontouchend = (e) => {
+    if (!t0) return;
+    const tch = e.changedTouches[0];
+    const dx = tch.clientX - t0.x;
+    const dy = tch.clientY - t0.y;
+    if (!lb.classList.contains('zoomed') && Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.5) { go(dx < 0 ? 1 : -1); t0 = null; return; }
+    if (!lb.classList.contains('zoomed') && dy > 90 && Math.abs(dy) > Math.abs(dx) * 1.5) { lb.close(); t0 = null; return; }
+    if (Math.abs(dx) < 10 && Math.abs(dy) < 10 && e.target === img) {
+      const now = Date.now();
+      if (now - lastTap < 320) {
+        e.preventDefault();
+        const r = img.getBoundingClientRect();
+        setZoom(!lb.classList.contains('zoomed'), (tch.clientX - r.left) / r.width, (tch.clientY - r.top) / r.height);
+        lastTap = 0;
+      } else lastTap = now;
+    }
+    t0 = null;
+  };
+  lb.onkeydown = (e) => {
+    if (e.key === 'ArrowLeft') go(-1);
+    else if (e.key === 'ArrowRight') go(1);
+  };
+  if (!lb.open) lb.showModal();
+  $('.lb-close', lb).focus();
+  show();
 }
 
 async function hydratePhotos(root = document) {
@@ -1371,6 +1462,8 @@ function bindKitForm(k) {
   rows.addEventListener('change', refresh);
   rows.addEventListener('click', (e) => {
     if (!e.target.closest('.kit-del')) return;
+    const chosen = product($('.it-product', e.target.closest('tr')).value);
+    if (chosen && !confirm(`«${chosen.name}» komplekt tarkibidan olib tashlansinmi?`)) return;
     e.target.closest('tr').remove();
     if (!rows.children.length) rows.insertAdjacentHTML('beforeend', kitPartRow());
     refresh();
@@ -2206,6 +2299,8 @@ function bindDocForm(type, editingId) {
   body.addEventListener('input', recalc);
   body.addEventListener('click', (e) => {
     if (!e.target.classList.contains('it-remove')) return;
+    const chosen = product($('.it-product', e.target.closest('tr')).value);
+    if (chosen && !confirm(`«${chosen.name}» ro'yxatdan olib tashlansinmi?`)) return;
     if ($$('tr', body).length > 1) e.target.closest('tr').remove();
     else {
       $('.it-product', e.target.closest('tr')).value = '';
@@ -4425,16 +4520,7 @@ const ACTIONS = {
       alert('Yuborib bo\'lmadi: ' + e.message);
     }
   },
-  photoView: (ds) => {
-    const p = product(ds.id);
-    openModal({
-      title: p.name,
-      wide: true,
-      body: `<div class="gallery">${p.photos.map((ph) => `<img data-photo="${esc(ph.path)}" alt="${esc(p.name)}">`).join('')}</div>
-        <p class="muted">${esc([p.size && p.size + ' sm', p.color, priceLabel(p)].filter(Boolean).join(' · '))}</p>`,
-      extra: can('products') ? [{ label: 'Kartochkani ochish', onClick: () => editProduct(p.id) }] : [],
-    });
-  },
+  photoView: (ds) => openLightbox(product(ds.id)?.photos || [], 0),
   catIconOpen: (ds, el) => {
     const grid = $('.cat-ic-grid', el.closest('.cat-row'));
     grid.hidden = !grid.hidden;
