@@ -1229,7 +1229,13 @@ function docForm(type, d) {
   }
   head += selectField(t.move ? 'Qaysi ombordan' : 'Ombor', 'warehouseId', whOptions(), d.warehouseId || db.warehouses[0].id);
   if (t.move) head += selectField('Qaysi omborga', 'toWarehouseId', whOptions(), d.toWarehouseId || (db.warehouses[1] || db.warehouses[0]).id);
-  if (t.statuses) head += selectField('Holati', 'status', Object.entries(t.statuses), d.status || Object.keys(t.statuses)[0]);
+  // Savdoda: avval mahsulotlar, keyin holati va yetkazish
+  let after = '';
+  const late = t.party === 'customer';
+  if (t.statuses) {
+    const st = selectField('Holati', 'status', Object.entries(t.statuses), d.status || Object.keys(t.statuses)[0]);
+    if (late) after += st; else head += st;
+  }
   const cur = t.fx && d.currency === 'USD' ? 'USD' : 'UZS';
   if (t.fx) {
     head += `<div class="field"><span class="field-label">Valyuta</span><div class="seg seg-sm" role="radiogroup">
@@ -1246,9 +1252,10 @@ function docForm(type, d) {
       <label><input type="radio" name="orderKind" value="standard" ${custom ? '' : 'checked'}><span>Standart — mavjud tovarlardan</span></label>
       <label><input type="radio" name="orderKind" value="custom" ${custom ? 'checked' : ''}><span>Nostandart — individual buyurtma</span></label>
     </div></div>`;
-    head += addressBlock(d, true, false);
+    after += addressBlock(d, true, false);
   } else if (t.delivery) {
-    head += addressBlock(d, !!(d.address || d.addr), true);
+    const ab = addressBlock(d, !!(d.address || d.addr), true);
+    if (late) after += ab; else head += ab;
   }
 
   let foot = '';
@@ -1299,7 +1306,7 @@ function docForm(type, d) {
     </table></div>
     <button type="button" class="small" id="addItemRow">${icon('plus')}Qator qo'shish</button>
     </div>
-    <div class="form-grid" style="margin-top:12px">${foot}</div>
+    <div class="form-grid" style="margin-top:12px">${after}${foot}</div>
     <div class="total-line" id="totalLine" data-paid="${prevPaid(d)}">Jami: <b id="docTotal">0</b><span id="docRest"></span></div>`;
 }
 
@@ -1533,8 +1540,10 @@ const picker = { input: null, cat: null, type: null };
 function pickerPanel() {
   let panel = $('#pickPanel');
   if (!panel) {
-    $('#modal').insertAdjacentHTML('beforeend', '<div id="pickPanel" class="pick-panel" hidden></div>');
-    panel = $('#pickPanel');
+    panel = document.createElement('div');
+    panel.id = 'pickPanel';
+    panel.className = 'pick-panel';
+    panel.hidden = true;
     panel.addEventListener('mousedown', (e) => e.preventDefault()); // katak fokusini yo'qotmasin
     panel.addEventListener('click', (e) => {
       const el = e.target.closest('[data-pick]');
@@ -1609,13 +1618,8 @@ function renderPicker() {
     }
   }
   panel.innerHTML = html;
-  const r = picker.input.getBoundingClientRect();
-  const width = Math.max(r.width, Math.min(420, window.innerWidth - 24));
-  panel.style.left = Math.max(12, Math.min(r.left, window.innerWidth - width - 12)) + 'px';
-  panel.style.width = width + 'px';
-  const below = window.innerHeight - r.bottom;
-  if (below < 260 && r.top > below) { panel.style.top = ''; panel.style.bottom = (window.innerHeight - r.top + 4) + 'px'; }
-  else { panel.style.bottom = ''; panel.style.top = (r.bottom + 4) + 'px'; }
+  // Ro'yxat maydonning o'zi ostida ochiladi (ekran tepasida emas)
+  if (panel.previousElementSibling !== picker.input) picker.input.after(panel);
   panel.hidden = false;
 }
 
@@ -1645,6 +1649,8 @@ document.addEventListener('focusin', (e) => {
   if (p) { picker.cat = p.category || ''; picker.type = p.type || null; }
   e.target.select();
   renderPicker();
+  // Telefonda: maydon tepaga chiqsin — ostidagi ro'yxat klaviatura ustida ko'rinsin
+  if (window.innerWidth <= 700) setTimeout(() => picker.input?.scrollIntoView({ block: 'start', behavior: 'smooth' }), 250);
 });
 document.addEventListener('input', (e) => {
   if (e.target.classList?.contains('it-search')) renderPicker();
@@ -1670,7 +1676,6 @@ document.addEventListener('focusout', (e) => {
     }
   }, 150);
 });
-$('#modalBody').addEventListener('scroll', closePicker);
 $('#modal').addEventListener('close', closePicker);
 $('#modal').addEventListener('cancel', (e) => {
   const panel = $('#pickPanel');

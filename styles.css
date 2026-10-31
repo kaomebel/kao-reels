@@ -773,9 +773,9 @@ input.phone { font-variant-numeric: tabular-nums; letter-spacing: .3px; }
 .it-pick { min-width: 240px; }
 .it-path:empty { display: none; }
 .pick-panel {
-  position: fixed;
-  z-index: 100;
-  max-height: min(360px, 60vh);
+  margin: 4px 0;
+  max-height: min(340px, 45vh);
+  overscroll-behavior: contain;
   overflow-y: auto;
   background: var(--card);
   border: 1px solid var(--border-strong);
