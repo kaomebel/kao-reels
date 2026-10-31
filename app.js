@@ -258,17 +258,18 @@ let authMessage = '';
 function renderAuth() {
   const setup = authNeedsSetup;
   const loginLabel = backend.loginLabel;
-  const isEmail = backend.kind === 'supabase';
   $('#authSubtitle').textContent = setup ? 'Birinchi ishga tushirish: administrator hisobini yarating.' : 'Tizimga kirish';
   $('#authForm').innerHTML = `
     ${setup ? '<label>Ismingiz<input name="name" required autocomplete="name"></label>' : ''}
-    <label>${loginLabel}<input name="login" required autocomplete="username" autocapitalize="none" ${isEmail ? 'type="email" inputmode="email"' : ''}></label>
+    <label>${loginLabel}<input name="login" required autocomplete="username" autocapitalize="none" spellcheck="false"></label>
     <label>Parol<input name="password" type="password" required autocomplete="${setup ? 'new-password' : 'current-password'}"></label>
     ${setup ? '<label>Parolni takrorlang<input name="password2" type="password" required autocomplete="new-password"></label>' : ''}
     <div class="auth-error" id="authError">${esc(authMessage)}</div>
     <button class="primary" type="submit">${setup ? 'Yaratish va kirish' : 'Kirish'}</button>
-    <div class="auth-server muted small">${esc(backend.label)} · <a href="#" id="serverLink">${backend.kind === 'local' ? 'Serverga ulanish' : "O'zgartirish"}</a></div>`;
-  $('#serverLink').addEventListener('click', (e) => { e.preventDefault(); openServerSettings(); });
+    ${serverLocked()
+    ? '<div class="auth-server muted small">Login va parolni administratordan oling.</div>'
+    : `<div class="auth-server muted small">${esc(backend.label)} · <a href="#" id="serverLink">${backend.kind === 'local' ? 'Serverga ulanish' : "O'zgartirish"}</a></div>`}`;
+  $('#serverLink')?.addEventListener('click', (e) => { e.preventDefault(); openServerSettings(); });
   (setup ? $('#authForm [name=name]') : $('#authForm [name=login]')).focus();
 }
 
@@ -3248,7 +3249,7 @@ function editUser(id) {
     title: id ? 'Foydalanuvchi' : 'Yangi foydalanuvchi',
     body: `<div class="form-grid">
       ${field('Ism *', 'name', u.name, 'required')}
-      ${field(server ? 'Email (login) *' : 'Login *', 'login', u.login, `required autocapitalize="none" autocomplete="off" ${server ? 'type="email"' : ''} ${server && id ? 'disabled' : ''}`)}
+      ${field('Login *', 'login', u.login, `required autocapitalize="none" autocomplete="off" placeholder="masalan: sardor" ${server && id ? 'disabled' : ''}`)}
       ${selectField('Roli', 'role', Object.entries(ROLES), u.role, '', `id="userRole" ${self ? 'disabled' : ''}`)}
       ${selectField('Holati', 'active', [['1', 'Faol'], ['0', 'Bloklangan']], u.active === false ? '0' : '1', '', self ? 'disabled' : '')}
       ${canSetPassword
@@ -3278,6 +3279,11 @@ function editUser(id) {
     },
     onSubmit: async (d) => {
       const password = d.password || '';
+      // Login: lotin harflari, raqamlar, nuqta, chiziqcha (yoki email)
+      if (!id && !/^[a-z0-9._-]+(@[a-z0-9.-]+\.[a-z]+)?$/i.test(d.login.trim())) {
+        alert("Login faqat lotin harflari, raqamlar, nuqta va chiziqchadan iborat bo'lsin (masalan: sardor yoki sardor.k).");
+        return false;
+      }
       if (password && password.length < 6) {
         alert("Parol kamida 6 belgidan iborat bo'lsin.");
         return false;
@@ -3300,7 +3306,7 @@ function editUser(id) {
       db.users = await backend.listUsers();
       if (self) Object.assign(me, { name: next.name });
       render();
-      if (!id && server) alert(`Foydalanuvchi qo'shildi. U ${next.login} va siz bergan parol bilan kiradi.`);
+      if (!id && server) alert(`Foydalanuvchi qo'shildi. U «${next.login}» login va siz bergan parol bilan kiradi.`);
     },
   });
 }
@@ -3577,7 +3583,7 @@ function viewServer() {
     <p class="muted">${server
       ? "Barcha qurilmalar shu bitta bazada ishlaydi. Bir qurilmadagi o'zgarish boshqalarida bir necha soniyada ko'rinadi."
       : "Ma'lumotlar faqat shu qurilmada. Sotuvchilar telefondan ishlashi uchun Supabase serveriga ulaning (README → \"Supabase'ni sozlash\")."}</p>
-    <button class="primary" data-act="serverSettings">${server ? 'Ulanish sozlamalari' : 'Serverga ulanish'}</button></div>
+    ${serverLocked() ? '<p class="muted small">Sayt shu serverga doimiy ulangan (config.js).</p>' : `<button class="primary" data-act="serverSettings">${server ? 'Ulanish sozlamalari' : 'Serverga ulanish'}</button>`}</div>
     <div class="card narrow"><h3>${server ? 'Rasmlar xotirasi (bepul tarif — 1 GB)' : 'Brauzer xotirasi'}</h3>${usageBar()}
       <button class="small" data-act="refreshUsage">Yangilash</button></div>
     ${local ? `<div class="card narrow"><h3>Lokal ma'lumotlarni serverga ko'chirish</h3>
@@ -3979,7 +3985,7 @@ const ACTIONS = {
     if (used && !confirm(`"${row.dataset.orig}" kategoriyasida ${used} ta mahsulot bor. Kategoriya ro'yxatdan olib tashlansinmi? (mahsulotlar o'chmaydi)`)) return;
     row.remove();
   },
-  serverSettings: () => openServerSettings(),
+  serverSettings: () => { if (!serverLocked()) openServerSettings(); },
   rateRefresh: () => refreshRate(true),
   contract: (ds) => printContract(ds.id),
   debtPay: (ds) => { const d = doc(ds.id); newPayment('in', { counterpartyId: d.counterpartyId, docId: d.id }); },

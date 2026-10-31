@@ -53,7 +53,9 @@ Supabase rejimida barcha qurilmalar bitta bazada ishlaydi va bir qurilmadagi o'z
 8. Avval lokal rejimda ma'lumot kiritgan bo'lsangiz: **Sozlamalar → Server → Serverga ko'chirish** (rasmlari bilan ko'chadi).
 9. Sotuvchilarni qo'shing: **Sozlamalar → Foydalanuvchilar → + Foydalanuvchi** (email + parol). Ular shu email va parol bilan istalgan qurilmadan kiradi.
 
-Har bir qurilmada URL va kalitni qayta kiritmaslik uchun ularni [`config.js`](config.js) fayliga yozib qo'yish mumkin — anon kalit ochiq kalit, uni saqlash xavfsiz.
+**Saytni serverga qulflash (tavsiya etiladi):** URL va anon kalitni [`config.js`](config.js) ga yozing (`supabaseUrl`, `supabaseAnonKey`) — anon kalit ochiq kalit, uni saqlash xavfsiz. Shundan keyin sayt faqat shu serverda ishlaydi: lokal rejim va "Serverga ulanish" yo'qoladi, havolani ochgan har kim faqat administrator bergan login bilan kira oladi (begona ro'yxatdan o'tsa ham hisobi bloklangan bo'ladi va hech narsa ko'rmaydi). Administrator hisobini birinchi bo'lib siz yarating.
+
+Loginlar oddiy so'z bo'lishi mumkin (`sardor`, `bahodir`) — dastur ularni ichkarida `sardor@kao.local` ko'rinishida saqlaydi; email ham ishlaydi.
 
 **Bepul tarif:** 500 MB baza, 1 GB rasm, oyiga ~5 GB trafik — 1000 ta mahsulot (har biriga 3–4 rasm) uchun yetarli. Band joy **Sozlamalar → Server** da ko'rinadi, 80% dan oshsa bosh sahifada ogohlantirish chiqadi. Bepul loyiha 7 kun umuman ishlatilmasa to'xtatiladi (ma'lumot o'chmaydi, panelda qayta yoqiladi).
 

@@ -23,8 +23,21 @@ const LOCAL_DATA_KEY = 'biznes-tizim-v1';
 const LOCAL_SESSION_KEY = 'biznes-tizim-session';
 const PHOTO_BUCKET = 'photos';
 
+// Supabase'da login — email. Xodimlarga oddiy login ("sardor") berish uchun unga ichki domen qo'shiladi
+const LOGIN_DOMAIN = '@kao.local';
+const toEmail = (login) => {
+  const l = String(login || '').trim().toLowerCase();
+  return l.includes('@') ? l : l + LOGIN_DOMAIN;
+};
+const shortLogin = (email) => String(email || '').replace(LOGIN_DOMAIN, '');
+
+// config.js da server yozilgan bo'lsa — sayt faqat shu serverda ishlaydi: lokal rejim ham, boshqa server ham yo'q.
+// Shunda havolani ochgan har kim faqat administrator bergan login bilan kira oladi.
+const serverLocked = () => !!(window.BT_CONFIG?.supabaseUrl && window.BT_CONFIG?.supabaseAnonKey);
+
 function serverConfig() {
   const c = window.BT_CONFIG || {};
+  if (serverLocked()) return { url: c.supabaseUrl.trim(), key: c.supabaseAnonKey.trim() };
   let saved = {};
   try { saved = JSON.parse(localStorage.getItem(SERVER_CONFIG_KEY) || '{}'); } catch (e) { /* xotira yopiq */ }
   return { url: (saved.url || c.supabaseUrl || '').trim(), key: (saved.key || c.supabaseAnonKey || '').trim() };
@@ -350,8 +363,8 @@ function syncError(error) {
 
 function friendlyError(error) {
   const m = error?.message || String(error);
-  if (/Invalid login credentials/i.test(m)) return "Email yoki parol noto'g'ri.";
-  if (/Email not confirmed/i.test(m)) return 'Email hali tasdiqlanmagan. Pochtangizdagi xatdagi havolani bosing.';
+  if (/Invalid login credentials/i.test(m)) return "Login yoki parol noto'g'ri.";
+  if (/Email not confirmed/i.test(m)) return "Hisob tasdiqlanmagan: Supabase'da Authentication → Email → «Confirm email» ni o'chiring.";
   if (/User already registered/i.test(m)) return "Bu email bilan foydalanuvchi allaqachon mavjud.";
   if (/Password should be at least/i.test(m)) return "Parol juda qisqa (kamida 6 belgi).";
   if (/rate limit/i.test(m)) return "Juda ko'p urinish. Birozdan keyin qayta urinib ko'ring.";
@@ -366,7 +379,7 @@ class SupabaseBackend {
     this.cfg = cfg;
     this.label = 'Supabase server: ' + cfg.url.replace(/^https?:\/\//, '');
     this.canSetOthersPassword = false;
-    this.loginLabel = 'Email';
+    this.loginLabel = 'Login';
     this.sb = window.supabase.createClient(cfg.url, cfg.key);
     this.snap = {};
     this.profile = null;
@@ -391,7 +404,7 @@ class SupabaseBackend {
       throw new Error("Hisobingiz hali faollashtirilmagan yoki bloklangan. Administratorga murojaat qiling.");
     }
     this.profile = data;
-    return { id: data.id, name: data.name, login: data.login, role: data.role, active: data.active, perms: data.perms ?? undefined };
+    return { id: data.id, name: data.name, login: shortLogin(data.login), role: data.role, active: data.active, perms: data.perms ?? undefined };
   }
 
   async restoreSession() {
@@ -400,15 +413,15 @@ class SupabaseBackend {
   }
 
   async signIn(login, password) {
-    const { data, error } = await this.sb.auth.signInWithPassword({ email: login.trim(), password });
+    const { data, error } = await this.sb.auth.signInWithPassword({ email: toEmail(login), password });
     if (error) throw new Error(friendlyError(error));
     return this.loadProfile(data.user);
   }
 
   async createFirstAdmin({ name, login, password }) {
-    const { data, error } = await this.sb.auth.signUp({ email: login.trim(), password, options: { data: { name } } });
+    const { data, error } = await this.sb.auth.signUp({ email: toEmail(login), password, options: { data: { name } } });
     if (error) throw new Error(friendlyError(error));
-    if (!data.session) throw new Error("Emailingizga tasdiqlash xati yuborildi. Havolani bosing, so'ng shu yerda kiring.");
+    if (!data.session) throw new Error("Supabase'da «Confirm email» yoqilgan: Authentication → Sign In / Providers → Email → Confirm email ni o'chiring va qayta urinib ko'ring.");
     return this.loadProfile(data.user);
   }
 
@@ -423,9 +436,9 @@ class SupabaseBackend {
       const tmp = window.supabase.createClient(this.cfg.url, this.cfg.key, {
         auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false, storageKey: 'bt-signup' },
       });
-      const { data, error } = await tmp.auth.signUp({ email: user.login, password, options: { data: { name: user.name } } });
+      const { data, error } = await tmp.auth.signUp({ email: toEmail(user.login), password, options: { data: { name: user.name } } });
       if (error) throw new Error(friendlyError(error));
-      if (!data.user?.id || (data.user.identities && !data.user.identities.length)) throw new Error('Bu email bilan foydalanuvchi allaqachon mavjud.');
+      if (!data.user?.id || (data.user.identities && !data.user.identities.length)) throw new Error('Bu login band — boshqasini tanlang.');
       user.id = data.user.id;
     }
     const { error } = await this.sb.from('profiles')
@@ -440,7 +453,7 @@ class SupabaseBackend {
   }
 
   async listUsers() {
-    return this.fetchAll('profiles', 'id,name,login,role,active,perms');
+    return (await this.fetchAll('profiles', 'id,name,login,role,active,perms')).map((u) => ({ ...u, login: shortLogin(u.login) }));
   }
 
   // --- Ma'lumotlar ---
@@ -470,7 +483,7 @@ class SupabaseBackend {
       Promise.all(ENTITY_TABLES.map((t) => this.fetchAll(t))),
       this.canCosts ? this.fetchAll('product_costs') : Promise.resolve([]),
       this.fetchAll('settings'),
-      this.fetchAll('profiles', 'id,name,login,role,active,perms'),
+      this.listUsers(),
     ]);
     const db = Object.assign({}, defaults);
     this.snap = {};
@@ -598,7 +611,7 @@ class SupabaseBackend {
     if (table === 'profiles') {
       const i = db.users.findIndex((u) => u.id === id);
       if (eventType === 'DELETE') { if (i >= 0) db.users.splice(i, 1); } else {
-        const u = { id: row.id, name: row.name, login: row.login, role: row.role, active: row.active, perms: row.perms ?? undefined };
+        const u = { id: row.id, name: row.name, login: shortLogin(row.login), role: row.role, active: row.active, perms: row.perms ?? undefined };
         if (i >= 0) db.users[i] = u; else db.users.push(u);
       }
       return true;
