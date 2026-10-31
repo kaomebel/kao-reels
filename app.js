@@ -139,6 +139,8 @@ function emptyDb() {
     categoryIcons: {},
     expenseCats: JSON.parse(JSON.stringify(DEFAULT_EXPENSE_CATS)),
     uiOrder: { sections: [], tabs: {} },
+    drivers: [],
+    driverChats: [],
     customerTypes: DEFAULT_CUSTOMER_TYPES.slice(),
     regions: JSON.parse(JSON.stringify(DEFAULT_REGIONS)),
     currency: { rate: 0, date: '', source: '', updatedAt: '', manual: false },
@@ -654,7 +656,8 @@ function partyBalance(id) {
 
 function cashBalances() {
   const b = Object.fromEntries(Object.keys(PAY_METHODS).map((k) => [k, 0]));
-  db.payments.forEach((p) => { b[p.method] = (b[p.method] || 0) + (p.dir === 'in' ? p.amount : -p.amount); });
+  // Shofyor olgan, lekin hali topshirmagan pul kassaga kirmagan
+  db.payments.forEach((p) => { if (p.handover?.status === 'pending') return; b[p.method] = (b[p.method] || 0) + (p.dir === 'in' ? p.amount : -p.amount); });
   return b;
 }
 
@@ -2173,6 +2176,7 @@ function addressBlock(d, enabled, withDate) {
       <label>Mahalla / joy<input name="aSpot" id="aSpot" list="aSpotList" autocomplete="off" placeholder="Masalan: Joydam" value="${esc(a.spot || '')}">
         <datalist id="aSpotList">${(placeOf(region, place)?.spots || []).map((x) => `<option value="${esc(x)}">`).join('')}</datalist></label>
       ${withDate ? field('Yetkazish sanasi', 'deliveryDate', d.deliveryDate, 'type="date"') : ''}
+      ${withDate && (db.drivers || []).length ? `<label>Shofyor (Telegramga yuboriladi)<select name="driverId"><option value="">— o'zi olib ketadi / tanlanmagan —</option>${db.drivers.map((x) => `<option value="${esc(x.id)}" ${x.id === d.driverId ? 'selected' : ''}>${esc(x.name)}${driverChat(x.id) ? '' : ' (Telegram ulanmagan)'}</option>`).join('')}</select></label>` : ''}
       ${field("Aniq manzil: ko'cha, uy, mo'ljal", 'aDetail', a.detail ?? (d.addr ? '' : d.address || ''), 'placeholder="Mustaqillik ko\'chasi 12, maktab yonida"', 'full')}
     </div>
   </div>`;
@@ -2197,7 +2201,12 @@ function bindAddressBlock() {
     spots();
   });
   place.addEventListener('change', () => { toggleNew(place); spots(); });
-  $('#needDelivery')?.addEventListener('change', (e) => { $('#addrGrid').hidden = !e.target.checked; });
+  $('#needDelivery')?.addEventListener('change', (e) => {
+    $('#addrGrid').hidden = !e.target.checked;
+    // Sotuvda: yetkazilmasa (mijoz o'zi olib ketdi) — darhol «Yetkazildi», yetkazilsa — «Yetkazilishi kerak»
+    const st = $('#modalBody [name=status]');
+    if (st && st.querySelector('option[value=delivered]')) st.value = e.target.checked ? (st.value === 'delivered' ? 'pending' : st.value) : 'delivered';
+  });
 }
 
 // Mijoz tanlanganda uning saqlangan manzili blokka qo'yiladi
@@ -2471,6 +2480,11 @@ $('#modal').addEventListener('cancel', (e) => {
 
 function bindDocForm(type, editingId) {
   const t = DOC_TYPES[type];
+  // Yangi sotuv yetkazilmasa — mijoz olib ketdi: «Yetkazildi»
+  if (type === 'sale' && !editingId && $('#needDelivery') && !$('#needDelivery').checked) {
+    const st = $('#modalBody [name=status]');
+    if (st) st.value = 'delivered';
+  }
   pickKits = t.price === 'sale';
   // Sotuv va buyurtmada: mahsulot yetmasa — shu yerning o'zida kirim qilish tugmasi
   const quick = (type === 'sale' || type === 'order') && can('enter');
@@ -2694,6 +2708,11 @@ function openDoc(type, existing, preset = {}) {
   let stock;
   const extra = [];
   if (existing) {
+    if (existing.delivered?.photos?.length) extra.push({ label: `📸 Yetkazish surati (${existing.delivered.photos.length})`, onClick: () => showReceipts(existing.delivered.photos.map((fileId) => ({ fileId }))) });
+    if (isOpenSale(existing)) {
+      extra.push({ label: '✅ Yetkazildi', cls: 'primary-soft', onClick: () => { closeModal(); closeSale(existing.id); } });
+      if (existing.driverId) extra.push({ label: '🚚 Shofyorga qayta yuborish', onClick: () => sendToDriver(existing.id, existing.driverId) });
+    }
     const rcs = db.payments.filter((p) => p.docId === existing.id).flatMap((p) => p.receipts || []);
     if (rcs.length) extra.push({ label: `🧾 Chek (${rcs.length})`, onClick: () => showReceipts(rcs) });
     if (type === 'order') extra.push({ label: 'Shartnoma', cls: 'primary-soft', onClick: () => printContract(existing.id) });
@@ -2848,6 +2867,7 @@ async function saveDoc(type, existing, preset, data, stock) {
     debtResponsible: type === 'sale' && debtRest > 0 ? data.debtResponsible : undefined,
     orderKind: type === 'order' || data.orderKind === 'custom' ? (data.orderKind === 'custom' ? 'custom' : 'standard') : d.orderKind,
     responsible: type === 'order' ? (data.responsible || '').trim() : d.responsible,
+    driverId: type === 'sale' ? (delivery && data.driverId) || undefined : d.driverId,
   });
 
   if (!existing) {
@@ -2879,8 +2899,13 @@ async function saveDoc(type, existing, preset, data, stock) {
     if (base?.type === 'order') base.status = 'shipped';
     if (base?.type === 'purchaseOrder') base.status = 'received';
   }
+  const prevDriver = existing ? existing.driverSentTo : null;
   save();
   if (!existing && t.tgAsk && data.tgPost === 'yes') telegramOnStockIn(d);
+  // Shofyor tanlangan bo'lsa — buyurtma uning Telegramiga yuboriladi (yangi yoki shofyor almashtirilgan)
+  if (type === 'sale' && d.driverId && isOpenSale(d) && prevDriver !== d.driverId) {
+    sendToDriver(d.id, d.driverId); // server sotuvga driverSentTo ni o'zi yozadi
+  }
 }
 
 function createFrom(id) {
@@ -3637,6 +3662,186 @@ document.addEventListener('click', async (e) => {
   }
 });
 
+// ---------- Yetkazib berish: yopilmagan sotuvlar, shofyorlar, pul topshirish ----------
+// Sotuv «Yetkazilishi kerak» yoki «Yo'lda» bo'lsa — u hali yopilmagan: ro'yxatda rang bilan ajraladi,
+// sotuvchi va administratorga eslatma chiqadi. Mijozga yetib borgach «Yetkazildi» qilinadi
+// (shofyor bot orqali belgilasa — avtomatik).
+const OPEN_STATUSES = ['pending', 'onway'];
+const isOpenSale = (d) => d.type === 'sale' && OPEN_STATUSES.includes(d.status);
+const daysSince = (date) => Math.floor((Date.parse(today()) - Date.parse(date)) / 864e5);
+// Muddati o'tgan: yetkazish sanasi o'tgan, sanasi bo'lmasa — 2 kundan ko'p
+const isOverdueSale = (d) => isOpenSale(d) && (d.deliveryDate ? d.deliveryDate < today() : daysSince(d.date) > 2);
+const openSales = () => db.docs.filter(isOpenSale).sort((a, b) => (a.deliveryDate || a.date).localeCompare(b.deliveryDate || b.date));
+const driver = (id) => (db.drivers || []).find((x) => x.id === id);
+const driverChat = (id) => (db.driverChats || []).find((x) => x.driver_id === id);
+// Shofyor olgan, lekin hali kassaga topshirilmagan pul
+const pendingHandovers = () => db.payments.filter((p) => p.handover?.status === 'pending');
+const myHandovers = () => pendingHandovers().filter((p) => isAdmin() || p.handover.to === me?.id);
+
+function openSalesCard() {
+  if (!can('sale')) return '';
+  const list = openSales();
+  if (!list.length) return '';
+  return `<div class="card open-sales"><h3>${icon('clock')}Yopilmagan sotuvlar <span class="badge-count">${list.length}</span></h3>
+    <p class="muted small">Mijozga yetib borgach «Yetkazildi» qiling — shundagina sotuv to'liq yopiladi.</p>
+    <div class="table-wrap"><table><thead><tr><th>Hujjat</th><th>Mijoz</th><th>Holati</th><th>Qoldi</th><th></th></tr></thead><tbody>
+    ${list.map((d) => {
+      const rest = Math.max(0, docTotal(d) - docPaid(d));
+      const late = isOverdueSale(d);
+      return `<tr class="click sale-${d.status} ${late ? 'sale-late' : ''}" data-act="openDoc" data-id="${d.id}">
+        <td><b>${esc(d.no)}</b><div class="muted small">${fmtDate(d.date)} · ${esc(userName(d.userId))}</div></td>
+        <td>${esc(party(d.counterpartyId)?.name || '')}<div class="muted small">${esc(d.address || '')}</div></td>
+        <td>${badge(DELIVERY_STATUSES[d.status], d.status)}${late ? `<div class="debt small">⚠ ${d.deliveryDate ? `muddat ${fmtDate(d.deliveryDate)}` : `${daysSince(d.date)} kun`}</div>` : d.deliveryDate ? `<div class="muted small">${fmtDate(d.deliveryDate)}</div>` : ''}${d.driverId ? `<div class="muted small">🚚 ${esc(driver(d.driverId)?.name || '')}</div>` : ''}</td>
+        <td class="num">${rest ? money(rest) : badge("To'langan", 'done')}</td>
+        <td class="actions"><button class="small primary" data-act="closeSale" data-id="${d.id}">${icon('check')}Yetkazildi</button></td></tr>`;
+    }).join('')}</tbody></table></div></div>`;
+}
+
+function handoverCard() {
+  const list = myHandovers();
+  if (!list.length) return '';
+  return `<div class="card handover-card"><h3>${icon('cash')}Shofyordan pul qabul qilish</h3>
+    ${list.map((p) => `<div class="ho-row"><span>🚚 <b>${esc(p.handover.driverName || 'Shofyor')}</b> ${isAdmin() && p.handover.to && p.handover.to !== me.id ? `${esc(userName(p.handover.to))}ga` : 'sizga'} <b>${money(p.amount)}</b> topshiradi
+      <span class="muted small">· ${esc(doc(p.docId)?.no || '')} · ${esc(party(p.counterpartyId)?.name || '')}</span></span>
+      <button class="small primary" data-act="acceptHandover" data-id="${p.id}">${icon('check')}Qabul qildim</button></div>`).join('')}</div>`;
+}
+
+// Har bir sahifa tepasidagi eslatma
+function renderAlertBanner() {
+  const el = $('#alertBanner');
+  if (!el) return;
+  const parts = [];
+  const ho = me ? myHandovers() : [];
+  if (ho.length) parts.push(`💵 Shofyordan qabul qilinadigan pul: <b>${money(ho.reduce((s, p) => s + p.amount, 0))}</b>`);
+  if (me && can('sale')) {
+    const open = openSales();
+    const late = open.filter(isOverdueSale).length;
+    if (open.length) parts.push(`⏳ Yopilmagan sotuv: <b>${open.length}</b>${late ? ` · <span class="late">muddati o'tgan: ${late}</span>` : ''}`);
+  }
+  el.hidden = !parts.length;
+  el.classList.toggle('urgent', parts.some((x) => x.includes('late')) || ho.length > 0);
+  el.innerHTML = parts.length ? `<a href="#dashboard">${parts.join(' &nbsp;·&nbsp; ')} — <u>ko'rish</u></a>` : '';
+}
+
+async function closeSale(id) {
+  const d = doc(id);
+  if (!d) return;
+  const rest = Math.max(0, docTotal(d) - docPaid(d));
+  if (!confirm(`${d.no}: mijozga yetkazib berildimi? Sotuv yopiladi.${rest ? `\n\nMijozdan olinadigan: ${money(rest)} — keyingi oynada to'lovni kiriting.` : ''}`)) return;
+  d.status = 'delivered';
+  d.delivered = Object.assign({ at: new Date().toISOString(), by: me?.id }, d.delivered);
+  await save();
+  if (rest) newPayment('in', { counterpartyId: d.counterpartyId, docId: d.id });
+}
+
+async function acceptHandover(pid) {
+  const p = db.payments.find((x) => x.id === pid);
+  if (!p) return;
+  if (!confirm(`Shofyor ${p.handover.driverName || ''}dan ${money(p.amount)} qabul qildingizmi?`)) return;
+  try {
+    if (backend.kind === 'supabase') await backend.acceptHandover(pid);
+    p.handover = Object.assign({}, p.handover, { status: 'received', receivedAt: new Date().toISOString(), receivedBy: me?.id });
+    await save();
+  } catch (e) {
+    alert('Xato: ' + e.message);
+  }
+}
+
+// Sotuvni shofyorga Telegram orqali yuborish (server bot)
+async function sendToDriver(docId, driverId, quiet = false) {
+  if (backend.kind !== 'supabase') return quiet || alert("Shofyorga Telegram orqali yuborish faqat server rejimida ishlaydi.");
+  try {
+    await commitQueue; // sotuv avval serverga yozilsin
+    await backend.botCall({ action: 'send', docId, driverId });
+    if (!quiet) alert(`Buyurtma shofyor ${driver(driverId)?.name || ''}ga Telegram orqali yuborildi.`);
+    return true;
+  } catch (e) {
+    alert(`Shofyorga yuborilmadi: ${e.message}`);
+    return false;
+  }
+}
+
+// --- Sozlamalar → Shofyorlar ---
+function driverLink(d) {
+  const bot = db.telegram.botUsername;
+  return bot ? `https://t.me/${bot}?start=d_${d.id}` : '';
+}
+
+function viewDrivers() {
+  const list = db.drivers || [];
+  const server = backend.kind === 'supabase';
+  const ready = server && db.telegram.webhook && db.telegram.botUsername;
+  return `<div class="card narrow"><h3>${icon('truck')}Shofyorlar</h3>
+    <p class="muted small">Sotuvda «Yetkazib beriladi» belgilanib shofyor tanlansa — buyurtma ma'lumotlari (mijoz, telefon, manzil, mahsulotlar, olinadigan pul) shofyorning Telegramiga boradi. Shofyor botda «Yetkazib berdim» ni bosib, <b>majburiy surat</b> yuboradi va olgan pulini belgilaydi — sotuv o'zi yopiladi, pul esa mas'ul xodimga «qabul qilib ol» deb ko'rsatiladi.</p>
+    ${!server ? `<p class="debt">Bu imkoniyat faqat server rejimida ishlaydi.</p>`
+      : !db.telegram.token ? `<p class="debt">Avval Sozlamalar → Telegram da bot tokenini kiriting.</p>`
+      : `<div class="toolbar"><button class="${ready ? '' : 'primary'}" data-act="botSetup">${icon('send')}${ready ? `Bot ulangan: @${esc(db.telegram.botUsername)} (qayta ulash)` : 'Botni shofyorlar uchun ulash'}</button></div>`}
+    <table class="drv-table"><tbody>${list.map((d) => {
+      const ch = driverChat(d.id);
+      const link = driverLink(d);
+      return `<tr><td><b>${esc(d.name)}</b><div class="muted small">${esc(d.phone || '')}${d.car ? ' · ' + esc(d.car) : ''}</div></td>
+        <td>${ch ? badge('Telegram ulangan', 'done') + `<div class="muted small">${esc(ch.tg_name || '')}</div>` : badge('Ulanmagan', 'cancel')}</td>
+        <td class="actions">${link && !ch ? `<button class="small" data-act="drvLink" data-id="${d.id}">${icon('share')}Havola</button>` : ''}
+          <button class="small icon-only" data-act="drvEdit" data-id="${d.id}" title="Tahrirlash">${icon('edit')}</button>
+          <button class="small danger icon-only" data-act="drvDel" data-id="${d.id}" title="O'chirish">${icon('trash')}</button></td></tr>`;
+    }).join('') || emptyRow(3, "Shofyor qo'shilmagan")}</tbody></table>
+    <div class="toolbar" style="margin-top:10px"><button class="primary" data-act="drvEdit">${icon('plus')}Shofyor qo'shish</button></div>
+    <ol class="muted small"><li>Shofyorni qo'shing (ism, telefon).</li><li>«Havola» ni bosib, uni shofyorga yuboring (Telegram yoki SMS orqali).</li><li>Shofyor havolani ochib <b>START</b> ni bosadi — «Telegram ulangan» bo'ladi.</li></ol></div>`;
+}
+
+function editDriver(id) {
+  const d = id ? driver(id) : null;
+  openModal({
+    title: d ? 'Shofyor' : "Yangi shofyor",
+    body: `<div class="form-grid">${field('Ism familiya *', 'name', d?.name, 'required', 'full')}${phoneField('Telefon', 'phone', d?.phone || '')}${field('Mashina', 'car', d?.car, 'placeholder="Masalan: Labo, 01 A 123 BC"')}</div>`,
+    onSubmit: async (f) => {
+      db.drivers = db.drivers || [];
+      const x = d || { id: uid() };
+      Object.assign(x, { name: f.name.trim(), phone: f.phone.trim(), car: f.car.trim() });
+      if (!d) db.drivers.push(x);
+      await save();
+      if (!d && driverLink(x)) setTimeout(() => shareDriverLink(x.id), 200);
+    },
+  });
+}
+
+async function shareDriverLink(id) {
+  const d = driver(id);
+  const link = driverLink(d);
+  if (!link) return alert("Avval «Botni shofyorlar uchun ulash» tugmasini bosing.");
+  const text = `Assalomu alaykum, ${d.name}! KAO Mebel yetkazish buyurtmalari Telegramingizga kelishi uchun shu havolani oching va START ni bosing:\n${link}`;
+  try {
+    if (navigator.share) return await navigator.share({ text });
+  } catch (e) { /* bekor qilindi */ }
+  try { await navigator.clipboard.writeText(link); alert("Havola nusxalandi — shofyorga yuboring:\n" + link); } catch (e) { prompt('Havolani nusxalang:', link); }
+}
+
+async function botSetup() {
+  showLoading(true, 'Bot ulanmoqda...');
+  try {
+    const r = await backend.botCall({ action: 'setup' });
+    Object.assign(db.telegram, { webhook: true, botUsername: r.botUsername });
+    await save();
+    alert(`Bot ulandi: @${r.botUsername}. Endi shofyorlarga havola yuboring.`);
+  } catch (e) {
+    alert('Xato: ' + e.message);
+  } finally {
+    showLoading(false);
+  }
+}
+
+// Bot webhook rejimida getUpdates ishlamaydi — chatlar server jadvalidan olinadi
+async function botUpdates() {
+  if (backend.kind === 'supabase' && db.telegram.webhook) {
+    const rows = await backend.botChats();
+    return rows.reverse().map((r) => ({ message: { chat: { id: Number(r.chat_id), type: r.type, title: r.title, first_name: r.title, is_forum: r.is_forum } } }));
+  }
+  const res = await fetch(`https://api.telegram.org/bot${db.telegram.token}/getUpdates`);
+  const json = await res.json();
+  if (!json.ok) throw new Error(json.description);
+  return json.result;
+}
+
 // ---------- Ko'rinishlar (sahifalar) ----------
 
 // Uchinchi element 'A' — faqat administrator ko'radi
@@ -3650,7 +3855,7 @@ const SECTIONS = [
   { id: 'expenses', icon: 'arrowOut', title: 'Xarajatlar', views: [['expenses', 'Xarajatlar', 'money|expenses'], ['expenseCats', 'Moddalar', 'A']] },
   { id: 'reports', icon: 'chart', title: 'Hisobotlar', views: [['profit', 'Foyda va zarar', 'reports'], ['top', 'Savdo tahlili', 'reports']] },
   { id: 'install', icon: 'phone', title: "Telefonga o'rnatish", hideInNav: true },
-  { id: 'settings', icon: 'settings', title: 'Sozlamalar', views: [['users', 'Foydalanuvchilar', 'A'], ['currency', 'Valyuta kursi', 'A'], ['server', 'Server', 'A'], ['telegram', 'Telegram', 'A'], ['company', 'Kompaniya', 'A'], ['categories', "Ro'yxatlar", 'A'], ['backup', 'Zaxira nusxa', 'A'], ['layout', 'Interfeys', 'A'], ['profile', 'Profil']] },
+  { id: 'settings', icon: 'settings', title: 'Sozlamalar', views: [['users', 'Foydalanuvchilar', 'A'], ['currency', 'Valyuta kursi', 'A'], ['server', 'Server', 'A'], ['telegram', 'Telegram', 'A'], ['company', 'Kompaniya', 'A'], ['categories', "Ro'yxatlar", 'A'], ['backup', 'Zaxira nusxa', 'A'], ['drivers', 'Shofyorlar', 'A'], ['layout', 'Interfeys', 'A'], ['profile', 'Profil']] },
 ];
 
 function viewTitle(v) {
@@ -3785,7 +3990,7 @@ function viewDashboard() {
   const backupWarn = isAdmin() && age > 2
     ? `<div class="card warn-card backup-warn">${icon('alert')}<span>${age === Infinity ? "Hali birorta ham zaxira nusxa olinmagan." : `Oxirgi zaxira nusxa ${Math.floor(age)} kun oldin olingan.`} Ma'lumot yo'qolmasligi uchun zaxira oling${db.telegram.backupChatId ? '' : ' yoki har kungi avtomatik zaxirani yoqing'}.</span>
         <button class="small primary" data-act="backup">${icon('download')}Zaxira olish</button><a href="#settings/backup">Sozlash</a></div>` : '';
-  return installCard + backupWarn + usageWarn + `<div class="stats">${cards.map(([l, v, h, cls]) => `<div class="stat">
+  return installCard + backupWarn + usageWarn + handoverCard() + openSalesCard() + `<div class="stats">${cards.map(([l, v, h, cls]) => `<div class="stat">
       <div class="stat-ic ${cls || ''}">${icon(cardIcon[l] || 'chart')}</div>
       <div class="label">${l}</div><div class="value ${cls || ''}">${v}</div><div class="muted small">${h}</div></div>`).join('')}</div>
     <div class="quick">${quick}</div>
@@ -3841,8 +4046,8 @@ function viewDocs(type) {
   const rows = list.map((d) => {
     const paid = t.pay ? docPaid(d) : 0;
     const where = t.party ? esc(party(d.counterpartyId)?.name) : esc(warehouse(d.warehouseId)?.name) + (t.move ? ' → ' + esc(warehouse(d.toWarehouseId)?.name) : '');
-    return `<tr class="click" data-act="openDoc" data-id="${d.id}">
-      <td>${esc(d.no)}</td><td>${fmtDate(d.date)}${d.userId ? `<div class="muted small">${esc(userName(d.userId))}</div>` : ''}</td><td>${where}</td>
+    return `<tr class="click ${isOpenSale(d) ? `sale-${d.status}` : ''} ${isOverdueSale(d) ? 'sale-late' : ''}" data-act="openDoc" data-id="${d.id}">
+      <td>${esc(d.no)}${isOverdueSale(d) ? '<div class="debt small">⚠ yopilmagan</div>' : ''}</td><td>${fmtDate(d.date)}${d.userId ? `<div class="muted small">${esc(userName(d.userId))}</div>` : ''}</td><td>${where}</td>
       <td class="items-cell">${d.items.slice(0, 3).map((it) => `${esc(itemName(it))} × ${it.qty}`).join('<br>')}${d.items.length > 3 ? `<br><span class="muted">yana ${d.items.length - 3} ta</span>` : ''}</td>
       <td class="num">${noSum ? '' : money(docTotal(d))}${d.currency === 'USD' ? `<div class="muted small">${fmtUsd(docTotalCur(d))} · ${fmtRate(d.rate)}</div>` : ''}</td>
       ${t.pay ? (isOrder
@@ -4059,7 +4264,9 @@ function viewPayments() {
 
 function viewCash() {
   const b = cashBalances();
-  return `<div class="stats">${Object.entries(PAY_METHODS).map(([k, v]) => `<div class="stat"><div class="label">${v}</div><div class="value">${money(b[k] || 0)}</div></div>`).join('')}
+  const atDrivers = pendingHandovers().reduce((s, p) => s + p.amount, 0);
+  return handoverCard() + `<div class="stats">${Object.entries(PAY_METHODS).map(([k, v]) => `<div class="stat"><div class="label">${v}</div><div class="value">${money(b[k] || 0)}</div></div>`).join('')}
+    ${atDrivers ? `<div class="stat"><div class="label">Shofyorlarda (topshirilmagan)</div><div class="value warn">${money(atDrivers)}</div></div>` : ''}
     <div class="stat"><div class="label">Jami</div><div class="value">${money(cashTotal(b))}</div></div></div>
     <div class="card"><p class="muted">Qoldiqlar barcha kirim va chiqim to'lovlaridan hisoblanadi. Boshlang'ich qoldiqni kiritish uchun "Boshqa kirim" moddasi bilan kirim to'lovi yarating.</p>
     <button data-act="newPayment" data-dir="in">${icon('arrowIn')}Kirim</button> <button data-act="newPayment" data-dir="out">${icon('arrowOut')}Chiqim</button></div>`;
@@ -4413,12 +4620,10 @@ async function tgDetect() {
   tgReadForm();
   if (!db.telegram.token) return alert('Avval bot tokenini kiriting.');
   try {
-    const res = await fetch(`https://api.telegram.org/bot${db.telegram.token}/getUpdates`);
-    const json = await res.json();
-    if (!json.ok) throw new Error(json.description);
+    const updates = await botUpdates();
     const chats = new Map();
     const moved = new Set();
-    json.result.forEach((u) => {
+    updates.forEach((u) => {
       const msg = u.message || u.my_chat_member || u.channel_post || {};
       const c = msg.chat;
       // Temalar yoqilganda oddiy guruh superguruhga aylanadi va ID si o'zgaradi
@@ -4850,10 +5055,7 @@ async function requestPersistentStorage() {
 async function detectBackupChat() {
   if (!db.telegram.token) return alert("Avval Sozlamalar → Telegram da bot tokenini kiriting.");
   try {
-    const res = await fetch(`https://api.telegram.org/bot${db.telegram.token}/getUpdates`);
-    const json = await res.json();
-    if (!json.ok) throw new Error(json.description);
-    const priv = json.result.map((u) => u.message?.chat).filter((c) => c && c.type === 'private').pop();
+    const priv = (await botUpdates()).map((u) => u.message?.chat).filter((c) => c && c.type === 'private').pop();
     if (!priv) return alert("Topilmadi. Telegramda botingizni oching, «/start» yoki istalgan xabar yozing va qayta bosing.");
     db.telegram.backupChatId = String(priv.id);
     await save();
@@ -4937,7 +5139,7 @@ const VIEWS = {
   dashboard: viewDashboard, products: viewProducts, stock: viewStock, parties: viewParties, debts: viewDebts,
   payments: viewPayments, cash: viewCash, profit: viewProfit, top: viewTop, users: viewUsers,
   telegram: viewTelegram, company: viewCompany, warehouses: viewWarehouses, categories: viewCategories, backup: viewBackup,
-  server: viewServer, profile: viewProfile, layout: viewLayout, kits: viewKits, expenses: viewExpenses, expenseCats: viewExpenseCats, currency: viewCurrency, install: viewInstall, labels: viewLabels, labelDesign: viewLabelDesign,
+  server: viewServer, profile: viewProfile, layout: viewLayout, drivers: viewDrivers, kits: viewKits, expenses: viewExpenses, expenseCats: viewExpenseCats, currency: viewCurrency, install: viewInstall, labels: viewLabels, labelDesign: viewLabelDesign,
 };
 
 function render() {
@@ -4967,6 +5169,7 @@ function render() {
   const { section, view } = currentRoute();
   $('#sections').innerHTML = visibleSections().filter((s) => !s.hideInNav).map((s) => `<a href="#${s.id}" class="${s === section ? 'active' : ''}">${icon(s.icon)}<span>${s.title}</span></a>`).join('');
   const sub = section.views && visibleViews(section).find((v) => v[0] === view);
+  renderAlertBanner();
   $('#pageHead').innerHTML = `<h1>${icon(section.icon)}${esc(sub && section.id !== 'dashboard' ? viewTitle(sub) : section.title)}</h1>
     ${section.id === 'dashboard' ? `<span class="date">${longDate(new Date())}</span>` : ''}`;
   $('#subnav').innerHTML = section.views
@@ -5025,6 +5228,13 @@ const ACTIONS = {
   newProduct: () => newProduct(),
   newKit: () => editKit(null),
   newExpense: (ds) => newExpense(ds.cat),
+  closeSale: (ds) => closeSale(ds.id),
+  acceptHandover: (ds) => acceptHandover(ds.id),
+  drvEdit: (ds) => editDriver(ds.id),
+  drvDel: (ds) => { const d = driver(ds.id); if (d && confirm(`«${d.name}» o'chirilsinmi?`)) { db.drivers = db.drivers.filter((x) => x.id !== d.id); save(); } },
+  drvLink: (ds) => shareDriverLink(ds.id),
+  botSetup: () => botSetup(),
+  sendDriver: (ds) => sendToDriver(ds.id, doc(ds.id)?.driverId),
   scanFilter: async (ds) => {
     const code = await scanCode();
     if (!code) return;
@@ -5754,7 +5964,7 @@ Object.assign(ACTIONS, {
 // Ruxsatga bog'liq amallar (tugma ko'rinmasa ham bajarilmasin)
 const ACTION_PERMS = { newProduct: 'products', newKit: 'products', exportProducts: 'products' };
 const ADMIN_ACTIONS = ['deleteProduct', 'unarchive', 'exportProducts', 'tgProduct', 'deleteParty', 'deletePayment',
-  'ecAdd', 'ecDel', 'ecSave', 'loMove', 'loReset', 'tgSave', 'tgDetect', 'tgTest', 'tgAll', 'tgTopicsCreate', 'tgTopicsReset', 'tgTopicIcons', 'coSave', 'editWh', 'deleteWh', 'catSave', 'catAdd', 'catDel', 'catIconOpen', 'catIconSet', 'fsAdd', 'fsDel', 'fsFieldAdd', 'fsFieldDel', 'regAdd', 'regDel', 'chipRemove', 'backup', 'backupDetect', 'backupSend', 'demo', 'reset', 'editUser', 'exportDocs',
+  'ecAdd', 'ecDel', 'ecSave', 'loMove', 'loReset', 'drvEdit', 'drvDel', 'drvLink', 'botSetup', 'tgSave', 'tgDetect', 'tgTest', 'tgAll', 'tgTopicsCreate', 'tgTopicsReset', 'tgTopicIcons', 'coSave', 'editWh', 'deleteWh', 'catSave', 'catAdd', 'catDel', 'catIconOpen', 'catIconSet', 'fsAdd', 'fsDel', 'fsFieldAdd', 'fsFieldDel', 'regAdd', 'regDel', 'chipRemove', 'backup', 'backupDetect', 'backupSend', 'demo', 'reset', 'editUser', 'exportDocs',
   'serverSettings', 'refreshUsage', 'migrateLocal', 'rateRefresh', 'rateManual', 'rateAuto',
   'ldSel', 'ldFs', 'ldBold', 'ldCur', 'ldAlign', 'ldCenter', 'ldFull', 'ldTest', 'ldUndo', 'ldReset', 'ldSave'];
 

@@ -17,7 +17,7 @@ const ENTITY_TABLES = ['warehouses', 'counterparties', 'products', 'docs', 'paym
 const ROLE_PERMS = { seller: ['sale', 'enter'], purchaser: ['purchase', 'enter', 'products', 'costs'] };
 const permsOf = (u) => (Array.isArray(u?.perms) ? u.perms : ROLE_PERMS[u?.role] || []);
 
-const SETTINGS_KEYS = ['categories', 'categoryTypes', 'materials', 'colors', 'customerTypes', 'featureSets', 'categoryIcons', 'expenseCats', 'uiOrder', 'regions', 'currency', 'company', 'telegram', 'legacyUsers'];
+const SETTINGS_KEYS = ['categories', 'categoryTypes', 'materials', 'colors', 'customerTypes', 'featureSets', 'categoryIcons', 'expenseCats', 'uiOrder', 'drivers', 'regions', 'currency', 'company', 'telegram', 'legacyUsers'];
 const SERVER_CONFIG_KEY = 'biznes-tizim-server';
 const LOCAL_DATA_KEY = 'biznes-tizim-v1';
 const LOCAL_SESSION_KEY = 'biznes-tizim-session';
@@ -509,6 +509,8 @@ class SupabaseBackend {
     this.snap.settings = new Map(settings.map((r) => [r.id, stableJson(r.data)]));
     settings.forEach((r) => { if (SETTINGS_KEYS.includes(r.id)) db[r.id] = r.data.value; });
     db.users = profiles;
+    // Shofyorlarning Telegram bog'lanishi (jadval hali bo'lmasa — bo'sh)
+    db.driverChats = await this.sb.from('driver_chats').select('driver_id,chat_id,tg_name').then((r) => r.data || [], () => []);
     this.restoredPending = this.applyOutbox(db);
 
     // Yangi bazani administrator birinchi kirganda boshlang'ich ma'lumotlar bilan to'ldiramiz
@@ -648,7 +650,7 @@ class SupabaseBackend {
   subscribe(db, onChange) {
     this.unsubscribe();
     this.channel = this.sb.channel('biznes-tizim');
-    ['products', 'product_costs', 'warehouses', 'counterparties', 'docs', 'payments', 'settings', 'profiles'].forEach((table) => {
+    ['products', 'product_costs', 'warehouses', 'counterparties', 'docs', 'payments', 'settings', 'profiles', 'driver_chats'].forEach((table) => {
       this.channel.on('postgres_changes', { event: '*', schema: 'public', table }, (payload) => {
         if (this.applyChange(db, table, payload)) onChange(table);
       });
@@ -662,6 +664,12 @@ class SupabaseBackend {
   }
 
   applyChange(db, table, { eventType, new: row, old }) {
+    if (table === 'driver_chats') {
+      const id = row?.driver_id || old?.driver_id;
+      db.driverChats = (db.driverChats || []).filter((x) => x.driver_id !== id);
+      if (eventType !== 'DELETE') db.driverChats.push({ driver_id: row.driver_id, chat_id: row.chat_id, tg_name: row.tg_name });
+      return true;
+    }
     const id = row?.id || old?.id;
     if (!id) return false;
     if (table === 'profiles') {
@@ -720,6 +728,29 @@ class SupabaseBackend {
     if (!paths.length) return;
     const { error } = await this.sb.storage.from(PHOTO_BUCKET).remove(paths);
     if (error) console.warn('Rasm o\'chirilmadi:', error);
+  }
+
+  // ---- Telegram bot (shofyorlar) — server funksiyasi tg-bot ----
+  async botCall(body) {
+    const { data, error } = await this.sb.functions.invoke('tg-bot', { body });
+    if (error) {
+      let msg = error.message;
+      try { msg = (await error.context.json()).error || msg; } catch (e) { /* matn yo'q */ }
+      throw new Error(friendlyError({ message: msg }));
+    }
+    if (!data?.ok) throw new Error(data?.error || 'Xato');
+    return data;
+  }
+
+  async botChats() {
+    const { data, error } = await this.sb.from('tg_chats').select('*').order('updated_at', { ascending: false }).limit(50);
+    if (error) throw new Error(friendlyError(error));
+    return data;
+  }
+
+  async acceptHandover(pid) {
+    const { error } = await this.sb.rpc('accept_handover', { pid });
+    if (error) throw new Error(friendlyError(error));
   }
 
   // To'lov cheklari Telegramda saqlanadi (server funksiyasi orqali — bot tokeni xodimga ko'rinmaydi)

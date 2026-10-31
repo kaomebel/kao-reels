@@ -355,7 +355,8 @@ button.icon-only { padding: 6px; }
 button.icon-only .ic { width: 17px; height: 17px; }
 
 .badge { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 12px; font-weight: 600; background: var(--card-2); color: var(--muted); white-space: nowrap; }
-.badge.new, .badge.pending { background: var(--info-soft); color: var(--info); }
+.badge.new { background: var(--info-soft); color: var(--info); }
+.badge.pending { background: var(--warn-soft); color: var(--warn); }
 .badge.confirmed, .badge.sent, .badge.onway { background: var(--violet-soft); color: var(--violet); }
 .badge.making { background: var(--warn-soft); color: var(--warn); }
 .badge.shipped, .badge.received, .badge.delivered, .badge.done { background: var(--ok-soft); color: var(--ok); }
@@ -1240,3 +1241,29 @@ fieldset[disabled] .qty-step .qs { opacity: .35; }
 .sc-manual { position: absolute; left: 0; right: 0; bottom: 0; display: flex; gap: 8px; padding: 12px max(12px, env(safe-area-inset-right)) max(14px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left)); background: linear-gradient(transparent, rgba(0, 0, 0, .7)); }
 .sc-manual input { flex: 1; min-width: 0; background: rgba(255, 255, 255, .92); color: #222; }
 .sc-manual button { min-width: 64px; }
+
+/* Yopilmagan sotuvlar va eslatmalar */
+.alert-banner { margin: 0 0 10px; padding: 10px 14px; border-radius: 12px; background: var(--warn-soft); color: var(--warn); font-size: 14px; border: 1px solid rgba(169, 102, 15, .25); }
+.alert-banner a { color: inherit; text-decoration: none; display: block; }
+.alert-banner .late { color: var(--danger); font-weight: 600; }
+.alert-banner.urgent { background: var(--danger-soft); color: var(--danger); border-color: rgba(176, 65, 45, .3); animation: alertPulse 2.4s ease-in-out infinite; }
+@keyframes alertPulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(176, 65, 45, .0); } 50% { box-shadow: 0 0 0 4px rgba(176, 65, 45, .15); } }
+@media (prefers-reduced-motion: reduce) { .alert-banner.urgent { animation: none; } }
+tr.sale-pending > td:first-child { box-shadow: inset 4px 0 0 var(--warn); }
+tr.sale-onway > td:first-child { box-shadow: inset 4px 0 0 var(--violet); }
+tr.sale-pending { background: color-mix(in srgb, var(--warn-soft) 55%, transparent); }
+tr.sale-onway { background: color-mix(in srgb, var(--violet-soft) 55%, transparent); }
+tr.sale-late { background: color-mix(in srgb, var(--danger-soft) 70%, transparent); }
+tr.sale-late > td:first-child { box-shadow: inset 4px 0 0 var(--danger); }
+.open-sales h3, .handover-card h3 { display: flex; align-items: center; gap: 8px; }
+.badge-count { display: inline-flex; min-width: 24px; height: 24px; padding: 0 7px; align-items: center; justify-content: center; border-radius: 12px; background: var(--danger); color: #fff; font-size: 13px; }
+.handover-card { border: 2px solid var(--ok); }
+.ho-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; padding: 8px 0; border-bottom: 1px dashed var(--border); }
+.ho-row:last-child { border-bottom: none; }
+.value.warn { color: var(--warn); }
+.drv-table td { vertical-align: middle; }
+@media (max-width: 700px) {
+  .m-cards tr.sale-pending, .m-cards tr.sale-onway, .m-cards tr.sale-late { border-left: 4px solid var(--warn); }
+  .m-cards tr.sale-onway { border-left-color: var(--violet); }
+  .m-cards tr.sale-late { border-left-color: var(--danger); }
+}
