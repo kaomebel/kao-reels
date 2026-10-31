@@ -2,7 +2,7 @@
 // Saytga joylashda scripts/build-web.js CACHE nomiga versiyani yozadi, shuning uchun
 // har bir yangi versiyada bu fayl o'zgaradi va telefon yangilanishni sezadi.
 const CACHE = 'biznes-tizim-dev';
-const FILES = ['./', './index.html', './styles.css', './config.js', './vendor/supabase.js', './vendor/qrcode.js', './icons.js', './backend.js', './app.js', './manifest.webmanifest', './icons/icon.svg', './icons/icon-192.png', './icons/icon-512.png'];
+const FILES = ['./', './index.html', './styles.css', './config.js', './vendor/supabase.js', './vendor/qrcode.js', './vendor/jsbarcode.min.js', './icons.js', './backend.js', './app.js', './manifest.webmanifest', './icons/icon.svg', './icons/icon-192.png', './icons/icon-512.png'];
 
 self.addEventListener('install', (e) => {
   // no-cache: telefonning HTTP keshidagi eski nusxalar emas, serverdagi yangilari olinsin

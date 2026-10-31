@@ -10,6 +10,7 @@ Mebel do'koni uchun ombor, savdo va pul hisobi dasturi (MoySklad uslubida), o'zb
 | **Xaridlar** | Ta'minotchiga buyurtma → Qabul qilish → Ta'minotchiga qaytarish |
 | **Savdo** | Mijoz buyurtmasi (rezerv bilan) → Sotuv → Mijozdan qaytarish; mijozni telefon raqami bo'yicha avtomatik topish; yetkazish sanasi va manzili, chek chop etish |
 | **Tovarlar** | Mahsulot kartochkasi (5 tagacha rasm, o'lcham, rang, material, ishlab chiqarilgan joyi), omborlar bo'yicha qoldiqlar, kirim qilish, hisobdan chiqarish, ko'chirish, inventarizatsiya |
+| **Etiketkalar** | Narx etiketkasi: shtrix-kod (artikul), QR, nom, o'lcham, narx. Administrator dizaynni o'zi sozlaydi — o'lcham (58×40, 40×30 va boshqa), har bir elementni sudrab joylash, shrift va shtrix-kod kattaligi. Etiketka printeri (rulon) yoki oddiy A4 printerda; mahsulot kartochkasi, qabul qilish hujjati yoki «Etiketkalar» sahifasidan bir nechtasini birdan |
 | **Kontragentlar** | Mijozlar va ta'minotchilar, o'zaro hisob-kitob (akt sverka), qarzlar |
 | **Pul** | Kirim/chiqim to'lovlari (naqd, karta, hisob raqam), xarajat moddalari, kassa qoldig'i |
 | **Hisobotlar** | Foyda va zarar, eng ko'p sotilganlar, kategoriyalar, mijozlar va sotuvchilar reytingi |

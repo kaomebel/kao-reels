@@ -1007,7 +1007,7 @@ function editProduct(id) {
   const p = product(id);
   if (!isAdmin()) {
     // Sotuvchi kartochkani faqat ko'radi
-    openModal({ title: p.name, body: `<fieldset disabled>${productForm(p, true)}</fieldset>`, wide: true, onOpen: () => bindProductForm(p, true) });
+    openModal({ title: p.name, body: `<fieldset disabled>${productForm(p, true)}</fieldset>`, wide: true, onOpen: () => bindProductForm(p, true), extra: [{ label: 'Etiketka', onClick: () => quickLabel(id) }] });
     return;
   }
   openModal({
@@ -1016,6 +1016,7 @@ function editProduct(id) {
     wide: true,
     onOpen: () => bindProductForm(p),
     extra: [
+      { label: 'Etiketka', onClick: () => quickLabel(id) },
       { label: 'Telegramga yuborish', onClick: () => telegramPostProducts([id], true) },
       { label: 'Harakatlar tarixi', onClick: () => productHistory(id) },
     ],
@@ -1856,6 +1857,7 @@ function openDoc(type, existing, preset = {}) {
   if (existing) {
     if (type === 'order') extra.push({ label: 'Shartnoma', cls: 'primary-soft', onClick: () => printContract(existing.id) });
     extra.push({ label: 'Chop etish', onClick: () => printDoc(existing.id) });
+    if (['receipt', 'enter'].includes(type)) extra.push({ label: 'Etiketkalar', onClick: () => docLabels(existing.id) });
     if (t.pay && (isAdmin() || t.pay === 'in')) extra.push({ label: "To'lov", onClick: () => newPayment(t.pay, { counterpartyId: existing.counterpartyId, docId: existing.id }) });
     if (t.next && canUseDoc(t.next)) extra.push({ label: `→ ${DOC_TYPES[t.next].one}`, onClick: () => createFrom(existing.id) });
     if (isAdmin()) extra.push({ label: "O'chirish", cls: 'danger', onClick: () => deleteDoc(existing.id) });
@@ -2399,7 +2401,7 @@ const SECTIONS = [
   { id: 'dashboard', icon: 'dashboard', title: "Ko'rsatkichlar" },
   { id: 'purchases', icon: 'truck', title: 'Xaridlar', admin: true, views: [['purchaseOrder'], ['receipt'], ['purchaseReturn']] },
   { id: 'sales', icon: 'bag', title: 'Savdo', views: [['order'], ['sale'], ['salesReturn']] },
-  { id: 'goods', icon: 'sofa', title: 'Tovarlar', views: [['products', 'Mahsulotlar'], ['stock', 'Qoldiqlar'], ['enter', '', 'A'], ['writeoff', '', 'A'], ['move', '', 'A'], ['inventory', '', 'A'], ['warehouses', 'Omborlar', 'A']] },
+  { id: 'goods', icon: 'sofa', title: 'Tovarlar', views: [['products', 'Mahsulotlar'], ['stock', 'Qoldiqlar'], ['enter', '', 'A'], ['writeoff', '', 'A'], ['move', '', 'A'], ['inventory', '', 'A'], ['warehouses', 'Omborlar', 'A'], ['labels', 'Etiketkalar'], ['labelDesign', 'Etiketka dizayni', 'A']] },
   { id: 'parties', icon: 'users', title: 'Kontragentlar', views: [['parties', 'Kontragentlar'], ['debts', 'Qarzlar', 'A']] },
   { id: 'money', icon: 'wallet', title: 'Pul', views: [['payments', "To'lovlar"], ['cash', 'Kassa va hisoblar', 'A']] },
   { id: 'reports', icon: 'chart', title: 'Hisobotlar', admin: true, views: [['profit', 'Foyda va zarar'], ['top', 'Savdo tahlili']] },
@@ -2631,7 +2633,7 @@ function viewProducts() {
       ${admin ? `<td class="num">${money(ctx.cost[p.id])}</td>` : ''}
       <td class="num">${priceLabel(p)}${p.priceCurrency === 'USD' ? `<div class="muted small">${fmtUsd(p.salePrice)}</div>` : ''}${p.minPrice ? `<div class="muted small">eng kami: ${priceLabel(p, 'minPrice')}</div>` : ''}</td>
       <td class="num ${st - rs <= (p.minQty || 0) ? 'debt' : ''}">${st}${rs ? `<div class="muted small">rezerv ${rs}</div>` : ''}</td>
-      <td class="actions">${admin ? `
+      <td class="actions"><button class="small icon-only" data-act="labelOne" data-id="${p.id}" title="Etiketka chop etish">${icon('tag')}</button>${admin ? `
         <button class="small icon-only" data-act="tgProduct" data-id="${p.id}" title="Telegram guruhga yuborish">${icon('send')}</button>
         ${p.archived ? `<button class="small" data-act="unarchive" data-id="${p.id}">Tiklash</button>` : `<button class="small danger icon-only" data-act="deleteProduct" data-id="${p.id}" title="O'chirish">${icon('trash')}</button>`}` : ''}
       </td>
@@ -3403,7 +3405,7 @@ const VIEWS = {
   dashboard: viewDashboard, products: viewProducts, stock: viewStock, parties: viewParties, debts: viewDebts,
   payments: viewPayments, cash: viewCash, profit: viewProfit, top: viewTop, users: viewUsers,
   telegram: viewTelegram, company: viewCompany, warehouses: viewWarehouses, categories: viewCategories, backup: viewBackup,
-  server: viewServer, currency: viewCurrency, install: viewInstall,
+  server: viewServer, currency: viewCurrency, install: viewInstall, labels: viewLabels, labelDesign: viewLabelDesign,
 };
 
 function render() {
@@ -3443,6 +3445,8 @@ function render() {
   const caret = document.activeElement?.selectionStart;
   $('#view').innerHTML = (VIEWS[view] || ((v) => viewDocs(v)))(view);
   hydratePhotos($('#view'));
+  if (view === 'labelDesign') ldRefresh();
+  else labelDraft = null;
   // Qidiruv maydonida yozayotganda fokusni saqlaymiz
   if (focused) {
     const el = $(`[data-filter="${focused}"]`);
@@ -3608,10 +3612,520 @@ const ACTIONS = {
   migrateLocal: () => migrateLocal(),
 };
 
+// ---------- Etiketkalar ----------
+// Shablon millimetrlarda saqlanadi (db.company.labelTpl): o'lcham va har bir element joyi,
+// eni, shrift kattaligi. Dizaynni administrator sozlaydi, chop etishni hamma qila oladi.
+
+const LABEL_FIELDS = {
+  company: { title: 'Kompaniya nomi', text: () => db.company.name || '' },
+  name: { title: 'Mahsulot nomi', text: (p) => p.name },
+  meta: { title: "O'lcham va rang", text: (p) => [p.size && p.size + ' sm', p.color].filter(Boolean).join(' · ') },
+  path: { title: 'Kategoriya va tur', text: (p) => productPath(p) },
+  price: { title: 'Narx', text: (p) => priceLabel(p) },
+  code: { title: 'Artikul', text: (p) => (p.code ? 'Art: ' + p.code : '') },
+  origin: { title: 'Ishlab chiqaruvchi', text: (p) => [p.maker, p.origin].filter(Boolean).join(', ') },
+  barcode: { title: 'Shtrix-kod', kind: 'barcode' },
+  qr: { title: 'QR-kod', kind: 'qr' },
+};
+
+const LABEL_SIZES = [[58, 40], [58, 30], [40, 30], [43, 25], [30, 20], [100, 70]];
+
+const DEFAULT_LABEL = {
+  w: 58,
+  h: 40,
+  gap: 2,
+  els: {
+    company: { on: true, x: 2, y: 1.5, w: 54, fs: 7, bold: false, align: 'center' },
+    name: { on: true, x: 2, y: 4.5, w: 54, fs: 10, bold: true, align: 'center' },
+    meta: { on: true, x: 2, y: 10, w: 54, fs: 7, bold: false, align: 'center' },
+    path: { on: false, x: 2, y: 13, w: 54, fs: 6, bold: false, align: 'center' },
+    price: { on: true, x: 2, y: 13.5, w: 54, fs: 18, bold: true, align: 'center' },
+    code: { on: true, x: 2, y: 35, w: 54, fs: 7, bold: false, align: 'center' },
+    origin: { on: false, x: 2, y: 31, w: 54, fs: 6, bold: false, align: 'center' },
+    barcode: { on: true, x: 6, y: 23.5, w: 46, h: 11 },
+    qr: { on: false, x: 44, y: 24, w: 12 },
+  },
+};
+
+const clone = (o) => JSON.parse(JSON.stringify(o));
+
+function labelTpl() {
+  const saved = db.company.labelTpl || {};
+  const t = Object.assign(clone(DEFAULT_LABEL), saved, { els: {} });
+  for (const k of Object.keys(LABEL_FIELDS)) t.els[k] = Object.assign({}, DEFAULT_LABEL.els[k], saved.els?.[k]);
+  return t;
+}
+
+const barcodeCache = new Map();
+function barcodeSvg(value) {
+  if (!window.JsBarcode || !value) return '';
+  if (barcodeCache.has(value)) return barcodeCache.get(value);
+  let out = '';
+  try {
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    window.JsBarcode(svg, String(value), { format: 'CODE128', displayValue: false, margin: 0, height: 100, width: 2 });
+    const w = parseFloat(svg.getAttribute('width'));
+    const h = parseFloat(svg.getAttribute('height'));
+    svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
+    svg.setAttribute('width', '100%');
+    svg.setAttribute('height', '100%');
+    svg.setAttribute('preserveAspectRatio', 'none');
+    svg.removeAttribute('style');
+    out = svg.outerHTML;
+  } catch (e) { /* kodda shtrix-kodga yaramaydigan belgi bor */ }
+  barcodeCache.set(value, out);
+  return out;
+}
+
+function labelQr(text) {
+  if (!window.qrcode || !text) return '';
+  const qr = window.qrcode(0, 'M');
+  qr.addData(text);
+  qr.make();
+  return qr.createSvgTag({ cellSize: 4, margin: 0, scalable: true });
+}
+
+// design: dizaynerda bo'sh elementlar ham nomi bilan ko'rinadi (sudrab joylash uchun)
+function labelElHtml(k, e, p, design) {
+  const f = LABEL_FIELDS[k];
+  const pos = `left:${e.x}mm;top:${e.y}mm;width:${e.w}mm;`;
+  const ph = (t) => (design ? `<span class="le-ph">${esc(t)}</span>` : '');
+  if (f.kind === 'barcode') return `<div class="le le-bc" data-el="${k}" style="${pos}height:${e.h}mm">${barcodeSvg(p.code) || ph("Shtrix-kod (artikul yo'q)")}</div>`;
+  if (f.kind === 'qr') return `<div class="le le-qr" data-el="${k}" style="${pos}height:${e.w}mm">${labelQr(p.code || p.name) || ph('QR')}</div>`;
+  const t = f.text(p);
+  if (!t && !design) return '';
+  let html = t ? esc(t) : ph(f.title);
+  // Narx: raqam katta, "so'm" kichikroq va yonida (yoki umuman yo'q)
+  if (k === 'price' && t) {
+    const m = /^(.*?)\s*(so'm)$/.exec(t);
+    if (m) html = esc(m[1]) + (e.cur === false ? '' : `<span class="le-cur"> so'm</span>`);
+  }
+  return `<div class="le" data-el="${k}" style="${pos}font-size:${e.fs}pt;font-weight:${e.bold ? 700 : 400};text-align:${e.align}">${html}</div>`;
+}
+
+function labelHtml(p, tpl, design = false) {
+  return `<div class="lbl" style="width:${tpl.w}mm;height:${tpl.h}mm">${Object.entries(tpl.els)
+    .filter(([k, e]) => e.on && LABEL_FIELDS[k]).map(([k, e]) => labelElHtml(k, e, p, design)).join('')}</div>`;
+}
+
+const LABEL_CSS = `.lbl{position:relative;overflow:hidden;background:#fff;color:#000;font-family:Arial,Helvetica,sans-serif;box-sizing:border-box}
+.lbl .le{position:absolute;line-height:1.15;overflow-wrap:anywhere}.lbl .le-cur{font-size:.5em;white-space:nowrap}
+.lbl .le-bc svg,.lbl .le-qr svg{display:block;width:100%;height:100%}`;
+
+// Printer turi qurilmaga bog'liq — shu qurilmada eslab qolinadi
+function labelMode() {
+  try { return localStorage.getItem('bt-label-mode') || 'roll'; } catch (e) { return 'roll'; }
+}
+function setLabelMode(m) {
+  try { localStorage.setItem('bt-label-mode', m); } catch (e) { /* */ }
+}
+
+// items: [{ p, n }] — n nusxa
+function printLabels(items, tpl = labelTpl()) {
+  const list = items.filter((x) => x.p && x.n > 0);
+  const total = list.reduce((s, x) => s + x.n, 0);
+  if (!total) return alert('Chop etish uchun etiketka soni kiritilmagan.');
+  if (total > 1000 && !confirm(`${total} ta etiketka chop etiladi. Davom etilsinmi?`)) return;
+  const labels = list.map(({ p, n }) => labelHtml(p, tpl).repeat(n)).join('');
+  const roll = labelMode() !== 'a4';
+  const css = roll
+    ? `@page{size:${tpl.w}mm ${tpl.h}mm;margin:0}body{margin:0}.lbl{break-after:page;page-break-after:always}.lbl:last-child{break-after:auto;page-break-after:auto}`
+    : `@page{size:A4;margin:8mm}body{margin:0}.sheet{display:flex;flex-wrap:wrap;gap:${tpl.gap}mm}.lbl{outline:.2mm dashed #bbb;break-inside:avoid;page-break-inside:avoid}`;
+  printHtml(`<!doctype html><html><head><meta charset="utf-8"><title>Etiketkalar</title>
+    <style>${LABEL_CSS}${css}</style></head><body>${roll ? labels : `<div class="sheet">${labels}</div>`}</body></html>`);
+}
+
+function labelModeSelect() {
+  const m = labelMode();
+  return `<select id="labelMode" title="Printer turi"><option value="roll" ${m !== 'a4' ? 'selected' : ''}>Etiketka printeri (rulon)</option><option value="a4" ${m === 'a4' ? 'selected' : ''}>Oddiy printer (A4 varaq)</option></select>`;
+}
+
+// Bitta mahsulot uchun tez chop etish (mahsulotlar ro'yxati va kartochkadan)
+function quickLabel(id) {
+  const p = product(id);
+  if (!p) return;
+  const st = Math.max(0, qtyIn(ctx.stock, p.id));
+  openModal({
+    title: 'Etiketka: ' + p.name,
+    body: `<div class="lbl-quick"><div class="lbl-view">${labelHtml(p, labelTpl())}</div>
+      <div class="form-grid"><label>Nechta nusxa<input name="n" type="number" min="1" step="1" value="1" required></label>
+      <label>Printer${labelModeSelect()}</label></div>
+      ${st ? `<button type="button" class="small" id="lqAll">Omborda borcha (${st})</button>` : ''}</div>`,
+    submitText: 'Chop etish',
+    onOpen: () => {
+      $('#lqAll')?.addEventListener('click', () => { $('#modalBody [name=n]').value = st; });
+    },
+    onSubmit: (d) => {
+      printLabels([{ p, n: Math.min(1000, Math.max(0, Math.round(num(d.n)))) }]);
+    },
+  });
+}
+
+// Qabul qilish / kirim hujjatidagi tovarlar — kelgan soni bo'yicha
+function docLabels(id) {
+  const d = doc(id);
+  const items = d.items.map((it) => ({ p: product(it.productId), n: Math.max(0, Math.round(it.qty)) })).filter((x) => x.p);
+  if (!items.length) return alert("Hujjatda mahsulot yo'q.");
+  openModal({
+    title: `Etiketkalar: ${DOC_TYPES[d.type].one} ${d.no}`,
+    body: `<div class="table-wrap"><table><thead><tr><th>Mahsulot</th><th class="num">Nusxa</th></tr></thead><tbody>
+      ${items.map((x, i) => `<tr><td>${esc(productLabel(x.p))}</td><td class="num"><input class="lq-in" type="number" min="0" step="1" name="n${i}" value="${x.n}"></td></tr>`).join('')}
+      </tbody></table></div><div class="form-grid" style="margin-top:12px"><label>Printer${labelModeSelect()}</label></div>`,
+    submitText: 'Chop etish',
+    onSubmit: (data) => {
+      printLabels(items.map((x, i) => ({ p: x.p, n: Math.min(1000, Math.max(0, Math.round(num(data['n' + i])))) })));
+    },
+  });
+}
+
+// --- Etiketkalar sahifasi: qaysi mahsulotdan nechta ---
+
+const labelQty = {};
+const labelTotal = () => Object.values(labelQty).reduce((s, n) => s + n, 0);
+
+function labelList() {
+  const q = filterVal('labels.q').toLowerCase();
+  const cat = db.categories.includes(filterVal('labels.cat')) ? filterVal('labels.cat') : '';
+  return activeProducts()
+    .filter((p) => !cat || p.category === cat)
+    .filter((p) => !q || [p.name, p.code, p.type, p.color, p.size].join(' ').toLowerCase().includes(q));
+}
+
+function viewLabels() {
+  const cat = filterVal('labels.cat');
+  const list = labelList();
+  const first = product(Object.keys(labelQty).find((id) => labelQty[id] > 0)) || list[0];
+  const rows = list.map((p) => {
+    const st = qtyIn(ctx.stock, p.id);
+    return `<tr>${thumbCell(p)}
+      <td><b>${esc(p.name)}</b><div class="muted small">${esc([p.code, productPath(p)].filter(Boolean).join(' · '))}</div></td>
+      <td class="num">${priceLabel(p)}</td><td class="num">${st}</td>
+      <td class="num"><div class="lq"><button type="button" class="small icon-only" data-act="lqStep" data-id="${p.id}" data-d="-1">−</button><input class="lq-in" type="number" min="0" step="1" data-lq="${p.id}" value="${labelQty[p.id] || ''}" placeholder="0"><button type="button" class="small icon-only" data-act="lqStep" data-id="${p.id}" data-d="1">+</button></div></td>
+    </tr>`;
+  }).join('');
+  return toolbar('labels', {
+    extra: `<select data-filter="labels.cat"><option value="">Barcha kategoriyalar</option>${db.categories.map((c) => `<option ${c === cat ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select>
+      <button data-act="lqStock" title="Ro'yxatdagi har bir mahsulotga omborda nechta bo'lsa, shuncha">Omborda borcha</button>
+      <button data-act="lqOne">Hammasiga 1 tadan</button>
+      <button data-act="lqClear">Tozalash</button>`,
+    buttons: `${labelModeSelect()}<button class="primary" data-act="lqPrint" id="lqPrintBtn">${icon('print')}Chop etish (${labelTotal()})</button>
+      ${isAdmin() ? `<button data-act="ldOpen">${icon('edit')}Dizaynni sozlash</button>` : ''}`,
+  }) + `<div class="lbl-page">
+    <div class="card lbl-sample"><h3>Ko'rinishi</h3>${first ? `<div class="lbl-view">${labelHtml(first, labelTpl())}</div>` : '<p class="muted">Mahsulot yo\'q</p>'}
+      <p class="muted small">${labelTpl().w}×${labelTpl().h} mm${isAdmin() ? ' · o\'lcham va joylashuv «Dizaynni sozlash» da o\'zgaradi' : ''}</p></div>
+    <div class="card"><div class="table-wrap"><table><thead><tr><th></th><th>Mahsulot</th><th class="num">Narx</th><th class="num">Qoldiq</th><th class="num">Nusxa</th></tr></thead>
+      <tbody>${rows || emptyRow(5, "Mahsulot yo'q")}</tbody></table></div></div></div>`;
+}
+
+function updateLabelTotal() {
+  const b = $('#lqPrintBtn');
+  if (b) b.innerHTML = `${icon('print')}Chop etish (${labelTotal()})`;
+}
+
+document.addEventListener('input', (e) => {
+  const id = e.target.dataset?.lq;
+  if (!id) return;
+  const n = Math.max(0, Math.round(num(e.target.value)));
+  if (n) labelQty[id] = Math.min(1000, n); else delete labelQty[id];
+  updateLabelTotal();
+});
+document.addEventListener('change', (e) => {
+  if (e.target.id === 'labelMode') setLabelMode(e.target.value);
+});
+
+Object.assign(ACTIONS, {
+  labelOne: ({ id }) => quickLabel(id),
+  ldOpen: () => { location.hash = '#goods/labelDesign'; },
+  lqStep: ({ id, d }) => {
+    const n = Math.max(0, (labelQty[id] || 0) + Number(d));
+    if (n) labelQty[id] = n; else delete labelQty[id];
+    const inp = $(`[data-lq="${id}"]`);
+    if (inp) inp.value = n || '';
+    updateLabelTotal();
+  },
+  lqStock: () => {
+    labelList().forEach((p) => {
+      const st = Math.round(qtyIn(ctx.stock, p.id));
+      if (st > 0) labelQty[p.id] = Math.min(1000, st); else delete labelQty[p.id];
+    });
+    render();
+  },
+  lqOne: () => { labelList().forEach((p) => { labelQty[p.id] = 1; }); render(); },
+  lqClear: () => { Object.keys(labelQty).forEach((k) => delete labelQty[k]); render(); },
+  lqPrint: () => printLabels(Object.entries(labelQty).map(([id, n]) => ({ p: product(id), n }))),
+});
+
+// --- Etiketka dizayneri (faqat administrator) ---
+
+let labelDraft = null;
+let labelSel = 'price';
+let labelSampleId = '';
+
+const labelSample = () => product(labelSampleId) || activeProducts().find((p) => p.code) || activeProducts()[0]
+  || { name: 'Divan «Milano»', code: 'DV-1024', size: '220×95×85', color: 'Kulrang', category: 'Yumshoq mebel', type: 'Divanlar', salePrice: 7500000 };
+
+function viewLabelDesign() {
+  if (!labelDraft) labelDraft = labelTpl();
+  const t = labelDraft;
+  const preset = LABEL_SIZES.find(([w, h]) => w === t.w && h === t.h);
+  const sample = labelSample();
+  return `<div class="ld" id="ld">
+    <div class="card ld-stage">
+      <div class="toolbar">
+        <label class="inline">O'lcham <select id="ldSize">${LABEL_SIZES.map(([w, h]) => `<option value="${w}x${h}" ${preset && preset[0] === w && preset[1] === h ? 'selected' : ''}>${w} × ${h} mm</option>`).join('')}<option value="custom" ${preset ? '' : 'selected'}>Boshqa o'lcham</option></select></label>
+        <label class="inline">Eni <input class="ld-num" type="number" min="15" max="200" step="1" data-ld="w" value="${t.w}"> mm</label>
+        <label class="inline">Bo'yi <input class="ld-num" type="number" min="10" max="200" step="1" data-ld="h" value="${t.h}"> mm</label>
+        <label class="inline">Namuna <select id="ldSample">${activeProducts().slice(0, 500).map((p) => `<option value="${p.id}" ${p === sample ? 'selected' : ''}>${esc(productLabel(p))}</option>`).join('')}</select></label>
+      </div>
+      <div class="ld-canvas"><div class="ld-wrap" id="ldWrap"></div></div>
+      <p class="muted small">Elementni sichqoncha yoki barmoq bilan sudrab joyini o'zgartiring, o'ng pastki burchagidagi kvadratchani tortib kattalashtiring. Strelka tugmalari — 0,5 mm ga suradi.</p>
+    </div>
+    <div class="card ld-side">
+      <h3>Elementlar</h3>
+      <div class="ld-els">${Object.entries(LABEL_FIELDS).map(([k, f]) => `<div class="ld-el ${k === labelSel ? 'sel' : ''}" data-k="${k}">
+        <input type="checkbox" data-ldon="${k}" ${t.els[k].on ? 'checked' : ''} title="Ko'rsatish"><span class="ld-el-name" data-act="ldSel" data-k="${k}">${esc(f.title)}</span></div>`).join('')}</div>
+      <div id="ldProps"></div>
+      <div class="toolbar ld-actions">
+        <button class="primary" data-act="ldSave">${icon('check')}Saqlash</button>
+        <button data-act="ldTest">${icon('print')}Sinov chop etish</button>
+        <button data-act="ldUndo">Bekor qilish</button>
+        <button class="danger" data-act="ldReset">Standart</button>
+      </div>
+      <div class="form-grid"><label>Printer (shu qurilmada)${labelModeSelect()}</label>
+        <label>A4 da oraliq, mm<input class="ld-num" type="number" min="0" max="20" step="0.5" data-ld="gap" value="${t.gap}"></label></div>
+    </div>
+  </div>`;
+}
+
+function ldProps() {
+  const k = labelSel;
+  const e = labelDraft.els[k];
+  const f = LABEL_FIELDS[k];
+  const field = (key, label, min, max, step) => `<label>${label}<div class="ld-range"><input type="range" min="${min}" max="${max}" step="${step}" data-lde="${key}" value="${e[key]}"><input class="ld-num" type="number" min="${min}" max="${max}" step="${step}" data-lde="${key}" value="${e[key]}"></div></label>`;
+  const text = !f.kind;
+  return `<h3>${esc(f.title)}</h3>${e.on ? '' : '<p class="muted small">Bu element yashirilgan — yuqorida belgilang.</p>'}
+    <div class="ld-props">
+    ${text ? `${field('fs', 'Shrift kattaligi (pt)', 4, 60, 0.5)}
+      <div class="ld-btns">
+        <button type="button" class="small" data-act="ldFs" data-d="-1">A−</button><button type="button" class="small" data-act="ldFs" data-d="1">A+</button>
+        <button type="button" class="small ${e.bold ? 'on' : ''}" data-act="ldBold"><b>Qalin</b></button>
+        ${k === 'price' ? `<button type="button" class="small ${e.cur === false ? '' : 'on'}" data-act="ldCur">so'm</button>` : ''}
+        ${['left', 'center', 'right'].map((a) => `<button type="button" class="small ${e.align === a ? 'on' : ''}" data-act="ldAlign" data-a="${a}">${{ left: 'Chapga', center: "O'rtaga", right: "O'ngga" }[a]}</button>`).join('')}
+      </div>` : ''}
+    ${field('w', f.kind === 'qr' ? "O'lchami (mm)" : 'Eni (mm)', 3, labelDraft.w, 0.5)}
+    ${f.kind === 'barcode' ? field('h', "Bo'yi (mm)", 3, labelDraft.h, 0.5) : ''}
+    ${field('x', 'Chapdan (mm)', 0, labelDraft.w, 0.5)}
+    ${field('y', 'Tepadan (mm)', 0, labelDraft.h, 0.5)}
+    <div class="ld-btns"><button type="button" class="small" data-act="ldCenter">Gorizontal o'rtaga</button><button type="button" class="small" data-act="ldFull">To'liq eniga</button></div>
+    </div>`;
+}
+
+function ldDraw() {
+  const wrap = $('#ldWrap');
+  if (!wrap) return;
+  const t = labelDraft;
+  wrap.innerHTML = labelHtml(labelSample(), t, true);
+  // Ekranga sig'adigan masshtab
+  const avail = Math.min(wrap.parentElement.clientWidth - 24, 640);
+  const k = Math.max(1, Math.min(4, avail / (t.w * 3.78)));
+  const lbl = $('.lbl', wrap);
+  lbl.style.transform = `scale(${k})`;
+  wrap.style.width = `${t.w * 3.78 * k}px`;
+  wrap.style.height = `${t.h * 3.78 * k}px`;
+  const sel = $(`.le[data-el="${labelSel}"]`, lbl);
+  if (sel) {
+    sel.classList.add('sel');
+    sel.insertAdjacentHTML('beforeend', '<span class="le-h"></span>');
+  }
+}
+
+function ldRefresh(props = true) {
+  ldDraw();
+  if (props && $('#ldProps')) $('#ldProps').innerHTML = ldProps();
+  $$('#ld .ld-el').forEach((el) => el.classList.toggle('sel', el.dataset.k === labelSel));
+}
+
+const clampNum = (v, a, b) => Math.min(b, Math.max(a, v));
+const r05 = (v) => Math.round(v * 2) / 2;
+
+// Element label ichidan chiqib ketmasin
+function ldClamp(k) {
+  const e = labelDraft.els[k];
+  e.w = clampNum(e.w, 3, labelDraft.w);
+  if (e.h != null) e.h = clampNum(e.h, 3, labelDraft.h);
+  e.x = clampNum(e.x, 0, Math.max(0, labelDraft.w - e.w));
+  e.y = clampNum(e.y, 0, Math.max(0, labelDraft.h - (e.h ?? (LABEL_FIELDS[k].kind === 'qr' ? e.w : 2))));
+}
+
+// O'lcham o'zgarsa — elementlar ham mutanosib ko'chadi
+function ldResize(w, h) {
+  const t = labelDraft;
+  const kx = w / t.w;
+  const ky = h / t.h;
+  const kf = Math.min(kx, ky);
+  for (const [k, e] of Object.entries(t.els)) {
+    e.x = r05(e.x * kx);
+    e.w = r05(e.w * kx);
+    e.y = r05(e.y * ky);
+    if (e.h != null) e.h = r05(e.h * ky);
+    if (e.fs) e.fs = r05(Math.max(4, e.fs * kf));
+    t.w = w; t.h = h;
+    ldClamp(k);
+  }
+  t.w = w;
+  t.h = h;
+}
+
+document.addEventListener('input', (e) => {
+  if (!labelDraft || !e.target.closest('#ld')) return;
+  const el = e.target;
+  if (el.dataset.lde) {
+    const key = el.dataset.lde;
+    const v = num(el.value);
+    labelDraft.els[labelSel][key] = v;
+    ldClamp(labelSel);
+    // range va son maydoni bir-biriga mos tursin
+    $$(`#ldProps [data-lde="${key}"]`).forEach((x) => { if (x !== el) x.value = labelDraft.els[labelSel][key]; });
+    ldDraw();
+  } else if (el.dataset.ld === 'gap') {
+    labelDraft.gap = clampNum(num(el.value), 0, 20);
+  } else if (el.dataset.ld === 'w' || el.dataset.ld === 'h') {
+    const w = el.dataset.ld === 'w' ? num(el.value) : labelDraft.w;
+    const h = el.dataset.ld === 'h' ? num(el.value) : labelDraft.h;
+    if (w < 15 || h < 10 || w > 200 || h > 200) return;
+    ldResize(w, h);
+    $('#ldSize').value = LABEL_SIZES.some(([a, b]) => a === w && b === h) ? `${w}x${h}` : 'custom';
+    ldRefresh();
+  }
+});
+
+document.addEventListener('change', (e) => {
+  if (!labelDraft || !e.target.closest('#ld')) return;
+  const el = e.target;
+  if (el.id === 'ldSize' && el.value !== 'custom') {
+    const [w, h] = el.value.split('x').map(Number);
+    ldResize(w, h);
+    $('#ld [data-ld="w"]').value = w;
+    $('#ld [data-ld="h"]').value = h;
+    ldRefresh();
+  } else if (el.id === 'ldSample') {
+    labelSampleId = el.value;
+    ldDraw();
+  } else if (el.dataset.ldon) {
+    labelDraft.els[el.dataset.ldon].on = el.checked;
+    labelSel = el.dataset.ldon;
+    ldRefresh();
+  }
+});
+
+// Sudrab ko'chirish va burchakdan kattalashtirish
+document.addEventListener('pointerdown', (e) => {
+  const le = e.target.closest('#ldWrap .le');
+  if (!le || !labelDraft) return;
+  e.preventDefault();
+  const k = le.dataset.el;
+  const resize = e.target.classList.contains('le-h');
+  if (k !== labelSel) {
+    labelSel = k;
+    ldRefresh();
+  }
+  const lbl = $('#ldWrap .lbl');
+  const pxPerMm = lbl.getBoundingClientRect().width / labelDraft.w;
+  const el = labelDraft.els[k];
+  const start = { x: e.clientX, y: e.clientY, ex: el.x, ey: el.y, ew: el.w, eh: el.h };
+  const move = (ev) => {
+    const dx = (ev.clientX - start.x) / pxPerMm;
+    const dy = (ev.clientY - start.y) / pxPerMm;
+    if (resize) {
+      el.w = r05(start.ew + dx);
+      if (el.h != null) el.h = r05(start.eh + dy);
+    } else {
+      el.x = r05(start.ex + dx);
+      el.y = r05(start.ey + dy);
+    }
+    ldClamp(k);
+    ldDraw();
+    ['x', 'y', 'w', 'h'].forEach((key) => $$(`#ldProps [data-lde="${key}"]`).forEach((x) => { x.value = el[key]; }));
+  };
+  const up = () => {
+    document.removeEventListener('pointermove', move);
+    document.removeEventListener('pointerup', up);
+    document.removeEventListener('pointercancel', up);
+  };
+  document.addEventListener('pointermove', move);
+  document.addEventListener('pointerup', up);
+  document.addEventListener('pointercancel', up);
+});
+
+// Strelkalar bilan aniq surish (yozish maydonida emas)
+document.addEventListener('keydown', (e) => {
+  if (!labelDraft || !$('#ldWrap') || $('#modal').open || e.target.closest('input, select, textarea')) return;
+  const d = { ArrowLeft: [-0.5, 0], ArrowRight: [0.5, 0], ArrowUp: [0, -0.5], ArrowDown: [0, 0.5] }[e.key];
+  if (!d) return;
+  e.preventDefault();
+  const el = labelDraft.els[labelSel];
+  el.x += d[0];
+  el.y += d[1];
+  ldClamp(labelSel);
+  ldRefresh();
+});
+
+Object.assign(ACTIONS, {
+  ldSel: ({ k }, el) => {
+    labelSel = k;
+    ldRefresh();
+  },
+  ldFs: ({ d }) => {
+    const e = labelDraft.els[labelSel];
+    e.fs = clampNum(e.fs + Number(d), 4, 60);
+    ldRefresh();
+  },
+  ldBold: () => {
+    const e = labelDraft.els[labelSel];
+    e.bold = !e.bold;
+    ldRefresh();
+  },
+  ldCur: () => {
+    const e = labelDraft.els[labelSel];
+    e.cur = e.cur === false;
+    ldRefresh();
+  },
+  ldAlign: ({ a }) => {
+    labelDraft.els[labelSel].align = a;
+    ldRefresh();
+  },
+  ldCenter: () => {
+    const e = labelDraft.els[labelSel];
+    e.x = r05((labelDraft.w - e.w) / 2);
+    ldRefresh();
+  },
+  ldFull: () => {
+    const e = labelDraft.els[labelSel];
+    e.x = 1;
+    e.w = labelDraft.w - 2;
+    if (e.align) e.align = 'center';
+    ldClamp(labelSel);
+    ldRefresh();
+  },
+  ldTest: () => printLabels([{ p: labelSample(), n: 1 }], labelDraft),
+  ldUndo: () => { labelDraft = labelTpl(); render(); },
+  ldReset: () => {
+    if (!confirm("Etiketka dizayni standart holatga qaytarilsinmi? (Saqlash bosilmaguncha o'zgarmaydi)")) return;
+    labelDraft = clone(DEFAULT_LABEL);
+    render();
+  },
+  ldSave: async () => {
+    db.company.labelTpl = clone(labelDraft);
+    await save();
+    alert('Etiketka dizayni saqlandi.');
+  },
+});
+
 // Sotuvchi tugmani ko'rmasa ham, bu amallarni bajara olmasligi kerak
 const ADMIN_ACTIONS = ['newProduct', 'deleteProduct', 'unarchive', 'exportProducts', 'tgProduct', 'deleteParty', 'deletePayment',
   'tgSave', 'tgDetect', 'tgTest', 'tgAll', 'coSave', 'editWh', 'deleteWh', 'catSave', 'catAdd', 'catDel', 'regAdd', 'regDel', 'chipRemove', 'backup', 'demo', 'reset', 'editUser', 'exportDocs',
-  'serverSettings', 'refreshUsage', 'migrateLocal', 'rateRefresh', 'rateManual', 'rateAuto'];
+  'serverSettings', 'refreshUsage', 'migrateLocal', 'rateRefresh', 'rateManual', 'rateAuto',
+  'ldSel', 'ldFs', 'ldBold', 'ldCur', 'ldAlign', 'ldCenter', 'ldFull', 'ldTest', 'ldUndo', 'ldReset', 'ldSave'];
 
 document.addEventListener('click', (e) => {
   const el = e.target.closest('[data-act]');
