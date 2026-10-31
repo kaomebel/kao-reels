@@ -1234,7 +1234,8 @@ function docForm(type, d) {
     head += `<div class="full party-hint" id="partyHint"></div>`;
   }
   const whF = selectField(t.move ? 'Qaysi ombordan' : 'Ombor', 'warehouseId', whOptions(), d.warehouseId || db.warehouses[0].id);
-  if (late) tail += whF; else head += whF;
+  // Ko'chirishdan boshqa hujjatlarda ombor mahsulotlardan keyin (odatda o'zgartirilmaydi)
+  if (t.move) head += whF; else tail += whF;
   if (t.move) head += selectField('Qaysi omborga', 'toWarehouseId', whOptions(), d.toWarehouseId || (db.warehouses[1] || db.warehouses[0]).id);
   if (t.statuses) {
     const st = selectField('Holati', 'status', Object.entries(t.statuses), d.status || Object.keys(t.statuses)[0]);
