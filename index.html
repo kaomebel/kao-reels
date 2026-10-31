@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="uz">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+  <title>Biznes Tizim</title>
+  <meta name="theme-color" content="#4b3427">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Biznes Tizim">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="styles.css">
+  <script>
+    // Tanlangan mavzuni sahifa chizilishidan oldin qo'llaymiz (oq-qora miltillamasligi uchun)
+    try { if (localStorage.getItem('biznes-tizim-theme') === 'dark') document.documentElement.dataset.theme = 'dark'; } catch (e) {}
+  </script>
+</head>
+<body>
+  <div id="auth" hidden>
+    <div class="auth-card">
+      <div class="auth-logo" id="authLogo"></div>
+      <h1>Biznes Tizim</h1>
+      <div class="muted" id="authSubtitle"></div>
+      <form id="authForm" novalidate></form>
+    </div>
+  </div>
+
+  <div id="app" class="shell" hidden>
+    <aside class="sidebar">
+      <a class="brand" href="#dashboard"><span class="brand-mark" id="brandMark"></span><span>Biznes Tizim</span></a>
+      <nav id="sections"></nav>
+      <a href="#settings/currency" class="rate-box" id="rateBox" title="Dollar kursi"></a>
+      <div class="side-foot">
+        <a href="#" id="userName" class="side-user" title="Profil va parol"></a>
+        <a href="#install" class="side-btn" id="installBtn" title="Telefonga o'rnatish"></a>
+        <button type="button" id="themeBtn" class="side-btn" title="Mavzuni almashtirish"></button>
+        <button type="button" id="logoutBtn" class="side-btn" title="Chiqish"></button>
+      </div>
+    </aside>
+    <div class="main-col">
+      <div id="syncBanner" class="sync-banner" hidden></div>
+      <div id="updateBanner" class="sync-banner update-banner" hidden></div>
+      <div class="page-head" id="pageHead"></div>
+      <nav id="subnav" class="subnav"></nav>
+      <main id="view"></main>
+      <div class="ver-foot" id="verFoot"></div>
+    </div>
+  </div>
+
+  <div id="iosHint" class="ios-hint" hidden>
+    <div><b>Ilova qilib o'rnating:</b> pastdagi <span class="ios-share" id="iosShareIc"></span> <b>Ulashish</b> → <b>«Bosh ekranga qo'shish»</b></div>
+    <button type="button" class="small" data-act="dismissIosHint">Yopish</button>
+  </div>
+
+  <div id="ptr" class="ptr" aria-hidden="true"><span class="ptr-ic" id="ptrIc"></span><span id="ptrText">Yangilash uchun torting</span></div>
+
+  <div id="loading" class="loading" hidden><div class="spinner"></div><div id="loadingText">Yuklanmoqda...</div></div>
+
+  <dialog id="modal">
+    <form id="modalForm" novalidate>
+      <h3 id="modalTitle" tabindex="-1"></h3>
+      <div id="modalBody"></div>
+      <div class="modal-actions">
+        <div id="modalExtra"></div>
+        <div>
+          <button type="button" id="modalCancel">Yopish</button>
+          <button type="submit" class="primary" id="modalSubmit">Saqlash</button>
+        </div>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="version.js" onerror="void 0"></script>
+  <script src="config.js"></script>
+  <script src="vendor/supabase.js"></script>
+  <script src="vendor/qrcode.js"></script>
+  <script src="vendor/jsbarcode.min.js"></script>
+  <script src="icons.js"></script>
+  <script src="backend.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
