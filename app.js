@@ -182,7 +182,7 @@ function setSyncState(offline, message = '') {
   const el = $('#syncBanner');
   if (!el) return;
   el.hidden = !offline;
-  el.textContent = offline ? "⚠️ Internet yo'q — o'zgarishlar hali serverga yuborilmadi. Ulanish tiklanganda avtomatik yuboriladi. Sahifani yopmang." : '';
+  el.textContent = offline ? "⚠️ Internet yo'q — o'zgarishlar telefonda saqlandi va internet qaytganda (yoki dastur keyingi safar ochilganda) serverga o'zi yuboriladi." : '';
 }
 
 window.addEventListener('online', () => { if (syncState.offline) commit(); });
@@ -225,6 +225,13 @@ async function loadData() {
   }
   requestPersistentStorage();
   setTimeout(autoBackup, 5000);
+  // Oldingi safar internet yo'qligida kiritilib, yuborilmay qolgan o'zgarishlar — endi serverga
+  const pending = backend.restoredPending;
+  if (pending) {
+    backend.restoredPending = 0;
+    commit();
+    setTimeout(() => alert(`Oldingi safar internet yo'qligida kiritilgan ${pending} ta o'zgarish serverga yuborilmoqda.`), 300);
+  }
 }
 
 function showLoading(on, text = 'Yuklanmoqda...') {

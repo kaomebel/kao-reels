@@ -497,6 +497,7 @@ class SupabaseBackend {
     this.snap.settings = new Map(settings.map((r) => [r.id, stableJson(r.data)]));
     settings.forEach((r) => { if (SETTINGS_KEYS.includes(r.id)) db[r.id] = r.data.value; });
     db.users = profiles;
+    this.restoredPending = this.applyOutbox(db);
 
     // Yangi bazani administrator birinchi kirganda boshlang'ich ma'lumotlar bilan to'ldiramiz
     if (this.isAdmin && !db.warehouses.length) {
@@ -539,6 +540,9 @@ class SupabaseBackend {
       const deletes = [...snap.keys()].filter((id) => !rows[t].has(id));
       return { t, upserts, deletes };
     });
+    // Yuborilmagan o'zgarishlar avval telefon xotirasiga yoziladi: internet uzilib, dastur yopilsa ham
+    // yo'qolmaydi va keyingi ochilishda serverga yuboriladi
+    this.saveOutbox(plan);
     // Avval qo'shish/yangilash (bog'liq yozuvlar tartibida), keyin teskari tartibda o'chirish
     for (const { t, upserts } of plan) {
       for (let i = 0; i < upserts.length; i += 500) {
@@ -557,6 +561,46 @@ class SupabaseBackend {
         chunk.forEach((id) => this.snap[t].delete(id));
       }
     }
+    this.saveOutbox([]);
+  }
+
+  get outboxKey() {
+    return 'biznes-tizim-outbox-' + (this.profile?.id || '');
+  }
+
+  saveOutbox(plan) {
+    const items = plan.filter((x) => x.upserts.length || x.deletes.length)
+      .map(({ t, upserts, deletes }) => ({ t, upserts: upserts.map(({ id, data }) => ({ id, data })), deletes }));
+    try {
+      if (items.length) localStorage.setItem(this.outboxKey, JSON.stringify({ at: new Date().toISOString(), items }));
+      else localStorage.removeItem(this.outboxKey);
+    } catch (e) { console.warn('Outbox:', e); }
+  }
+
+  // Serverdan yuklangan holatga oldingi seansda yuborilmay qolgan o'zgarishlarni qo'yamiz
+  // (dastur keyin ularni odatdagidek serverga yuboradi). Qaytaradi: nechta yozuv tiklandi
+  applyOutbox(db) {
+    let box = null;
+    try { box = JSON.parse(localStorage.getItem(this.outboxKey) || 'null'); } catch (e) { /* buzilgan */ }
+    if (!box?.items?.length) return 0;
+    let n = 0;
+    box.items.forEach(({ t, upserts, deletes }) => {
+      upserts.forEach(({ id, data }) => {
+        n++;
+        if (t === 'settings') { if (SETTINGS_KEYS.includes(id)) db[id] = data.value; return; }
+        if (t === 'product_costs') { const p = db.products.find((x) => x.id === id); if (p) p.buyPrice = data.buyPrice; return; }
+        if (!Array.isArray(db[t])) return;
+        const i = db[t].findIndex((x) => x.id === id);
+        // Mahsulot qatorida kelish narxi alohida saqlanadi — uni yo'qotmaymiz
+        const merged = t === 'products' && i >= 0 ? { ...data, buyPrice: db[t][i].buyPrice } : data;
+        if (i >= 0) db[t][i] = merged; else db[t].push(merged);
+      });
+      deletes.forEach((id) => {
+        n++;
+        if (Array.isArray(db[t])) db[t] = db[t].filter((x) => x.id !== id);
+      });
+    });
+    return n;
   }
 
   async nextNo(kind, prefix) {
