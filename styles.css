@@ -1085,3 +1085,11 @@ button.primary:active:not(:disabled) { background: var(--accent-dark); }
 .backup-status .ic { flex: none; width: 20px; height: 20px; }
 .backup-status.ok .ic { color: var(--ok); }
 .backup-status.warn .ic { color: var(--warn); }
+
+/* Profil: tungi mavzu, telefonga o'rnatish va chiqish shu yerda */
+.profile-actions { display: grid; gap: 10px; margin-top: 14px; }
+.profile-actions > button, .profile-actions > a {
+  display: flex; align-items: center; gap: 10px; justify-content: flex-start;
+  width: 100%; min-height: 48px; padding: 10px 14px; text-align: left; text-decoration: none;
+}
+.profile-actions svg { width: 20px; height: 20px; flex: none; }

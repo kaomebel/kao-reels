@@ -2654,7 +2654,7 @@ const SECTIONS = [
   { id: 'money', icon: 'wallet', title: 'Pul', views: [['payments', "To'lovlar", 'sale|money'], ['cash', 'Kassa va hisoblar', 'money']] },
   { id: 'reports', icon: 'chart', title: 'Hisobotlar', views: [['profit', 'Foyda va zarar', 'reports'], ['top', 'Savdo tahlili', 'reports']] },
   { id: 'install', icon: 'phone', title: "Telefonga o'rnatish", hideInNav: true },
-  { id: 'settings', icon: 'settings', title: 'Sozlamalar', admin: true, views: [['users', 'Foydalanuvchilar'], ['currency', 'Valyuta kursi'], ['server', 'Server'], ['telegram', 'Telegram'], ['company', 'Kompaniya'], ['categories', "Ro'yxatlar"], ['backup', 'Zaxira nusxa']] },
+  { id: 'settings', icon: 'settings', title: 'Sozlamalar', views: [['users', 'Foydalanuvchilar', 'A'], ['currency', 'Valyuta kursi', 'A'], ['server', 'Server', 'A'], ['telegram', 'Telegram', 'A'], ['company', 'Kompaniya', 'A'], ['categories', "Ro'yxatlar", 'A'], ['backup', 'Zaxira nusxa', 'A'], ['profile', 'Profil']] },
 ];
 
 function viewTitle(v) {
@@ -3614,6 +3614,21 @@ function localDataSummary() {
   }
 }
 
+// Profil: har bir foydalanuvchiga ochiq — parol, tungi mavzu, telefonga o'rnatish va chiqish
+function viewProfile() {
+  const dark = document.documentElement.dataset.theme === 'dark';
+  return `<div class="card narrow profile-card">
+      <h3>${esc(me.name)}</h3>
+      <p class="muted">${esc(ROLES[me.role] || '')} · login: <b>${esc(me.login || '')}</b></p>
+      <div class="profile-actions">
+        <button type="button" data-act="editMe">${icon('users')}<span>Ism va parolni o'zgartirish</span></button>
+        <button type="button" data-act="toggleTheme">${icon(dark ? 'sun' : 'moon')}<span>${dark ? 'Kunduzgi mavzuga o\'tish' : 'Tungi mavzuga o\'tish'}</span></button>
+        <button type="button" data-act="goInstall">${icon('phone')}<span>Telefonga o'rnatish</span></button>
+        <button type="button" class="danger" data-act="logout">${icon('logout')}<span>Chiqish</span></button>
+      </div>
+    </div>`;
+}
+
 function viewServer() {
   const server = backend.kind === 'supabase';
   const local = server && localDataSummary();
@@ -3870,7 +3885,7 @@ const VIEWS = {
   dashboard: viewDashboard, products: viewProducts, stock: viewStock, parties: viewParties, debts: viewDebts,
   payments: viewPayments, cash: viewCash, profit: viewProfit, top: viewTop, users: viewUsers,
   telegram: viewTelegram, company: viewCompany, warehouses: viewWarehouses, categories: viewCategories, backup: viewBackup,
-  server: viewServer, currency: viewCurrency, install: viewInstall, labels: viewLabels, labelDesign: viewLabelDesign,
+  server: viewServer, profile: viewProfile, currency: viewCurrency, install: viewInstall, labels: viewLabels, labelDesign: viewLabelDesign,
 };
 
 function render() {
@@ -4156,6 +4171,10 @@ const ACTIONS = {
   },
   refreshUsage: () => refreshStorageUsage(),
   migrateLocal: () => migrateLocal(),
+  editMe: () => editUser(me.id),
+  goInstall: () => { location.hash = '#install'; },
+  toggleTheme: () => { applyTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'); render(); },
+  logout: () => logout(),
 };
 
 // ---------- Etiketkalar ----------
@@ -4709,9 +4728,6 @@ document.addEventListener('keydown', (e) => {
 });
 
 $('#authForm').addEventListener('submit', onAuthSubmit);
-$('#logoutBtn').addEventListener('click', logout);
-$('#logoutBtn').innerHTML = icon('logout');
-$('#installBtn').innerHTML = icon('phone');
 $('#iosShareIc').innerHTML = icon('share');
 $('#brandMark').innerHTML = icon('sofa');
 $('#authLogo').innerHTML = icon('sofa');
@@ -4720,12 +4736,9 @@ $('#authLogo').innerHTML = icon('sofa');
 function applyTheme(theme) {
   if (theme === 'dark') document.documentElement.dataset.theme = 'dark';
   else delete document.documentElement.dataset.theme;
-  $('#themeBtn').innerHTML = icon(theme === 'dark' ? 'sun' : 'moon');
-  $('#themeBtn').title = theme === 'dark' ? 'Kunduzgi mavzu' : 'Tungi mavzu';
   try { localStorage.setItem('biznes-tizim-theme', theme); } catch (e) { /* xotira yopiq */ }
 }
 applyTheme(document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light');
-$('#themeBtn').addEventListener('click', () => applyTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'));
 $('#userName').addEventListener('click', (e) => { e.preventDefault(); editUser(me.id); });
 
 async function start() {
