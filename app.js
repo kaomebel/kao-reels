@@ -1190,6 +1190,9 @@ function itemRowHtml(t, it = {}, cur = 'UZS') {
   </tr>`;
 }
 
+// Chegirma maydoni: savdoda ming so'mlarda (discountK = 1000), xaridlarda — to'liq summa
+const discountOf = (data) => num(data.discount) * (num(data.discountK) || 1);
+
 function docForm(type, d) {
   const t = DOC_TYPES[type];
   const isOrder = type === 'order';
@@ -1264,7 +1267,14 @@ function docForm(type, d) {
   }
 
   let foot = '';
-  if (t.money || type === 'order' || type === 'purchaseOrder') foot += moneyField('Chegirma', 'discount', d.discount || '', cur, 'placeholder="0"');
+  if (t.money || type === 'order' || type === 'purchaseOrder') {
+    if (t.fx) foot += moneyField('Chegirma', 'discount', d.discount || '', cur, 'placeholder="0"');
+    // Savdoda chegirma ming so'mlarda yoziladi: 5 → 5 000, 50 → 50 000 so'm
+    else {
+      foot += `<label>Chegirma<span class="money-wrap"><input name="discount" class="money disc-k" data-cur="USD" inputmode="decimal" autocomplete="off" placeholder="0" value="${esc(d.discount ? fmtIn(Math.round(d.discount / 10) / 100, 'USD') : '')}"><span class="cur">ming so'm</span></span>
+        <input type="hidden" name="discountK" value="1000"><span class="muted small disc-hint" id="discHint"></span></label>`;
+    }
+  }
   if (!d.id && t.pay) {
     foot += moneyField(isOrder ? "Oldindan to'lov (zaklad)" : t.pay === 'in' ? "Hozir to'landi" : "Hozir to'ladik", 'payNow', d.payNow ?? '', 'UZS', 'placeholder="0"');
     foot += selectField("To'lov usuli", 'payMethod', Object.entries(PAY_METHODS), 'cash');
@@ -1726,7 +1736,10 @@ function bindDocForm(type, editingId) {
       priceEl.classList.toggle('below-min', !!min && num(priceEl.value) < min);
     });
     if (isCustom()) sum = num($('#modalBody [name=cQty]').value) * num($('#modalBody [name=cPrice]').value);
-    const total = Math.max(0, sum - num(discount?.value));
+    const disc = discountOf({ discount: discount?.value, discountK: $('#modalForm [name=discountK]')?.value });
+    const hint = $('#discHint');
+    if (hint) hint.textContent = disc ? `= ${money(disc)}` : '';
+    const total = Math.max(0, sum - disc);
     $('#docTotal').innerHTML = curOf() === 'USD'
       ? `${fmtUsd(total)} <span class="muted">≈ ${money(total * rateOf())}</span>`
       : money(total);
@@ -1804,7 +1817,7 @@ function bindDocForm(type, editingId) {
       warehouseId: f.warehouseId,
       addr: f.needDelivery && f.aRegion && f.aRegion !== '__new' ? { region: f.aRegion, place: f.aPlace !== '__new' ? f.aPlace : '', spot: f.aSpot, detail: f.aDetail } : undefined,
       deliveryDate: f.deliveryDate,
-      discount: num(f.discount),
+      discount: discountOf(f),
       payNow: num(f.payNow) || '',
       note: f.note,
       items: items.length ? items : undefined,
@@ -1906,7 +1919,7 @@ async function saveDoc(type, existing, preset, data, stock) {
   // Qarzga sotuv: qolgan summa bo'lsa — qaytarish sanasi va aniq mijoz kerak
   let debtRest = 0;
   if (type === 'sale') {
-    const total = Math.max(0, items.reduce((sum, it) => sum + it.qty * it.price, 0) - num(data.discount));
+    const total = Math.max(0, items.reduce((sum, it) => sum + it.qty * it.price, 0) - discountOf(data));
     debtRest = total - prevPaid(existing || preset) - num(data.payNow);
     if (debtRest > 0) {
       if (!data.debtDue) {
@@ -2007,7 +2020,7 @@ async function saveDoc(type, existing, preset, data, stock) {
     deliveryDate: t.delivery && (delivery || type === 'order') ? data.deliveryDate : undefined,
     address: t.delivery ? delivery?.text || '' : undefined,
     addr: t.delivery ? delivery?.addr : undefined,
-    discount: num(data.discount),
+    discount: discountOf(data),
     note: data.note.trim(),
     items,
     currency: t.fx ? currency : undefined,

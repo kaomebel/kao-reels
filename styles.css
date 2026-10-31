@@ -912,3 +912,5 @@ input::-webkit-date-and-time-value { text-align: left; }
   .toolbar > * { min-width: 0; }
   .toolbar button { flex: 1 1 auto; }
 }
+.money-wrap input.disc-k { padding-right: 84px; }
+.disc-hint:empty { display: none; }
