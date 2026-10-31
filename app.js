@@ -1203,7 +1203,13 @@ function docForm(type, d) {
       <label><input type="radio" name="saleMode" value="order" ${isOrder ? 'checked' : ''}><span>${icon('clock')}Buyurtma berdi</span></label>
     </div></div>`;
   }
-  head += field('Sana', 'date', d.date, 'type="date" required');
+  // Savdoda mijoz va mahsulotlar eng tepada (mijoz shoshayotgan bo'lishi mumkin);
+  // holati, yetkazish, sana va ombor — mahsulotlardan keyin
+  const late = t.party === 'customer';
+  let after = '';
+  let tail = '';
+  const dateF = field('Sana', 'date', d.date, 'type="date" required');
+  if (late) tail += dateF; else head += dateF;
   if (t.party === 'customer') {
     // Mijoz: telefon → ism (ostida mos mijozlar ro'yxati) → mijoz turi.
     // Ism va telefon bo'sh qolsa — "Chakana xaridor".
@@ -1227,11 +1233,9 @@ function docForm(type, d) {
     head += `<label class="new-party" hidden>Yangi ${who} ismi *<input name="newPartyName" id="newPartyName" placeholder="Ism familiya" autocomplete="off"></label>`;
     head += `<div class="full party-hint" id="partyHint"></div>`;
   }
-  head += selectField(t.move ? 'Qaysi ombordan' : 'Ombor', 'warehouseId', whOptions(), d.warehouseId || db.warehouses[0].id);
+  const whF = selectField(t.move ? 'Qaysi ombordan' : 'Ombor', 'warehouseId', whOptions(), d.warehouseId || db.warehouses[0].id);
+  if (late) tail += whF; else head += whF;
   if (t.move) head += selectField('Qaysi omborga', 'toWarehouseId', whOptions(), d.toWarehouseId || (db.warehouses[1] || db.warehouses[0]).id);
-  // Savdoda: avval mahsulotlar, keyin holati va yetkazish
-  let after = '';
-  const late = t.party === 'customer';
   if (t.statuses) {
     const st = selectField('Holati', 'status', Object.entries(t.statuses), d.status || Object.keys(t.statuses)[0]);
     if (late) after += st; else head += st;
@@ -1244,9 +1248,9 @@ function docForm(type, d) {
       <label id="rateField" ${cur === 'USD' ? '' : 'hidden'}>Kurs: 1 $ =<span class="money-wrap"><input name="rate" class="money" data-cur="USD" inputmode="decimal" value="${esc(fmtIn(d.rate || usdRate() || '', 'USD'))}"><span class="cur">so'm</span></span></label>`;
   }
   if (isOrder) {
-    head += field('Bajarish muddati *', 'deliveryDate', d.deliveryDate, 'type="date" required');
+    after = field('Bajarish muddati *', 'deliveryDate', d.deliveryDate, 'type="date" required') + after;
     const names = db.users.map((u) => u.name).filter(Boolean);
-    head += `<label>Mas'ul xodim<input name="responsible" list="respList" autocomplete="off" placeholder="Kim bajaradi" value="${esc(d.responsible || '')}">
+    after += `<label>Mas'ul xodim<input name="responsible" list="respList" autocomplete="off" placeholder="Kim bajaradi" value="${esc(d.responsible || '')}">
       <datalist id="respList">${names.map((n) => `<option value="${esc(n)}">`).join('')}</datalist></label>`;
     head += `<div class="field full"><span class="field-label">Buyurtma turi</span><div class="seg seg-sm" role="radiogroup">
       <label><input type="radio" name="orderKind" value="standard" ${custom ? '' : 'checked'}><span>Standart — mavjud tovarlardan</span></label>
@@ -1306,7 +1310,7 @@ function docForm(type, d) {
     </table></div>
     <button type="button" class="small" id="addItemRow">${icon('plus')}Qator qo'shish</button>
     </div>
-    <div class="form-grid" style="margin-top:12px">${after}${foot}</div>
+    <div class="form-grid" style="margin-top:12px">${after}${tail}${foot}</div>
     <div class="total-line" id="totalLine" data-paid="${prevPaid(d)}">Jami: <b id="docTotal">0</b><span id="docRest"></span></div>`;
 }
 
