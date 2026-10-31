@@ -510,7 +510,9 @@ class SupabaseBackend {
     settings.forEach((r) => { if (SETTINGS_KEYS.includes(r.id)) db[r.id] = r.data.value; });
     db.users = profiles;
     // Shofyorlarning Telegram bog'lanishi (jadval hali bo'lmasa — bo'sh)
-    db.driverChats = await this.sb.from('driver_chats').select('driver_id,chat_id,tg_name').then((r) => r.data || [], () => []);
+    const dc = await this.sb.from('driver_chats').select('driver_id,chat_id,tg_name').then((r) => r, () => ({ error: true }));
+    this.hasDriverChats = !dc.error; // jadval hali o'rnatilmagan serverda jonli obuna buzilmasin
+    db.driverChats = dc.data || [];
     this.restoredPending = this.applyOutbox(db);
 
     // Yangi bazani administrator birinchi kirganda boshlang'ich ma'lumotlar bilan to'ldiramiz
@@ -650,7 +652,7 @@ class SupabaseBackend {
   subscribe(db, onChange) {
     this.unsubscribe();
     this.channel = this.sb.channel('biznes-tizim');
-    ['products', 'product_costs', 'warehouses', 'counterparties', 'docs', 'payments', 'settings', 'profiles', 'driver_chats'].forEach((table) => {
+    ['products', 'product_costs', 'warehouses', 'counterparties', 'docs', 'payments', 'settings', 'profiles', ...(this.hasDriverChats ? ['driver_chats'] : [])].forEach((table) => {
       this.channel.on('postgres_changes', { event: '*', schema: 'public', table }, (payload) => {
         if (this.applyChange(db, table, payload)) onChange(table);
       });
