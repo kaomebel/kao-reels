@@ -68,6 +68,12 @@ Loginlar oddiy so'z bo'lishi mumkin (`sardor`, `bahodir`) — dastur ularni ichk
 - **Har kungi avtomatik zaxira:** Sozlamalar → Zaxira nusxa → botga /start yozib «Mening Telegramimni aniqlash» → «Hozir yuborish». Shundan keyin dastur har kuni (administrator birinchi ochganda) zaxira faylini administratorning shaxsiy Telegramiga yuboradi. Zaxira 2 kundan eski bo'lsa, bosh sahifada ogohlantirish chiqadi.
 - Tiklash va «Barcha ma'lumotlarni o'chirish» dan oldin joriy holat avtomatik yuklab olinadi; o'chirish «O'CHIRISH» deb yozib tasdiqlanadi; namuna ma'lumotlar faqat bo'sh dasturga yuklanadi.
 
+### Ma'lumotlar himoyasi (serverda)
+
+- **O'zgarishlar tarixi** (`history` jadvali): har bir mahsulot, hujjat, to'lov, kontragent yoki sozlama o'zgartirilganda yoki o'chirilganda uning avvalgi holati saqlanadi. Xato bilan o'chirilgan narsani qaytarish mumkin.
+- **Har kungi server zaxirasi** (`supabase/functions/daily-backup`): har kecha soat 02:00 da (Toshkent) server barcha ma'lumotlarni JSON faylga yig'adi, yopiq `backups` xotirasiga yozadi (90 kun saqlanadi) va Telegram sozlangan bo'lsa administratorga yuboradi. Telefonlar o'chiq bo'lsa ham ishlaydi. Jurnal — `backup_log` jadvali.
+- Supabase Pro tarifi (oyiga ~25$) qo'shimcha ravishda Supabase'ning o'z kunlik zaxiralarini (7 kun) beradi va loyiha hech qachon "uxlab qolmaydi".
+
 ## Ilovalar (Windows, Android, iPhone)
 
 Har push'da GitHub Actions ikkita ilovani yig'adi: repo → **Actions** → *Ilovalarni yig'ish* → oxirgi yashil ishga tushirish → pastdagi **Artifacts**:

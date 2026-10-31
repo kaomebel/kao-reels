@@ -429,3 +429,80 @@ begin
     end if;
   end loop;
 end $$;
+
+-- ---------- Ma'lumot yo'qolmasligi uchun himoya ----------
+
+-- O'zgarishlar tarixi: har bir yozuv o'zgartirilganda yoki o'chirilganda uning avvalgi holati shu yerda qoladi.
+-- Xato bilan o'chirilgan yoki buzilgan mahsulot, hujjat, to'lovni istalgan vaqtda qaytarish mumkin.
+-- Dasturdan bu jadvalga yozish yoki undan o'chirish mumkin emas; faqat administrator o'qiy oladi.
+create table if not exists public.history (
+  id bigserial primary key,
+  tbl text not null,
+  row_id text not null,
+  op text not null,
+  data jsonb,
+  changed_by uuid,
+  changed_at timestamptz not null default now()
+);
+create index if not exists history_row_idx on public.history (tbl, row_id, changed_at desc);
+create index if not exists history_at_idx on public.history (changed_at desc);
+alter table public.history enable row level security;
+revoke all on public.history from anon, authenticated;
+grant select on public.history to authenticated;
+drop policy if exists history_select on public.history;
+create policy history_select on public.history for select to authenticated using (public.is_admin());
+
+create or replace function public.keep_history() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  if tg_op = 'UPDATE' and old.data is not distinct from new.data then
+    return null;
+  end if;
+  insert into public.history (tbl, row_id, op, data, changed_by)
+  values (tg_table_name, old.id, lower(tg_op), old.data, auth.uid());
+  return null;
+end;
+$$;
+
+do $$
+declare t text;
+begin
+  foreach t in array array['products', 'product_costs', 'warehouses', 'counterparties', 'docs', 'payments', 'settings'] loop
+    execute format('drop trigger if exists keep_history on public.%I', t);
+    execute format('create trigger keep_history after update or delete on public.%I for each row execute function public.keep_history()', t);
+  end loop;
+end $$;
+
+-- Har kungi server zaxirasi jurnali (supabase/functions/daily-backup)
+create table if not exists public.backup_log (
+  id bigserial primary key,
+  at timestamptz not null default now(),
+  ok boolean not null,
+  file text,
+  bytes integer,
+  telegram text,
+  error text
+);
+alter table public.backup_log enable row level security;
+revoke all on public.backup_log from anon, authenticated;
+grant select on public.backup_log to authenticated;
+drop policy if exists backup_log_select on public.backup_log;
+create policy backup_log_select on public.backup_log for select to authenticated using (public.is_admin());
+
+-- Zaxira fayllari uchun yopiq xotira (ochiq havola yo'q; dastur foydalanuvchilari ham o'chira olmaydi)
+insert into storage.buckets (id, name, public)
+values ('backups', 'backups', false)
+on conflict (id) do nothing;
+drop policy if exists backups_select on storage.objects;
+create policy backups_select on storage.objects for select to authenticated
+  using (bucket_id = 'backups' and public.is_admin());
+
+-- Har kecha soat 02:00 da (Toshkent vaqti) server zaxirasini ishga tushirish.
+-- <PROJECT_URL> va <ANON_KEY> o'rniga loyihangiz ma'lumotlarini yozing (Project Settings → API).
+-- create extension if not exists pg_cron;
+-- create extension if not exists pg_net;
+-- select cron.schedule('daily-backup', '0 21 * * *', $cron$
+--   select net.http_post(url := '<PROJECT_URL>/functions/v1/daily-backup',
+--     headers := '{"Content-Type": "application/json", "Authorization": "Bearer <ANON_KEY>"}'::jsonb, body := '{}'::jsonb);
+-- $cron$);
+revoke execute on function public.handle_new_user(), public.keep_history() from public, anon, authenticated;
