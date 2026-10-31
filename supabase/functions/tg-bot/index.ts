@@ -124,6 +124,110 @@ async function finishDelivery(tg: any, chatId: string, st: any, amount: number) 
   }
 }
 
+// ---- Guruhdagi savollarga javob ----
+const BOT_DEFAULTS = { answer: true, priceDM: true, deleteAfterH: 24, address: "", hours: "", delivery: "", extra: [] as { q: string; a: string }[] };
+const RX = {
+  price: /narx|нарх|цена|цен[уы]|qancha|канча|қанча|сколько|necha pul|нечпул|nechpul|price|почём|почем|stoimost|стоимост/i,
+  stock: /bormi|борми|bor mi|есть ли|в наличии|nalichi|qolganmi|mavjudmi|мавжудми/i,
+  address: /manzil|манзил|qayerda|қаерда|каерда|адрес|где вы|где наход|lokatsiya|локация|joylashuv|mo'ljal/i,
+  hours: /ish vaqt|иш вақт|soat nech|qachon ochiq|до скольк|время работ|график|ochiqmi|очиқми/i,
+  delivery: /yetkaz|етказ|dostav|доставк|olib borib|олиб бориб/i,
+  phone: /telefon|телефон|nomer|номер|raqam|рақам|aloqa|алоқа|связ/i,
+};
+
+async function productPrice(p: any) {
+  const cur = (await settings("currency")) || {};
+  const uzs = p.priceCurrency === "USD" ? (p.salePrice || 0) * (cur.rate || 0) : p.salePrice || 0;
+  return p.priceCurrency === "USD" ? `$${fmt(p.salePrice)}${cur.rate ? ` (≈ ${money(uzs)})` : ""}` : money(uzs);
+}
+
+async function findProduct(msg: any, text: string) {
+  const mid = msg.reply_to_message?.message_id;
+  if (mid) {
+    const { data } = await sb.from("products").select("id,data").filter("data->tgPost->msgIds", "cs", JSON.stringify([mid])).limit(1);
+    if (data?.[0]) return data[0].data;
+  }
+  // Artikul yozilgan bo'lsa (masalan A101)
+  const words = (text.match(/[A-Za-zА-Яа-я]{0,4}[-\s]?\d{2,}[A-Za-z]?/g) || []).map((w) => w.replace(/\s/g, "").toLowerCase());
+  if (!words.length) return null;
+  const { data } = await sb.from("products").select("data").limit(5000);
+  return (data || []).map((r: any) => r.data).find((p: any) => !p.archived && p.code && words.includes(String(p.code).toLowerCase().replace(/\s/g, ""))) || null;
+}
+
+async function stockOf(pid: string) {
+  const { data } = await sb.from("docs").select("data").filter("data->items", "cs", JSON.stringify([{ productId: pid }]));
+  const sign: Record<string, number> = { receipt: 1, enter: 1, salesReturn: 1, purchaseReturn: -1, sale: -1, writeoff: -1 };
+  let q = 0;
+  for (const r of data || []) for (const it of r.data.items || []) if (it.productId === pid) q += (sign[r.data.type] || 0) * it.qty;
+  return q;
+}
+
+async function remember(chat: string, msgId: number | undefined, hours: number) {
+  if (!msgId || !(hours > 0)) return;
+  await setPriv(`del:${chat}:${msgId}`, { chat, msg: msgId, due: new Date(Date.now() + hours * 3600e3).toISOString() });
+}
+
+async function cleanup(tg: any) {
+  const last = (await priv("cleanup")).at || 0;
+  if (Date.now() - last < 10 * 60e3) return;
+  await setPriv("cleanup", { at: Date.now() });
+  const { data } = await sb.from("bot_private").select("id,data").like("id", "del:%").lte("data->>due", new Date().toISOString()).limit(200);
+  for (const r of data || []) {
+    await tgCall(tg.token, "deleteMessage", { chat_id: r.data.chat, message_id: r.data.msg });
+    await sb.from("bot_private").delete().eq("id", r.id);
+  }
+}
+
+async function sendPriceDM(tg: any, userId: number, p: any) {
+  const company = await settings("company");
+  const price = await productPrice(p);
+  const st = await stockOf(p.id);
+  return tgCall(tg.token, "sendMessage", { chat_id: userId, parse_mode: "HTML",
+    text: `🛋 <b>${esc(p.name)}</b>${p.code ? ` (${esc(p.code)})` : ""}\n💰 Narxi: <b>${esc(price)}</b>\n📦 ${st > 0 ? "Omborda bor" : "Buyurtma asosida"}` +
+      (company?.phone ? `\n\n📞 ${esc(company.phone)} — savollaringiz bo'lsa, qo'ng'iroq qiling.` : "") });
+}
+
+async function handleGroup(tg: any, msg: any) {
+  const cfg = Object.assign({}, BOT_DEFAULTS, tg.bot || {});
+  if (!cfg.answer || msg.from?.is_bot) return;
+  const text = String(msg.text || msg.caption || "").trim();
+  if (!text || text.startsWith("/")) return;
+  const chat = String(msg.chat.id);
+  const hours = Number(cfg.deleteAfterH) || 0;
+  const reply = async (t: string, extra: Record<string, unknown> = {}) => {
+    const r = await tgCall(tg.token, "sendMessage", { chat_id: chat, text: t, parse_mode: "HTML", reply_to_message_id: msg.message_id, allow_sending_without_reply: true, ...(msg.message_thread_id ? { message_thread_id: msg.message_thread_id } : {}), ...extra });
+    if (r.ok) { await remember(chat, msg.message_id, hours); await remember(chat, r.result.message_id, hours); }
+    return r;
+  };
+  const who = msg.from?.username ? "@" + msg.from.username : esc(msg.from?.first_name || "");
+  const company = await settings("company");
+
+  if (RX.price.test(text) || RX.stock.test(text)) {
+    const p = await findProduct(msg, text);
+    if (!p) {
+      if (RX.price.test(text)) return reply(`${who}, qaysi mahsulot narxi kerak? Mahsulot e'loniga <b>javob (reply)</b> qilib so'rang yoki artikulini yozing — narxini lichkangizga yozamiz.`);
+      return;
+    }
+    if (RX.price.test(text) && cfg.priceDM) {
+      const dm = await sendPriceDM(tg, msg.from.id, p);
+      if (dm.ok) return reply(`✅ ${who}, «${esc(p.name)}» narxini lichkangizga yozdik.`);
+      // Foydalanuvchi botni hali ishga tushirmagan — lichkaga o'tish tugmasi
+      const me = await tgCall(tg.token, "getMe", {});
+      return reply(`${who}, «${esc(p.name)}» narxini lichkada yuboramiz — pastdagi tugmani bosing 👇`,
+        { reply_markup: { inline_keyboard: [[{ text: "💬 Narxini lichkada olish", url: `https://t.me/${me.result?.username}?start=p_${p.id}` }]] } });
+    }
+    const st = await stockOf(p.id);
+    return reply(`${who}, «${esc(p.name)}»: ${st > 0 ? "✅ omborda bor" : "buyurtma asosida tayyorlab beramiz"}.${cfg.priceDM ? "" : `\n💰 Narxi: <b>${esc(await productPrice(p))}</b>`}`);
+  }
+  if (RX.address.test(text) && (cfg.address || company?.address)) return reply(`📍 ${esc(cfg.address || company.address)}`);
+  if (RX.hours.test(text) && cfg.hours) return reply(`🕘 ${esc(cfg.hours)}`);
+  if (RX.delivery.test(text) && cfg.delivery) return reply(`🚚 ${esc(cfg.delivery)}`);
+  if (RX.phone.test(text) && company?.phone) return reply(`📞 ${esc(company.phone)}`);
+  const low = text.toLowerCase();
+  const hit = (cfg.extra || []).find((x: any) => String(x.q).split(",").map((w: string) => w.trim().toLowerCase()).filter(Boolean).some((w: string) => low.includes(w)));
+  if (hit) return reply(esc(hit.a));
+}
+
 async function onUpdate(tg: any, u: any) {
   const msg = u.message || u.edited_message;
   const chat = msg?.chat || u.my_chat_member?.chat || u.callback_query?.message?.chat;
@@ -167,9 +271,19 @@ async function onUpdate(tg: any, u: any) {
     }
     return;
   }
+  if (msg && (chat?.type === "group" || chat?.type === "supergroup")) {
+    if (String(chat.id) === String(tg.chatId)) await handleGroup(tg, msg);
+    return;
+  }
   if (!msg || chat?.type !== "private") return;
   const chatId = String(chat.id);
   const text = String(msg.text || "").trim();
+  // Guruhdagi «Narxini lichkada olish» tugmasi: /start p_<mahsulot>
+  const pm = text.match(/^\/start\s+p_([\w-]+)/);
+  if (pm) {
+    const { data } = await sb.from("products").select("data").eq("id", pm[1]).maybeSingle();
+    if (data?.data) return sendPriceDM(tg, msg.from.id, data.data);
+  }
   // Shofyorni ulash: /start d_<id>
   const m = text.match(/^\/start\s+d_([\w-]+)/);
   if (m) {
@@ -210,6 +324,7 @@ Deno.serve(async (req) => {
   if (tgSecret) {
     if (!secret || tgSecret !== secret || !tg.token) return new Response("forbidden", { status: 403 });
     try { await onUpdate(tg, await req.json()); } catch (e) { console.error(e); }
+    try { await cleanup(tg); } catch (e) { console.error(e); }
     return new Response("ok");
   }
   // Dastur so'rovi — foydalanuvchi tekshiriladi

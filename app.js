@@ -3461,11 +3461,27 @@ async function telegramTopic(p, fresh = false) {
 
 async function telegramSend(p) {
   try {
-    await telegramSendTo(p, await telegramTopic(p));
+    const thread = await telegramTopic(p);
+    return { thread, msgIds: await telegramSendTo(p, thread) };
   } catch (e) {
     // Tema guruhda o'chirilgan bo'lsa — yangisini yaratib, qayta yuboramiz
     if (!db.telegram.useTopics || !/thread|topic/i.test(e.message)) throw e;
-    await telegramSendTo(p, await telegramTopic(p, true));
+    const thread = await telegramTopic(p, true);
+    return { thread, msgIds: await telegramSendTo(p, thread) };
+  }
+}
+
+// E'lon «izi»: matn + rasmlar + guruh. Bir xil bo'lsa — qayta joylanmaydi
+function postHash(p) {
+  const str = [db.telegram.chatId, telegramCaption(p), ...(p.photos || []).map((ph) => ph.path)].join('|');
+  let h = 5381;
+  for (let i = 0; i < str.length; i++) h = ((h << 5) + h + str.charCodeAt(i)) | 0;
+  return (h >>> 0).toString(36);
+}
+
+async function deleteTgPost(post) {
+  for (const id of post?.msgIds || []) {
+    await telegramCall('deleteMessage', { chat_id: post.chat, message_id: id }).catch(() => {});
   }
 }
 
@@ -3479,9 +3495,11 @@ async function telegramSendTo(p, thread) {
     const b = await backend.photoBlob(ph.path).catch(() => null);
     if (b) blobs.push(await toJpeg(b));
   }
+  const ids = [];
+  const take = (res) => (Array.isArray(res.result) ? res.result : [res.result]).forEach((m) => m?.message_id && ids.push(m.message_id));
   if (!blobs.length) {
-    await telegramCall('sendMessage', { chat_id: chatId, ...th, text: caption, parse_mode: 'HTML' });
-    return;
+    take(await telegramCall('sendMessage', { chat_id: chatId, ...th, text: caption, parse_mode: 'HTML' }));
+    return ids;
   }
   const fd = new FormData();
   fd.append('chat_id', chatId);
@@ -3489,16 +3507,17 @@ async function telegramSendTo(p, thread) {
   if (blobs.length === 1) {
     fd.append('photo', blobs[0], 'photo.jpg');
     if (fits) { fd.append('caption', caption); fd.append('parse_mode', 'HTML'); }
-    await telegramCall('sendPhoto', fd);
+    take(await telegramCall('sendPhoto', fd));
   } else {
     fd.append('media', JSON.stringify(blobs.map((b, i) => Object.assign(
       { type: 'photo', media: `attach://p${i}` },
       i === 0 && fits ? { caption, parse_mode: 'HTML' } : {},
     ))));
     blobs.forEach((b, i) => fd.append(`p${i}`, b, `p${i}.jpg`));
-    await telegramCall('sendMediaGroup', fd);
+    take(await telegramCall('sendMediaGroup', fd));
   }
-  if (!fits) await telegramCall('sendMessage', { chat_id: chatId, ...th, text: caption, parse_mode: 'HTML' });
+  if (!fits) take(await telegramCall('sendMessage', { chat_id: chatId, ...th, text: caption, parse_mode: 'HTML' }));
+  return ids;
 }
 
 function telegramLog(text, ok) {
@@ -3515,14 +3534,29 @@ async function telegramPostProducts(ids, manual = false) {
   }
   const errors = [];
   const list = [...new Set(ids)];
-  for (const [i, id] of list.entries()) {
+  let sent = 0;
+  let same = 0;
+  let wait = false;
+  for (const id of list) {
     const p = product(id);
     if (!p) continue;
+    // Bir xil rasm va matnli e'lon ikkinchi marta joylanmaydi
+    const hash = postHash(p);
+    const old = p.tgPost;
+    if (old && old.hash === hash && old.chat === String(tg.chatId)) {
+      const force = manual && list.length === 1 && confirm(`«${p.name}» shu ko'rinishda guruhda allaqachon bor.\n\nEskisini o'chirib, qayta joylansinmi?`);
+      if (!force) { same++; continue; }
+    }
     // Guruhga daqiqasiga ~20 xabardan ko'p yuborib bo'lmaydi
-    if (i > 0) await new Promise((r) => setTimeout(r, 3500));
+    if (wait) await new Promise((r) => setTimeout(r, 3500));
+    wait = true;
     try {
-      await telegramSend(p);
-      telegramLog(`Yuborildi: ${p.name}`, true);
+      const { thread, msgIds } = await telegramSend(p);
+      // Yangisi joylangach — avvalgi e'lon o'chiriladi (guruhda faqat bittasi qoladi)
+      if (old?.msgIds?.length) await deleteTgPost(old);
+      p.tgPost = { chat: String(tg.chatId), thread: thread || null, msgIds, hash, at: new Date().toISOString() };
+      sent++;
+      telegramLog(`${old ? 'Yangilandi' : 'Yuborildi'}: ${p.name}`, true);
     } catch (e) {
       errors.push(`${p.name}: ${e.message}`);
       telegramLog(`Xato: ${p.name} — ${e.message}`, false);
@@ -3530,7 +3564,7 @@ async function telegramPostProducts(ids, manual = false) {
   }
   commit();
   if (errors.length) alert("Telegramga yuborilmadi:\n" + errors.join('\n'));
-  else if (manual) alert('Telegramga yuborildi.');
+  else if (manual) alert(sent ? `Telegramga yuborildi: ${sent} ta.${same ? ` O'zgarmagan ${same} tasi qayta joylanmadi.` : ''}` : `Hammasi guruhda allaqachon bor — o'zgarmagani qayta joylanmadi (${same} ta).`);
 }
 
 function telegramOnStockIn(d) {
@@ -4605,6 +4639,7 @@ function viewTelegram() {
     <p class="muted small">Token faqat administratorga ko'rinadi — sotuvchilar uni ko'rmaydi.</p>
   </div>
   ${sample ? `<div class="card narrow"><h3>Namuna xabar</h3><div class="tg-preview">${sample.photos?.length ? `<img data-photo="${esc(sample.photos[0].path)}" alt="">` : ''}<div>${telegramCaption(sample).replace(/\n/g, '<br>')}</div></div></div>` : ''}
+  ${botAnswersCard()}
   <div class="card narrow"><h3>Yuborish jurnali</h3><table><tbody>
     ${tg.log.length ? tg.log.map((l) => `<tr><td class="muted small">${esc(l.at)}</td><td class="${l.ok ? '' : 'debt'}">${esc(l.text)}</td></tr>`).join('') : emptyRow(2, "Hali yuborilmagan")}
   </tbody></table></div>`;
@@ -4620,7 +4655,45 @@ function tgChatValue(v) {
   return v;
 }
 
+// Guruhdagi savollarga bot javobi (server: supabase/functions/tg-bot)
+const BOT_DEFAULTS = { answer: true, priceDM: true, deleteAfterH: 24, address: '', hours: '', delivery: '', extra: [] };
+const botCfg = () => Object.assign({}, BOT_DEFAULTS, db.telegram.bot);
+
+function botAnswersCard() {
+  const b = botCfg();
+  const ready = backend.kind === 'supabase' && db.telegram.webhook;
+  return `<div class="card narrow"><h3>${icon('send')}Guruhdagi savollarga avtomatik javob</h3>
+    <p class="muted small">Bot guruhdagi savollarga javob beradi va <b>javob yozishmalarini belgilangan vaqtdan keyin o'chiradi</b>. Narxini so'raganlarga narxni <b>lichkasiga</b> yozadi (guruhda «lichkangizga yozdik» deydi). Mahsulot e'loniga javob qilib yoki artikulini yozib so'ralsa, qaysi mahsulot ekanini o'zi biladi.</p>
+    ${ready ? '' : `<p class="debt small">Ishlashi uchun: server rejimi va Sozlamalar → Shofyorlar dagi «Botni ulash» tugmasi bosilgan bo'lishi kerak. Guruhda botga «Xabarlarni o'chirish» huquqini ham bering.</p>`}
+    <div class="form-grid">
+      <label class="check full"><input type="checkbox" id="tgbAnswer" ${b.answer ? 'checked' : ''}> Guruhdagi savollarga javob berish</label>
+      <label class="check full"><input type="checkbox" id="tgbPrice" ${b.priceDM ? 'checked' : ''}> Narxni so'raganlarga lichkada javob berish</label>
+      <label>Javob yozishmalarini o'chirish (soatdan keyin)<input id="tgbDel" type="number" inputmode="numeric" min="0" max="168" value="${esc(b.deleteAfterH)}"></label>
+      <label class="full">Manzil («qayerdasiz», «manzil» deb so'rashsa)<input id="tgbAddr" value="${esc(b.address || db.company.address || '')}" placeholder="Masalan: Toshkent, Chilonzor, Mebel bozori 2-qator"></label>
+      <label class="full">Ish vaqti<input id="tgbHours" value="${esc(b.hours)}" placeholder="Har kuni 9:00 — 19:00"></label>
+      <label class="full">Yetkazib berish haqida<input id="tgbDelivery" value="${esc(b.delivery)}" placeholder="Shahar ichida bepul, viloyatlarga kelishilgan narxda"></label>
+    </div>
+    <h4>Qo'shimcha savol-javoblar</h4>
+    <p class="muted small">Kalit so'zlar (vergul bilan) savolda uchrasa — javob yuboriladi.</p>
+    <table class="exp-cats bot-faq"><tbody>${(b.extra || []).map((x, i) => `<tr><td><input class="bf-q" value="${esc(x.q)}" placeholder="kredit, nasiya, bo'lib to'lash"></td><td><input class="bf-a" value="${esc(x.a)}" placeholder="Ha, 6 oygacha nasiyaga sotamiz"></td><td class="actions"><button class="small danger icon-only" data-act="bfDel" data-i="${i}">${icon('trash')}</button></td></tr>`).join('')}</tbody></table>
+    <div class="toolbar" style="margin-top:8px"><button data-act="bfAdd">${icon('plus')}Savol-javob qo'shish</button><button class="primary" data-act="tgSave">Saqlash</button></div></div>`;
+}
+
+function readBotCfg() {
+  if (!$('#tgbAnswer')) return;
+  db.telegram.bot = {
+    answer: $('#tgbAnswer').checked,
+    priceDM: $('#tgbPrice').checked,
+    deleteAfterH: Math.max(0, Math.min(168, num($('#tgbDel').value))),
+    address: $('#tgbAddr').value.trim(),
+    hours: $('#tgbHours').value.trim(),
+    delivery: $('#tgbDelivery').value.trim(),
+    extra: $$('.bot-faq tr').map((tr) => ({ q: $('.bf-q', tr).value.trim(), a: $('.bf-a', tr).value.trim() })).filter((x) => x.q && x.a),
+  };
+}
+
 function tgReadForm() {
+  readBotCfg();
   const raw = $('#tgChat').value.trim();
   const chatId = tgChatValue(raw);
   if (raw && !chatId) {
@@ -5307,6 +5380,8 @@ const ACTIONS = {
   print: () => window.print(),
   tgSave: () => { tgReadForm(); save(); alert('Saqlandi.'); },
   tgDetect: () => tgDetect(),
+  bfAdd: () => { tgReadForm(); db.telegram.bot.extra = [...(db.telegram.bot.extra || []), { q: '', a: '' }]; render(); },
+  bfDel: (ds) => { tgReadForm(); db.telegram.bot.extra.splice(+ds.i, 1); save(); },
   tgTopicsCreate: () => tgTopicsCreate(),
   tgTopicIcons: () => tgTopicIcons(),
   tgTopicsReset: () => { if (confirm("Kategoriyalar va temalar bog'lanishi o'chirilsinmi? Keyingi e'londa temalar qayta yaratiladi.")) { db.telegram.topics = {}; save(); } },
@@ -6005,7 +6080,7 @@ Object.assign(ACTIONS, {
 // Ruxsatga bog'liq amallar (tugma ko'rinmasa ham bajarilmasin)
 const ACTION_PERMS = { newProduct: 'products', newKit: 'products', exportProducts: 'products' };
 const ADMIN_ACTIONS = ['deleteProduct', 'unarchive', 'exportProducts', 'tgProduct', 'deleteParty', 'deletePayment',
-  'ecAdd', 'ecDel', 'ecSave', 'loMove', 'loReset', 'drvEdit', 'drvDel', 'drvLink', 'botSetup', 'tgSave', 'tgDetect', 'tgTest', 'tgAll', 'tgTopicsCreate', 'tgTopicsReset', 'tgTopicIcons', 'coSave', 'editWh', 'deleteWh', 'catSave', 'catAdd', 'catDel', 'catIconOpen', 'catIconSet', 'fsAdd', 'fsDel', 'fsFieldAdd', 'fsFieldDel', 'regAdd', 'regDel', 'chipRemove', 'backup', 'backupDetect', 'backupSend', 'demo', 'reset', 'editUser', 'exportDocs',
+  'ecAdd', 'ecDel', 'ecSave', 'loMove', 'loReset', 'drvEdit', 'drvDel', 'drvLink', 'botSetup', 'tgSave', 'tgDetect', 'tgTest', 'tgAll', 'bfAdd', 'bfDel', 'tgTopicsCreate', 'tgTopicsReset', 'tgTopicIcons', 'coSave', 'editWh', 'deleteWh', 'catSave', 'catAdd', 'catDel', 'catIconOpen', 'catIconSet', 'fsAdd', 'fsDel', 'fsFieldAdd', 'fsFieldDel', 'regAdd', 'regDel', 'chipRemove', 'backup', 'backupDetect', 'backupSend', 'demo', 'reset', 'editUser', 'exportDocs',
   'serverSettings', 'refreshUsage', 'migrateLocal', 'rateRefresh', 'rateManual', 'rateAuto',
   'ldSel', 'ldFs', 'ldBold', 'ldCur', 'ldAlign', 'ldCenter', 'ldFull', 'ldTest', 'ldUndo', 'ldReset', 'ldSave'];
 
