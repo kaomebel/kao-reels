@@ -562,6 +562,9 @@ language plpgsql security definer set search_path = public as $$
 declare
   n integer;
 begin
+  if coalesce(auth.role(), '') <> 'service_role' then
+    raise exception 'Faqat server';
+  end if;
   insert into public.counters (id, value) values (kind, 1)
   on conflict (id) do update set value = public.counters.value + 1
   returning value into n;
