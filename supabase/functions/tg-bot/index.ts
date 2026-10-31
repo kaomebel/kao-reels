@@ -239,8 +239,6 @@ Deno.serve(async (req) => {
     const company = await settings("company");
     const r = await tgCall(tg.token, "sendMessage", { chat_id: link.chat_id, parse_mode: "HTML", text: orderText(b, company), reply_markup: orderKeyboard(b.d.id) });
     if (!r.ok) return out({ ok: false, error: r.description }, 502);
-    const party = b.party;
-    if (party?.addr?.lat && party?.addr?.lng) await tgCall(tg.token, "sendLocation", { chat_id: link.chat_id, latitude: party.addr.lat, longitude: party.addr.lng });
     await updateDoc(b.d.id, (d) => { d.driverId = body.driverId; d.driverSentTo = body.driverId; d.driverSentAt = new Date().toISOString(); });
     return out({ ok: true });
   }
