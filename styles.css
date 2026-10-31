@@ -382,6 +382,8 @@ dialog {
 }
 dialog.wide { width: min(1000px, calc(100vw - 24px)); }
 dialog::backdrop { background: var(--overlay); }
+/* Oynaning o'zi hech qachon surilmaydi — faqat ichidagi #modalBody */
+dialog { overflow: clip; }
 dialog form { display: flex; flex-direction: column; max-height: calc(100vh - 24px); }
 dialog h3 { margin: 0; padding: 18px 22px; border-bottom: 1px solid var(--border); font-size: 18px; }
 #modalBody { padding: 18px 22px; overflow-y: auto; }
@@ -582,7 +584,8 @@ input.below-min { border-color: var(--danger); background: var(--danger-soft); }
 
 /* ---- Tanlov tugmalari (Ha/Yo'q, So'm/$) ---- */
 .seg { display: inline-flex; flex-wrap: wrap; gap: 6px; }
-.seg label { cursor: pointer; }
+/* position: relative — yashirin radio tugma o'z yorlig'i ichida turadi (aks holda oyna surilib ketadi) */
+.seg label { cursor: pointer; position: relative; }
 .seg input { position: absolute; opacity: 0; width: 1px; height: 1px; pointer-events: none; }
 .seg span {
   display: inline-flex;
@@ -889,7 +892,7 @@ input::-webkit-date-and-time-value { text-align: left; }
     margin: 0;
     border: none;
     border-radius: 0;
-    overflow: hidden;
+    overflow: clip;
   }
   dialog form { height: 100%; max-height: 100%; }
   #modalBody { overscroll-behavior: contain; min-height: 0; }
@@ -1016,3 +1019,12 @@ button.primary:active:not(:disabled) { background: var(--accent-dark); }
   .ld-stage .toolbar label.inline .ld-num { flex: 1; }
   .ld-range { grid-template-columns: 1fr 80px; }
 }
+
+/* Turga xos xususiyatlar */
+.feat-wrap > .form-grid { gap: 12px; }
+.feat-tag { display: inline-block; margin-left: 6px; padding: 1px 8px; border-radius: 6px; background: var(--accent-soft); color: var(--accent-dark); font-size: 12px; font-weight: 600; }
+.fs-row .field-label { margin-top: 4px; }
+.fs-applies { display: grid; gap: 6px; }
+.fs-fields { display: grid; gap: 10px; }
+.fs-field { padding: 10px; border: 1px dashed var(--border-strong); border-radius: 10px; display: grid; gap: 8px; }
+.fs-row > button.small { justify-self: start; }

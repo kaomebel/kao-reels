@@ -74,6 +74,20 @@ const DEFAULT_REGIONS = [
 // Mijoz turlari (Sozlamalarda o'zgartiriladi)
 const DEFAULT_CUSTOMER_TYPES = ['Chakana xaridor', 'Mebelchi', 'Domchi', "Do'konchi", 'Optomchi', "Uy to'ldiruvchi"];
 
+// Kategoriya/turga xos xususiyatlar: shu turdagi mahsulot kartochkasida o'z ranglari va qo'shimcha
+// maydonlari chiqadi (Sozlamalar → Ro'yxatlar da o'zgartiriladi). "applies" — "Kategoriya" yoki "Kategoriya › Tur"
+const DEFAULT_FEATURE_SETS = [{
+  id: 'chairs',
+  name: 'Ofis kreslo va stullar',
+  applies: ['Ofis mebeli › Ofis kreslo', 'Ofis mebeli › Rahbar kreslosi', 'Ofis mebeli › Stul'],
+  colors: ['Qora', 'Kulrang', 'Oq', 'Bej', 'Jigarrang', "To'q ko'k", "Ko'k", 'Qizil', 'Yashil', "To'q sariq"],
+  fields: [
+    { name: 'Qoplama materiali', options: ['Eko-charm', 'Tabiiy charm', 'Mato', "Setka (to'r)", 'Velyur', 'Aralash (charm + setka)'] },
+    { name: 'Krestovina turi', options: ['Plastik', 'Neylon', 'Xrom', 'Alyuminiy', "Yog'och", "Metall (bo'yalgan)"] },
+    { name: 'Mexanizm', options: ["Piastra (oddiy ko'tarish)", 'Tilt (tebranish)', 'Top-Gun', 'Multiblok', 'Sinxron', 'Anyfix'] },
+  ],
+}];
+
 const DEFAULT_MATERIALS = ['LDSP', 'MDF', 'DSP', 'Massiv (yog\'och)', 'Faner', 'Metall', 'Shisha', 'Oyna', 'Velyur', 'Ekokoja', 'Charm', 'Mato', 'Rattan', 'Plastik'];
 
 // ---------- Ma'lumotlar ombori ----------
@@ -89,6 +103,7 @@ function emptyDb() {
     categoryTypes: JSON.parse(JSON.stringify(DEFAULT_CATEGORY_TYPES)),
     materials: DEFAULT_MATERIALS.slice(),
     colors: DEFAULT_COLORS.slice(),
+    featureSets: JSON.parse(JSON.stringify(DEFAULT_FEATURE_SETS)),
     customerTypes: DEFAULT_CUSTOMER_TYPES.slice(),
     regions: JSON.parse(JSON.stringify(DEFAULT_REGIONS)),
     currency: { rate: 0, date: '', source: '', updatedAt: '', manual: false },
@@ -748,8 +763,7 @@ function productForm(p = {}, readonly = false) {
         <input name="typeNew" id="typeNew" placeholder="Yangi tur nomi" hidden></label>
       <label>Ishlab chiqaruvchi / ta'minotchi<select name="makerId" id="makerSel">${makerOptions(p)}</select>
         <input name="makerNew" id="makerNew" placeholder="Fabrika yoki ta'minotchi nomi" hidden></label>
-      <div class="field full"><span class="field-label">Rangi</span>${chipPicker('colorChips', db.colors, p.color, '+ Yangi rang')}
-        <input type="hidden" name="color" value="${esc(p.color || '')}"></div>
+      <div class="field full feat-wrap" id="featBlock">${featureBlock(p.category, p.type, p)}</div>
       ${field('Ishlab chiqarilgan joyi', 'origin', p.origin, 'placeholder="O\'zbekiston, Toshkent / Turkiya..."')}
       ${field("O'lchov birligi", 'unit', p.unit || 'dona')}
       ${field('Minimal qoldiq', 'minQty', p.minQty ?? 1, 'type="number" min="0"')}
@@ -861,6 +875,41 @@ function bindSizeField() {
   });
 }
 
+// --- Kategoriyaga xos xususiyatlar ---
+const featureSetFor = (cat, type) => (db.featureSets || []).find((f) => (f.applies || []).some((a) => a === cat || (type && a === `${cat} › ${type}`)));
+const productAttrs = (p) => Object.entries(p.attrs || {}).filter(([, v]) => v);
+const attrsText = (p, sep = ' · ') => productAttrs(p).map(([k, v]) => `${k}: ${v}`).join(sep);
+
+// Bitta tanlanadigan tugmachalar (krestovina, mexanizm...)
+function chipOne(name, options, value) {
+  const all = [...options, ...(value && !options.includes(value) ? [value] : [])];
+  return `<div class="field full"><span class="field-label">${esc(name)}</span>
+    <div class="chips chips-pick chips-one">
+      ${all.map((m) => `<button type="button" class="chip ${m === value ? 'on' : ''}" data-act="chipOne" data-v="${esc(m)}">${esc(m)}</button>`).join('')}
+      ${isAdmin() ? `<input class="chip-add" placeholder="+ Boshqa" enterkeyhint="done">` : ''}
+    </div>
+    <input type="hidden" name="attr:${esc(name)}" value="${esc(value || '')}"></div>`;
+}
+
+// Rang va qo'shimcha maydonlar: kategoriya/tur o'zgarganda o'zi almashadi
+function featureBlock(cat, type, p = {}) {
+  const set = featureSetFor(cat, type);
+  const colors = set ? set.colors || [] : db.colors;
+  return `<div class="form-grid">
+    <div class="field full"><span class="field-label">Rangi${set ? ` <span class="feat-tag">${esc(set.name)}</span>` : ''}</span>${chipPicker('colorChips', colors, p.color, '+ Yangi rang')}
+      <input type="hidden" name="color" value="${esc(p.color || '')}"></div>
+    ${set ? (set.fields || []).map((f) => chipOne(f.name, f.options || [], p.attrs?.[f.name] || '')).join('') : ''}
+  </div>`;
+}
+
+// Kartochkada tanlanganlar (kategoriya almashtirilganda yo'qolmasligi uchun)
+function readFeatureDraft() {
+  const f = Object.fromEntries(new FormData($('#modalForm')).entries());
+  const attrs = {};
+  Object.entries(f).forEach(([k, v]) => { if (k.startsWith('attr:') && v) attrs[k.slice(5)] = v; });
+  return { color: f.color, attrs };
+}
+
 // Turi — tanlangan kategoriyaning o'z turlari
 function typeOptions(cat, value) {
   const types = (db.categoryTypes[cat] || []).slice();
@@ -877,8 +926,12 @@ function bindTypeField() {
     fresh.hidden = type.value !== '__new';
     if (!fresh.hidden) fresh.focus();
   };
-  cat.addEventListener('change', () => { type.innerHTML = typeOptions(cat.value, ''); toggle(); });
-  type.addEventListener('change', toggle);
+  const refresh = () => {
+    const box = $('#featBlock');
+    if (box) box.innerHTML = featureBlock(cat.value, type.value, readFeatureDraft());
+  };
+  cat.addEventListener('change', () => { type.innerHTML = typeOptions(cat.value, ''); toggle(); refresh(); });
+  type.addEventListener('change', () => { toggle(); refresh(); });
 }
 
 // Tanlash tugmachalari (rang): bir nechtasini belgilash mumkin, "Dub beliy, Oq gladkiy" ko'rinishida saqlanadi
@@ -962,7 +1015,20 @@ function readProduct(d, p) {
     const list = (db.categoryTypes[d.category] = db.categoryTypes[d.category] || []);
     if (!list.includes(type)) list.push(type);
   }
-  splitList(d.color).forEach((c) => { if (!db.colors.includes(c)) db.colors.push(c); });
+  // Yangi ranglar va xususiyat qiymatlari keyingi safar ro'yxatda tursin
+  const set = featureSetFor(d.category, type);
+  const colorList = set ? (set.colors = set.colors || []) : db.colors;
+  splitList(d.color).forEach((c) => { if (!colorList.includes(c)) colorList.push(c); });
+  const attrs = {};
+  if (set) {
+    (set.fields || []).forEach((f) => {
+      const v = (d['attr:' + f.name] || '').trim();
+      if (!v) return;
+      attrs[f.name] = v;
+      f.options = f.options || [];
+      if (!f.options.includes(v)) f.options.push(v);
+    });
+  }
   // Ishlab chiqaruvchi: ro'yxatdan, yangi (ta'minotchi sifatida qo'shiladi) yoki eski yozuv
   let supplierId = d.makerId;
   let maker = '';
@@ -984,6 +1050,7 @@ function readProduct(d, p) {
     type,
     size: d.size.trim(),
     color: d.color.trim(),
+    attrs,
     origin: d.origin.trim(),
     supplierId: supplierId || '',
     maker,
@@ -1621,7 +1688,7 @@ function searchProducts(q) {
   return activeProducts()
     .map((p) => {
       const code = (p.code || '').toLowerCase();
-      const hay = [p.name, p.code, p.category, p.type, p.color, p.size].join(' ').toLowerCase();
+      const hay = [p.name, p.code, p.category, p.type, p.color, p.size, ...Object.values(p.attrs || {})].join(' ').toLowerCase();
       const score = code === s ? 0 : code.startsWith(s) ? 1 : words.every((w) => hay.includes(w)) ? 2 : 9;
       return { p, score };
     })
@@ -2360,6 +2427,7 @@ function telegramCaption(p) {
   lines.push(`💰 Narxi: <b>${priceLabel(p)}</b>`);
   if (p.size) lines.push(`📐 O'lchami: ${esc(p.size)} sm`);
   if (p.color) lines.push(`🎨 Rangi: ${esc(p.color)}`);
+  productAttrs(p).forEach(([k, v]) => lines.push(`▫️ ${esc(k)}: ${esc(v)}`));
   if (p.origin || p.maker) lines.push(`🏭 Ishlab chiqarilgan: ${esc([p.origin, p.maker].filter(Boolean).join(', '))}`);
   lines.push(`📦 ${stockLine(p)}`);
   if (p.note) lines.push('', esc(p.note));
@@ -2678,7 +2746,7 @@ function viewProducts() {
     .filter((p) => !!p.archived === arch)
     .filter((p) => !cat || p.category === cat)
     .filter((p) => !ptype || p.type === ptype)
-    .filter((p) => !q || [p.name, p.code, p.type, p.material, p.color, p.origin, p.maker, p.size].join(' ').toLowerCase().includes(q));
+    .filter((p) => !q || [p.name, p.code, p.type, p.material, p.color, p.origin, p.maker, p.size, ...Object.values(p.attrs || {})].join(' ').toLowerCase().includes(q));
 
   const admin = isAdmin();
   const rows = list.map((p) => {
@@ -2687,7 +2755,7 @@ function viewProducts() {
     return `<tr>
       ${thumbCell(p)}
       <td class="click" data-act="editProduct" data-id="${p.id}"><b>${esc(p.name)}</b><div class="muted small">${esc([p.code, p.category, p.type].filter(Boolean).join(' · '))}</div>
-        ${p.size || p.color ? `<div class="prod-meta">${p.size ? `<span class="dt">${esc(p.size)} sm</span>` : ''}${p.color ? `<span>${esc(p.color)}</span>` : ''}</div>` : ''}
+        ${p.size || p.color || productAttrs(p).length ? `<div class="prod-meta">${p.size ? `<span class="dt">${esc(p.size)} sm</span>` : ''}${p.color ? `<span>${esc(p.color)}</span>` : ''}${productAttrs(p).map(([k, v]) => `<span title="${esc(k)}">${esc(v)}</span>`).join('')}</div>` : ''}
         ${p.origin || p.maker ? `<div class="muted small prod-origin">${icon('warehouse')}${esc([p.maker, p.origin].filter(Boolean).join(', '))}</div>` : ''}</td>
       ${admin ? `<td class="num">${money(ctx.cost[p.id])}</td>` : ''}
       <td class="num">${priceLabel(p)}${p.priceCurrency === 'USD' ? `<div class="muted small">${fmtUsd(p.salePrice)}</div>` : ''}${p.minPrice ? `<div class="muted small">eng kami: ${priceLabel(p, 'minPrice')}</div>` : ''}</td>
@@ -3222,6 +3290,42 @@ function chipEditor(values, placeholder) {
   return `<div class="chips chips-edit">${values.map(editChip).join('')}<input class="chip-add" placeholder="${placeholder}" enterkeyhint="done"></div>`;
 }
 
+// "Kategoriya" va "Kategoriya › Tur" — xususiyatlar to'plami qayerda ishlashini tanlash uchun
+function fsApplyOptions() {
+  return db.categories.flatMap((c) => [c, ...(db.categoryTypes[c] || []).map((t) => `${c} › ${t}`)]);
+}
+
+function fsFieldRow(f = { name: '', options: [] }) {
+  return `<div class="fs-field">
+    <div class="cat-head"><input class="fs-fname" value="${esc(f.name)}" placeholder="Maydon nomi (masalan: Krestovina turi)">
+      <button type="button" class="small danger icon-only" data-act="fsFieldDel" title="Maydonni olib tashlash">${icon('trash')}</button></div>
+    ${chipEditor(f.options || [], "+ Variant qo'shish (Enter)")}
+  </div>`;
+}
+
+function fsRow(set = { name: '', applies: [], colors: [], fields: [] }) {
+  return `<div class="cat-row fs-row" data-id="${esc(set.id || '')}">
+    <div class="cat-head"><input class="cat-name fs-name" value="${esc(set.name)}" placeholder="To'plam nomi (masalan: Ofis kreslo va stullar)">
+      <button type="button" class="small danger icon-only" data-act="fsDel" title="To'plamni olib tashlash">${icon('trash')}</button></div>
+    <span class="field-label">Qaysi kategoriya va turlarda</span>
+    <div class="fs-applies"><div class="chips chips-edit">${(set.applies || []).map(editChip).join('')}</div>
+      <select class="fs-apply-add"><option value="">+ Kategoriya yoki tur qo'shish...</option>${fsApplyOptions().map((o) => `<option>${esc(o)}</option>`).join('')}</select></div>
+    <span class="field-label">Ranglar</span>
+    <div class="fs-colors">${chipEditor(set.colors || [], "+ Rang qo'shish (Enter)")}</div>
+    <span class="field-label">Qo'shimcha maydonlar</span>
+    <div class="fs-fields">${(set.fields || []).map(fsFieldRow).join('')}</div>
+    <button type="button" class="small" data-act="fsFieldAdd">${icon('plus')}Maydon qo'shish</button>
+  </div>`;
+}
+
+document.addEventListener('change', (e) => {
+  if (!e.target.classList?.contains('fs-apply-add') || !e.target.value) return;
+  const box = $('.chips', e.target.closest('.fs-applies'));
+  const v = e.target.value;
+  if (!$$('[data-v]', box).some((c) => c.dataset.v === v)) box.insertAdjacentHTML('beforeend', editChip(v));
+  e.target.value = '';
+});
+
 function catRow(name, types) {
   return `<div class="cat-row" data-orig="${esc(name)}">
     <div class="cat-head"><input class="cat-name" value="${esc(name)}" placeholder="Kategoriya nomi">
@@ -3239,6 +3343,11 @@ function viewCategories() {
     <div class="card narrow"><h3>${icon('tag')}Ranglar</h3>
       <p class="muted">Mahsulot kartochkasida tanlanadigan ranglar (masalan, Dub beliy, Belaya korona, Oq gladkiy).</p>
       <div id="colorEditor">${chipEditor(db.colors, "+ Rang qo'shish (Enter)")}</div>
+    </div>
+    <div class="card narrow"><h3>${icon('sofa')}Turga xos xususiyatlar</h3>
+      <p class="muted">Tanlangan kategoriya yoki turdagi mahsulot kartochkasida umumiy ranglar o'rniga shu ranglar va qo'shimcha maydonlar chiqadi (masalan, ofis kreslolarida — qoplama materiali, krestovina, mexanizm).</p>
+      <div id="fsRows">${(db.featureSets || []).map(fsRow).join('')}</div>
+      <button type="button" data-act="fsAdd">${icon('plus')}To'plam qo'shish</button>
     </div>
     <div class="card narrow"><h3>${icon('truck')}Yetkazish manzillari</h3>
       <p class="muted">Viloyatlar va ularning shahar/tumanlari. Birinchi turgan viloyat va uning birinchi shahri savdoda oldindan tanlanadi. Mahallalar savdoda yozilganda o'zi qo'shiladi.</p>
@@ -3592,6 +3701,15 @@ const ACTIONS = {
     renames.forEach(([from, to]) => db.products.forEach((p) => { if (p.category === from) p.category = to; }));
     db.categories = categories;
     db.categoryTypes = types;
+    // Turga xos xususiyatlar (kategoriya nomi o'zgargan bo'lsa — bog'lanish ham yangilanadi)
+    const renamePath = (a) => renames.reduce((x, [from, to]) => (x === from ? to : x.startsWith(from + ' › ') ? to + x.slice(from.length) : x), a);
+    db.featureSets = $$('#fsRows .fs-row').map((row) => ({
+      id: row.dataset.id || uid(),
+      name: $('.fs-name', row).value.trim() || 'Xususiyatlar',
+      applies: $$('.fs-applies .chip', row).map((c) => renamePath(c.dataset.v)),
+      colors: $$('.fs-colors .chip', row).map((c) => c.dataset.v),
+      fields: $$('.fs-field', row).map((f) => ({ name: $('.fs-fname', f).value.trim(), options: $$('.chip', f).map((c) => c.dataset.v) })).filter((f) => f.name),
+    }));
     db.colors = $$('#colorEditor .chip').map((c) => c.dataset.v);
     db.customerTypes = $$('#ctypeEditor .chip').map((c) => c.dataset.v);
     // Viloyatlar: mavjud shahar/tumanlarning mahallalari saqlanib qoladi
@@ -3624,6 +3742,13 @@ const ACTIONS = {
     });
   },
   chipToggle: (ds, el) => { el.classList.toggle('on'); syncChips(el.closest('.chips')); },
+  chipOne: (ds, el) => {
+    const box = el.closest('.chips');
+    const on = !el.classList.contains('on');
+    $$('.chip', box).forEach((c) => c.classList.remove('on'));
+    el.classList.toggle('on', on);
+    syncChips(box);
+  },
   chipRemove: (ds, el) => el.closest('.chip').remove(),
   regAdd: () => {
     $('#regionRows').insertAdjacentHTML('beforeend', `<div class="cat-row reg-row" data-orig="">
@@ -3633,6 +3758,17 @@ const ACTIONS = {
     $('#regionRows .reg-row:last-child .cat-name').focus();
   },
   regDel: (ds, el) => el.closest('.reg-row').remove(),
+  fsAdd: () => {
+    $('#fsRows').insertAdjacentHTML('beforeend', fsRow());
+    $('#fsRows .fs-row:last-child .fs-name').focus();
+  },
+  fsDel: (ds, el) => { if (confirm("Bu xususiyatlar to'plami olib tashlansinmi? (mahsulotlardagi qiymatlar o'chmaydi)")) el.closest('.fs-row').remove(); },
+  fsFieldAdd: (ds, el) => {
+    const box = $('.fs-fields', el.closest('.fs-row'));
+    box.insertAdjacentHTML('beforeend', fsFieldRow());
+    $('.fs-field:last-child .fs-fname', box).focus();
+  },
+  fsFieldDel: (ds, el) => el.closest('.fs-field').remove(),
   catAdd: () => {
     $('#catRows').insertAdjacentHTML('beforeend', catRow('', []));
     $('#catRows .cat-row:last-child .cat-name').focus();
@@ -3684,6 +3820,7 @@ const LABEL_FIELDS = {
   price: { title: 'Narx', text: (p) => priceLabel(p) },
   code: { title: 'Artikul', text: (p) => (p.code ? 'Art: ' + p.code : '') },
   origin: { title: 'Ishlab chiqaruvchi', text: (p) => [p.maker, p.origin].filter(Boolean).join(', ') },
+  attrs: { title: 'Xususiyatlar (krestovina, mexanizm...)', text: (p) => productAttrs(p).map(([, v]) => v).join(' · ') },
   barcode: { title: 'Shtrix-kod', kind: 'barcode' },
   qr: { title: 'QR-kod', kind: 'qr' },
 };
@@ -3702,6 +3839,7 @@ const DEFAULT_LABEL = {
     price: { on: true, x: 2, y: 13.5, w: 54, fs: 18, bold: true, align: 'center' },
     code: { on: true, x: 2, y: 35, w: 54, fs: 7, bold: false, align: 'center' },
     origin: { on: false, x: 2, y: 31, w: 54, fs: 6, bold: false, align: 'center' },
+    attrs: { on: false, x: 2, y: 31, w: 54, fs: 6, bold: false, align: 'center' },
     barcode: { on: true, x: 6, y: 23.5, w: 46, h: 11 },
     qr: { on: false, x: 44, y: 24, w: 12 },
   },
@@ -4183,7 +4321,7 @@ Object.assign(ACTIONS, {
 
 // Sotuvchi tugmani ko'rmasa ham, bu amallarni bajara olmasligi kerak
 const ADMIN_ACTIONS = ['newProduct', 'deleteProduct', 'unarchive', 'exportProducts', 'tgProduct', 'deleteParty', 'deletePayment',
-  'tgSave', 'tgDetect', 'tgTest', 'tgAll', 'coSave', 'editWh', 'deleteWh', 'catSave', 'catAdd', 'catDel', 'regAdd', 'regDel', 'chipRemove', 'backup', 'demo', 'reset', 'editUser', 'exportDocs',
+  'tgSave', 'tgDetect', 'tgTest', 'tgAll', 'coSave', 'editWh', 'deleteWh', 'catSave', 'catAdd', 'catDel', 'fsAdd', 'fsDel', 'fsFieldAdd', 'fsFieldDel', 'regAdd', 'regDel', 'chipRemove', 'backup', 'demo', 'reset', 'editUser', 'exportDocs',
   'serverSettings', 'refreshUsage', 'migrateLocal', 'rateRefresh', 'rateManual', 'rateAuto',
   'ldSel', 'ldFs', 'ldBold', 'ldCur', 'ldAlign', 'ldCenter', 'ldFull', 'ldTest', 'ldUndo', 'ldReset', 'ldSave'];
 
@@ -4204,8 +4342,11 @@ document.addEventListener('keydown', (e) => {
   if (!v) return;
   const box = input.closest('.chips');
   const exists = $$('[data-v]', box).find((c) => c.dataset.v.toLowerCase() === v.toLowerCase());
+  if (box.classList.contains('chips-one')) $$('.chip', box).forEach((c) => c.classList.remove('on'));
   if (exists) {
     exists.classList.add('on');
+  } else if (box.classList.contains('chips-one')) {
+    input.insertAdjacentHTML('beforebegin', `<button type="button" class="chip on" data-act="chipOne" data-v="${esc(v)}">${esc(v)}</button>`);
   } else if (box.classList.contains('chips-pick')) {
     input.insertAdjacentHTML('beforebegin', `<button type="button" class="chip on" data-act="chipToggle" data-v="${esc(v)}">${esc(v)}</button>`);
   } else {
