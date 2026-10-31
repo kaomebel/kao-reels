@@ -204,6 +204,25 @@ async function refreshServerStock() {
 }
 
 let renderTimer = null;
+// Administrator xodimning ruxsatlarini o'zgartirsa — xodimning dasturida darhol kuchga kiradi
+// (qayta kirish shart emas): kerakli ma'lumotlar serverdan qayta yuklanadi.
+let accessReloading = false;
+async function checkMyAccess() {
+  const u = me && db.users.find((x) => x.id === me.id);
+  if (!u || u.active === false || accessReloading) return; // bloklanganini render() o'zi hal qiladi
+  const key = (x) => x.role + '|' + JSON.stringify(permsOf(x));
+  if (key(u) === key(me)) return;
+  Object.assign(me, { role: u.role, perms: u.perms });
+  accessReloading = true;
+  try {
+    await loadData();
+    render();
+    alert("Administrator ruxsatlaringizni o'zgartirdi. Dastur yangilandi.");
+  } finally {
+    accessReloading = false;
+  }
+}
+
 function scheduleRender() {
   clearTimeout(renderTimer);
   renderTimer = setTimeout(async () => {
@@ -217,7 +236,7 @@ async function loadData() {
   try {
     db = normalizeDb(await backend.load(emptyDb()));
     await refreshServerStock();
-    backend.subscribe(db, scheduleRender);
+    backend.subscribe(db, (table) => { if (table === 'profiles') checkMyAccess(); scheduleRender(); });
     if (isAdmin()) refreshStorageUsage();
     refreshRate();
   } finally {
