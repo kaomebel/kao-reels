@@ -141,6 +141,7 @@ function emptyDb() {
     uiOrder: { sections: [], tabs: {} },
     drivers: [],
     driverChats: [],
+    staffNames: [],
     customerTypes: DEFAULT_CUSTOMER_TYPES.slice(),
     regions: JSON.parse(JSON.stringify(DEFAULT_REGIONS)),
     currency: { rate: 0, date: '', source: '', updatedAt: '', manual: false },
@@ -689,6 +690,9 @@ function refreshCtx() {
     } else {
       root.removeProperty('--vvh');
       root.removeProperty('--vvt');
+      // iPhone klaviatura yopilgach sahifani surilgan holda qoldiradi — oyna ekran o'rtasiga «tushib» qolardi
+      const base = window.modalScrollY ?? 0;
+      if (document.querySelector('dialog[open]') && (Math.abs(window.scrollY - base) > 2 || vv.offsetTop)) window.scrollTo(0, base);
     }
   };
   // Klaviatura yopilish animatsiyasi tugaguncha bir necha marta qayta tekshiramiz
@@ -714,7 +718,8 @@ function openModal({ title, body, onSubmit, onOpen, extra = [], wide = false, su
   $('#modalSubmit').hidden = !onSubmit;
   $('#modalExtra').innerHTML = extra.map((b, i) => `<button type="button" class="${b.cls || ''}" data-extra="${i}">${esc(b.label)}</button>`).join('');
   modalState = { onSubmit, extra };
-  if (!$('#modal').open) $('#modal').showModal();
+  if (!$('#modal').open) { window.modalScrollY = window.scrollY; $('#modal').showModal(); }
+  document.documentElement.classList.add('modal-open');
   window.trackViewportSettle?.();
   $('#modalBody').scrollTop = 0;
   if (onOpen) onOpen();
@@ -745,6 +750,11 @@ function cardTables(root) {
 function closeModal() {
   $('#modal').close();
 }
+// Oyna ochiq paytda orqadagi sahifa surilmaydi (iPhone'da oyna joyidan siljimasin)
+document.addEventListener('close', () => {
+  if (!document.querySelector('dialog[open]')) document.documentElement.classList.remove('modal-open');
+  window.trackViewportSettle?.();
+}, true);
 
 // Ichki oyna — asosiy oyna (masalan, sotuv) yopilmasdan uning ustida ochiladi
 let subState = null;
@@ -1870,8 +1880,20 @@ function newParty(kind) {
   });
 }
 
+// Xodimlarga kontragentlarning to'liq ma'lumotlari (telefon, manzil, STIR, izoh, balans) ko'rsatilmaydi
+const seesParties = () => isAdmin();
+function maskPhone(ph) {
+  const d = phoneKey(ph);
+  return d ? `+998 •• ••• •• ${d.slice(-2)}` : '';
+}
+
 function editParty(id) {
   const c = party(id);
+  if (!seesParties()) {
+    openModal({ title: 'Kontragent', body: `<p><b>${esc(c.name)}</b></p><p class="muted">${esc(KINDS[c.kind] || '')}${c.phone ? ' · ' + maskPhone(c.phone) : ''}</p>
+      <p class="muted small">To'liq ma'lumotlarni faqat administrator ko'radi.</p>` });
+    return;
+  }
   openModal({
     title: 'Kontragent',
     body: partyForm(c),
@@ -1965,6 +1987,16 @@ function itemRowHtml(t, it = {}, cur = 'UZS') {
     <td class="it-sum num"></td>
     <td><button type="button" class="small danger it-remove" title="O'chirish">×</button></td>
   </tr>`;
+}
+
+// Eng ko'p ruxsat etilgan chegirma: har bir mahsulot eng kam narxigacha (eng kam narx yo'q bo'lsa — tannarxigacha)
+function maxDiscount(items) {
+  return items.reduce((s, it) => {
+    const p = product(it.productId);
+    if (!p || !it.productId) return s;
+    const floor = minPriceUZS(p) || Math.round(ctx.cost?.[p.id] || 0);
+    return s + Math.max(0, (it.price - floor) * it.qty);
+  }, 0);
 }
 
 // Chegirma maydoni: savdoda ming so'mlarda (discountK = 1000), xaridlarda — to'liq summa
@@ -2075,8 +2107,8 @@ function docForm(type, d) {
       </div>
     </div>`;
   }
-  foot += textArea('Izoh', 'note', d.note);
-  if (!d.id && t.tgAsk) foot += tgQuestion();
+  let noteHtml = textArea('Izoh', 'note', d.note);
+  if (!d.id && t.tgAsk) noteHtml += tgQuestion();
 
   const stdItems = custom ? [] : d.items || [];
   const items = (stdItems.length ? stdItems : [{}]).map((it) => itemRowHtml(t, it, cur)).join('');
@@ -2104,8 +2136,19 @@ function docForm(type, d) {
     </table></div>
     <button type="button" class="small" id="addItemRow">${icon('plus')}Qator qo'shish</button>
     </div>
-    <div class="form-grid" style="margin-top:12px">${after}${tail}${foot}</div>
-    <div class="total-line" id="totalLine" data-paid="${prevPaid(d)}" ${hidesCost(t) ? 'hidden' : ''}>Jami: <b id="docTotal">0</b><span id="docRest"></span></div>`;
+    ${moneyBox(foot, d, t, late)}
+    <div class="form-grid" style="margin-top:12px">${after}${tail}${noteHtml}</div>
+    ${late ? '' : totalLine(d, t)}`;
+}
+
+// Jami: mahsulotlar summasi, chegirma (ayriladi) va to'lanadigan summa
+const totalLine = (d, t) => `<div class="total-line" id="totalLine" data-paid="${prevPaid(d)}" ${hidesCost(t) ? 'hidden' : ''}>
+    <span id="docBreak" class="muted"></span>Jami: <b id="docTotal">0</b><span id="docRest"></span></div>`;
+
+// Savdoda pul bilan bog'liq hamma narsa (chegirma, jami, to'lov, qarz) mahsulotlardan keyin bitta blokda
+function moneyBox(foot, d, t, late) {
+  if (!late) return `<div class="form-grid" style="margin-top:12px">${foot}</div>`;
+  return `<div class="money-box"><h4>${icon('wallet')}To'lov</h4>${totalLine(d, t)}<div class="form-grid">${foot}</div></div>`;
 }
 
 function bindPartyLookup(kind) {
@@ -2276,7 +2319,7 @@ function bindCustomerLookup() {
 
   const status = () => {
     const c = party(idInput.value);
-    if (c) hint.innerHTML = `<span class="ok">${icon('check')} Saqlangan mijoz: <b>${esc(c.name)}</b>${c.ctype ? ` · ${esc(c.ctype)}` : ''}${c.address ? ` · ${esc(c.address)}` : ''}</span>`;
+    if (c) hint.innerHTML = `<span class="ok">${icon('check')} Saqlangan mijoz: <b>${esc(c.name)}</b>${seesParties() && c.ctype ? ` · ${esc(c.ctype)}` : ''}${seesParties() && c.address ? ` · ${esc(c.address)}` : ''}</span>`;
     else if (name.value.trim()) hint.innerHTML = '<span class="muted">Yangi mijoz — saqlanganda bazaga qo\'shiladi.</span>';
     else if (fieldPhoneDigits(phone.value)) hint.innerHTML = '<span class="muted">Mijoz ismini yozing yoki ro\'yxatdan tanlang.</span>';
     else hint.innerHTML = '<span class="muted">Ism va telefon bo\'sh qolsa — Chakana xaridor.</span>';
@@ -2285,8 +2328,11 @@ function bindCustomerLookup() {
   const pick = (c) => {
     idInput.value = c.id;
     name.value = c.name;
-    phone.value = c.phone || '';
-    if (c.phone) formatPhoneInput(phone);
+    // Xodimga saqlangan mijozning telefoni ko'rsatilmaydi (o'zi yozgan raqam qoladi)
+    if (seesParties()) {
+      phone.value = c.phone || '';
+      if (c.phone) formatPhoneInput(phone);
+    }
     if (c.ctype && typeSel) {
       if (![...typeSel.options].some((o) => o.value === c.ctype)) typeSel.insertAdjacentHTML('afterbegin', `<option>${esc(c.ctype)}</option>`);
       typeSel.value = c.ctype;
@@ -2304,7 +2350,7 @@ function bindCustomerLookup() {
     const list = customers().filter((c) => (!digits || phoneKey(c.phone).startsWith(digits)) && (!q || c.name.toLowerCase().includes(q)));
     box.innerHTML = list.length
       ? list.slice(0, 8).map((c) => `<button type="button" class="suggest-row" data-id="${c.id}"><b>${esc(c.name)}</b>
-          <span>${esc(c.phone || '—')}${c.ctype ? ` · ${esc(c.ctype)}` : ''}</span></button>`).join('')
+          <span>${esc(seesParties() ? c.phone || '—' : maskPhone(c.phone) || '—')}${c.ctype && seesParties() ? ` · ${esc(c.ctype)}` : ''}</span></button>`).join('')
         + (list.length > 8 ? `<div class="suggest-more muted small">yana ${list.length - 8} ta — raqamni davom ettiring</div>` : '')
       : '<div class="suggest-more muted small">Mos mijoz yo\'q — yangi mijoz sifatida saqlanadi</div>';
     box.hidden = false;
@@ -2393,9 +2439,15 @@ function searchProducts(q) {
 }
 
 function productRow(p) {
+  // Sotuvda: omborda borligi ko'rinadi; yo'q bo'lsa — tanlanganda kirim oynasi o'zi ochiladi
+  let stockTag = '';
+  if (docFormCtx?.quick && !isKit(p)) {
+    const q = qtyIn(ctx.stock || {}, p.id, docFormCtx.warehouseId?.());
+    stockTag = q > 0 ? `<span class="pick-stock">${q} ta</span>` : `<span class="pick-stock none">yo'q · + kirim</span>`;
+  }
   return `<button type="button" class="pick-row" data-pick="product" data-value="${p.id}">
     <span class="pick-ic">${icon(productIcon(p))}</span><span><b>${esc(p.name)}</b>${p.code ? ` <span class="pick-code">${esc(p.code)}</span>` : ''}<span class="pick-sub">${esc(productPath(p))}${p.size ? ' · ' + esc(p.size) : ''}</span></span>
-    <span class="pick-price">${priceLabel(p)}</span></button>`;
+    <span class="pick-price">${priceLabel(p)}${stockTag}</span></button>`;
 }
 
 function renderPicker() {
@@ -2449,7 +2501,14 @@ function choosePickedProduct(p) {
   td.querySelector('.it-path').textContent = productPath(p);
   closePicker();
   hidden.dispatchEvent(new Event('change', { bubbles: true }));
-  td.closest('tr').querySelector('.it-qty')?.focus();
+  const tr = td.closest('tr');
+  // Sotuvda omborda yo'q mahsulot tanlansa — shu yerning o'zida kirim qilish oynasi ochiladi
+  if (docFormCtx?.quick && !isKit(p) && tr) {
+    const have = qtyIn(computeStock(), p.id, docFormCtx.warehouseId?.());
+    const need = num(tr.querySelector('.it-qty')?.value) || 1;
+    if (have < need) return quickEntry({ productId: p.id, qty: need - have, row: tr });
+  }
+  if (!isTouch()) tr?.querySelector('.it-qty')?.focus();
 }
 
 function closePicker() {
@@ -2555,8 +2614,15 @@ function bindDocForm(type, editingId) {
     if (isCustom()) sum = num($('#modalBody [name=cQty]').value) * num($('#modalBody [name=cPrice]').value);
     const disc = discountOf({ discount: discount?.value, discountK: $('#modalForm [name=discountK]')?.value });
     const hint = $('#discHint');
-    if (hint) hint.textContent = disc ? `= ${money(disc)}` : '';
+    if (hint) {
+      const maxD = t.price === 'sale' && type !== 'salesReturn' && !isCustom() ? maxDiscount(readItems()) : Infinity;
+      const over = disc > maxD;
+      hint.innerHTML = disc ? `= ${money(disc)}${over ? ` <b class="debt">— juda katta! Ko'pi bilan ${money(maxD)}</b>` : ''}` : '';
+      discount?.classList.toggle('below-min', over);
+    }
     const total = Math.max(0, sum - disc);
+    const brk = $('#docBreak');
+    if (brk) brk.innerHTML = disc && curOf() === 'UZS' ? `${money(sum)} − chegirma ${money(Math.min(disc, sum))} = ` : '';
     $('#docTotal').innerHTML = curOf() === 'USD'
       ? `${fmtUsd(total)} <span class="muted">≈ ${money(total * rateOf())}</span>`
       : money(total);
@@ -2809,6 +2875,15 @@ async function saveDoc(type, existing, preset, data, stock) {
         return false;
       }
       if (!confirm("Narx eng kam narxdan past:\n" + low.join('\n') + "\n\nBaribir saqlansinmi?")) return false;
+    }
+  }
+  // Chegirma mahsulotlarning eng kam narxidan pastga tushirmasin
+  if (t.price === 'sale' && type !== 'salesReturn' && discountOf(data) > 0 && data.orderKind !== 'custom') {
+    const maxD = maxDiscount(items);
+    if (discountOf(data) > maxD) {
+      const msg = `Chegirma juda katta: ${money(discountOf(data))}.\nMahsulotlarning eng kam narxi bo'yicha ko'pi bilan ${money(maxD)} chegirma qilish mumkin.`;
+      if (!isAdmin()) { alert(msg + '\n\nSotish mumkin emas — chegirmani kamaytiring.'); $('#modalBody [name=discount]')?.focus(); return false; }
+      if (!confirm(msg + '\n\nBaribir saqlansinmi? (faqat administrator)')) return false;
     }
   }
   if (t.move && data.warehouseId === data.toWarehouseId) {
@@ -3234,11 +3309,18 @@ const isExpense = (p) => p.dir === 'out' && !p.counterpartyId && (p.expense || E
 const expenseCat = (name) => (db.expenseCats || []).find((c) => c.name === name);
 const expenseEmoji = (name) => expenseCat(name)?.emoji || (isSalaryCat(name) ? '👷' : '📦');
 
+// Oylik oladigan xodimlar: Moddalar sahifasidagi ro'yxat + dastur foydalanuvchilari + avval oylik berilganlar
+function staffNames() {
+  const names = [...(db.staffNames || []), ...db.users.filter((u) => u.active !== false).map((u) => u.name),
+    ...db.payments.filter((p) => p.employee).map((p) => p.employee)];
+  return [...new Set(names.map((n) => String(n).trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+}
+
 function newExpense(catName) {
   if (!can('money') && !can('expenses')) return alert("Xarajat kiritish uchun ruxsatingiz yo'q.");
   const cats = db.expenseCats?.length ? db.expenseCats : DEFAULT_EXPENSE_CATS;
   const cat = catName || cats[0].name;
-  const staff = db.users.filter((u) => u.active !== false).map((u) => u.name);
+  const staff = staffNames();
   openModal({
     title: 'Yangi xarajat',
     body: `<div class="form-grid">
@@ -3248,7 +3330,8 @@ function newExpense(catName) {
         ${selectField("To'lov usuli", 'method', Object.entries(PAY_METHODS), 'cash')}
         <div class="full salary-box" id="salaryBox" ${isSalaryCat(cat) ? '' : 'hidden'}>
           <div class="form-grid">
-            <label>Xodim<input name="employee" list="staffList" autocomplete="off" placeholder="Ism familiya"><datalist id="staffList">${staff.map((n) => `<option value="${esc(n)}"></option>`).join('')}</datalist></label>
+            ${staff.length ? `<label>Xodim<select name="employeeSel"><option value="">— ro'yxatdan tanlang —</option>${staff.map((n) => `<option>${esc(n)}</option>`).join('')}<option value="__new">+ Yangi xodim...</option></select></label>` : ''}
+            <label id="empNewLbl" ${staff.length ? 'hidden' : ''}>${staff.length ? 'Yangi xodim ismi' : 'Xodim'}<input name="employee" autocomplete="off" placeholder="Ism familiya"></label>
             ${field('Qaysi oy uchun', 'forMonth', today().slice(0, 7), 'type="month"')}
           </div>
         </div>
@@ -3257,18 +3340,25 @@ function newExpense(catName) {
     onOpen: () => {
       const sel = $('#modalBody [name=purpose]');
       sel.addEventListener('change', () => { $('#salaryBox').hidden = !isSalaryCat(sel.value); });
+      $('#modalBody [name=employeeSel]')?.addEventListener('change', (e) => {
+        $('#empNewLbl').hidden = e.target.value !== '__new';
+        if (e.target.value === '__new') $('#modalBody [name=employee]').focus();
+      });
       setTimeout(() => $('#modalBody [name=amount]')?.focus(), 50);
     },
     onSubmit: async (d) => {
       const amount = num(d.amount);
       if (amount <= 0) { alert('Summani kiriting.'); return false; }
       const salary = isSalaryCat(d.purpose);
+      if (d.employeeSel && d.employeeSel !== '__new') d.employee = d.employeeSel;
       if (salary && !d.employee.trim()) { alert('Oylik kimga berilganini kiriting.'); $('#modalBody [name=employee]').focus(); return false; }
       db.payments.push({
         id: uid(), no: await nextNo('payOut'), dir: 'out', expense: true, date: d.date, amount, method: d.method,
         purpose: d.purpose, counterpartyId: null, docId: null, note: d.note.trim(), userId: me?.id,
         employee: salary ? d.employee.trim() : undefined, forMonth: salary ? d.forMonth : undefined,
       });
+      // Yangi xodim ismi ro'yxatga yoziladi (administrator) — keyingi safar tanlanadi
+      if (salary && isAdmin() && !(db.staffNames || []).includes(d.employee.trim())) db.staffNames = [...(db.staffNames || []), d.employee.trim()];
       await save();
     },
   });
@@ -3320,7 +3410,11 @@ function viewExpenseCats() {
       <td><input class="ec-name" data-i="${i}" value="${esc(c.name)}" aria-label="Nomi"></td>
       <td class="actions"><button class="small danger icon-only" data-act="ecDel" data-i="${i}" title="O'chirish">${icon('trash')}</button></td></tr>`).join('')}</tbody></table>
     <div class="toolbar" style="margin-top:10px"><button data-act="ecAdd">${icon('plus')}Modda qo'shish</button><button class="primary" data-act="ecSave">Saqlash</button></div>
-    <p class="muted small">Moddani o'chirish yoki nomini o'zgartirish avval kiritilgan xarajatlarga ta'sir qilmaydi.</p></div>`;
+    <p class="muted small">Moddani o'chirish yoki nomini o'zgartirish avval kiritilgan xarajatlarga ta'sir qilmaydi.</p></div>
+    <div class="card narrow"><h3>👷 Oylik oladigan xodimlar</h3>
+      <p class="muted small">Oylik berishda ism shu ro'yxatdan tanlanadi (dastur foydalanuvchilari ham ro'yxatda bo'ladi).</p>
+      <div class="chips staff-chips">${(db.staffNames || []).map((n, i) => `<span class="chip">${esc(n)} <button type="button" class="chip-x" data-act="staffDel" data-i="${i}" title="O'chirish">×</button></span>`).join('') || '<span class="muted small">Hali ism qo\'shilmagan</span>'}</div>
+      <div class="toolbar" style="margin-top:8px"><input id="staffNew" placeholder="Ism familiya" autocomplete="off"><button class="primary" data-act="staffAdd">${icon('plus')}Qo'shish</button></div></div>`;
 }
 
 function readExpenseCats() {
@@ -4253,9 +4347,11 @@ function viewParties() {
     .filter((c) => !q || [c.name, c.phone, c.address, c.inn].join(' ').toLowerCase().includes(q) || phoneMatch(c.phone, q));
   const rows = list.map((c) => {
     const b = partyBalance(c.id);
-    return `<tr class="click" data-act="editParty" data-id="${c.id}"><td><b>${esc(c.name)}</b>${c.note ? `<div class="muted small">${esc(c.note)}</div>` : ''}</td><td>${esc(KINDS[c.kind])}${c.ctype ? `<div class="muted small">${esc(c.ctype)}</div>` : ''}</td>
-      <td class="dt">${esc(c.phone)}</td><td>${esc(c.address)}</td><td class="num ${b > 0 ? 'debt' : b < 0 ? 'warn' : ''}">${b ? money(b) : '—'}</td>
-      <td class="actions"><button class="small" data-act="statement" data-id="${c.id}">${icon('receipt')}Hisob-kitob</button>${isAdmin() ? `<button class="small danger icon-only" data-act="deleteParty" data-id="${c.id}" title="O'chirish">${icon('trash')}</button>` : ''}</td></tr>`;
+    const full = seesParties();
+    const money_ = can('money');
+    return `<tr class="click" data-act="editParty" data-id="${c.id}"><td><b>${esc(c.name)}</b>${c.note && full ? `<div class="muted small">${esc(c.note)}</div>` : ''}</td><td>${esc(KINDS[c.kind])}${c.ctype && full ? `<div class="muted small">${esc(c.ctype)}</div>` : ''}</td>
+      <td class="dt">${esc(full ? c.phone : maskPhone(c.phone))}</td><td>${full ? esc(c.address) : '—'}</td><td class="num ${b > 0 ? 'debt' : b < 0 ? 'warn' : ''}">${b && (full || money_) ? money(b) : '—'}</td>
+      <td class="actions">${full || money_ ? `<button class="small" data-act="statement" data-id="${c.id}">${icon('receipt')}Hisob-kitob</button>` : ''}${isAdmin() ? `<button class="small danger icon-only" data-act="deleteParty" data-id="${c.id}" title="O'chirish">${icon('trash')}</button>` : ''}</td></tr>`;
   }).join('');
   return toolbar('parties', {
     extra: (!(isAdmin() || kinds.length > 1) ? '' : `<select data-filter="parties.kind"><option value="">Hammasi</option><option value="customer" ${kind === 'customer' ? 'selected' : ''}>Mijozlar</option><option value="supplier" ${kind === 'supplier' ? 'selected' : ''}>Ta'minotchilar</option></select>`)
@@ -5364,6 +5460,8 @@ const ACTIONS = {
   expFilter: (ds) => { filters['expenses.cat'] = ds.cat || ''; render(); },
   ecAdd: () => { db.expenseCats = readExpenseCats(); db.expenseCats.push({ emoji: '📦', name: '' }); render(); $$('.ec-name').pop()?.focus(); },
   ecDel: (ds) => { const cats = readExpenseCats(); const c = (db.expenseCats || [])[+ds.i]; if (c && !confirm(`«${c.name}» moddasi o'chirilsinmi?`)) return; db.expenseCats = cats.filter((x) => x.name !== c?.name); save(); },
+  staffAdd: () => { const v = $('#staffNew').value.trim(); if (!v) return; db.staffNames = [...new Set([...(db.staffNames || []), v])]; save(); },
+  staffDel: (ds) => { const n = db.staffNames[+ds.i]; if (n && confirm(`«${n}» ro'yxatdan olib tashlansinmi?`)) { db.staffNames.splice(+ds.i, 1); save(); } },
   ecSave: async () => { db.expenseCats = readExpenseCats(); await save(); alert('Saqlandi.'); },
   editProduct: (ds) => editProduct(ds.id),
   deleteProduct: (ds) => deleteProduct(ds.id),
@@ -6080,7 +6178,7 @@ Object.assign(ACTIONS, {
 // Ruxsatga bog'liq amallar (tugma ko'rinmasa ham bajarilmasin)
 const ACTION_PERMS = { newProduct: 'products', newKit: 'products', exportProducts: 'products' };
 const ADMIN_ACTIONS = ['deleteProduct', 'unarchive', 'exportProducts', 'tgProduct', 'deleteParty', 'deletePayment',
-  'ecAdd', 'ecDel', 'ecSave', 'loMove', 'loReset', 'drvEdit', 'drvDel', 'drvLink', 'botSetup', 'tgSave', 'tgDetect', 'tgTest', 'tgAll', 'bfAdd', 'bfDel', 'tgTopicsCreate', 'tgTopicsReset', 'tgTopicIcons', 'coSave', 'editWh', 'deleteWh', 'catSave', 'catAdd', 'catDel', 'catIconOpen', 'catIconSet', 'fsAdd', 'fsDel', 'fsFieldAdd', 'fsFieldDel', 'regAdd', 'regDel', 'chipRemove', 'backup', 'backupDetect', 'backupSend', 'demo', 'reset', 'editUser', 'exportDocs',
+  'ecAdd', 'ecDel', 'ecSave', 'staffAdd', 'staffDel', 'loMove', 'loReset', 'drvEdit', 'drvDel', 'drvLink', 'botSetup', 'tgSave', 'tgDetect', 'tgTest', 'tgAll', 'bfAdd', 'bfDel', 'tgTopicsCreate', 'tgTopicsReset', 'tgTopicIcons', 'coSave', 'editWh', 'deleteWh', 'catSave', 'catAdd', 'catDel', 'catIconOpen', 'catIconSet', 'fsAdd', 'fsDel', 'fsFieldAdd', 'fsFieldDel', 'regAdd', 'regDel', 'chipRemove', 'backup', 'backupDetect', 'backupSend', 'demo', 'reset', 'editUser', 'exportDocs',
   'serverSettings', 'refreshUsage', 'migrateLocal', 'rateRefresh', 'rateManual', 'rateAuto',
   'ldSel', 'ldFs', 'ldBold', 'ldCur', 'ldAlign', 'ldCenter', 'ldFull', 'ldTest', 'ldUndo', 'ldReset', 'ldSave'];
 

@@ -6,7 +6,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 
 const KEEP_DAYS = 90;
-const SETTINGS_KEYS = ["categories", "categoryTypes", "materials", "colors", "customerTypes", "featureSets", "categoryIcons", "expenseCats", "uiOrder", "regions", "currency", "company", "telegram", "legacyUsers"];
+const SETTINGS_KEYS = ["categories", "categoryTypes", "materials", "colors", "customerTypes", "featureSets", "categoryIcons", "expenseCats", "uiOrder", "drivers", "staffNames", "regions", "currency", "company", "telegram", "legacyUsers"];
 
 Deno.serve(async () => {
   const sb = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, { auth: { persistSession: false } });

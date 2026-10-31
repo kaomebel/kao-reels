@@ -1271,3 +1271,12 @@ tr.sale-late > td:first-child { box-shadow: inset 4px 0 0 var(--danger); }
 .tg-fields { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 4px 12px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 12px; }
 .tg-fields .field-label { grid-column: 1 / -1; }
 .tg-fields label.check { min-height: 36px; display: flex; align-items: center; gap: 8px; }
+.pick-stock { display: block; margin-top: 2px; font-size: 11px; font-weight: 600; color: var(--ok); text-align: right; }
+.pick-stock.none { color: var(--danger); }
+.money-box { margin-top: 14px; padding: 12px 14px; border-radius: 14px; border: 1px solid var(--border); background: var(--card-2, var(--bg)); }
+.money-box h4 { display: flex; align-items: center; gap: 8px; margin: 0 0 6px; }
+.money-box .total-line { margin: 0 0 10px; }
+#docBreak { font-size: 14px; }
+html.modal-open, html.modal-open body { overflow: hidden; overscroll-behavior: none; }
+.money-box .total-line { display: block; text-align: left; font-size: 16px; line-height: 1.6; }
+.money-box #docBreak { display: block; }
