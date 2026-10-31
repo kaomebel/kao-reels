@@ -1870,7 +1870,8 @@ function docForm(type, d) {
         <div class="party-suggest" id="partySuggest" hidden></div>
       </label>
       <input type="hidden" name="counterpartyId" id="partyId" value="${esc(known ? known.id : '')}">`;
-    head += customerTypeField(known ? known.ctype : draft.ctype || '');
+    // Mijoz turi faqat administratorga ko'rinadi — sotuvchi oynasida yo'q (saqlangan turi o'zgarmaydi)
+    if (isAdmin()) head += customerTypeField(known ? known.ctype : draft.ctype || '');
     head += `<div class="full party-hint" id="partyHint"></div>`;
   } else if (t.party) {
     // Telefon yozilsa — saqlangan mijoz avtomatik topiladi; topilmasa, yangi mijoz ismi so'raladi
@@ -2143,7 +2144,7 @@ function bindCustomerLookup() {
     name.value = c.name;
     phone.value = c.phone || '';
     if (c.phone) formatPhoneInput(phone);
-    if (c.ctype) {
+    if (c.ctype && typeSel) {
       if (![...typeSel.options].some((o) => o.value === c.ctype)) typeSel.insertAdjacentHTML('afterbegin', `<option>${esc(c.ctype)}</option>`);
       typeSel.value = c.ctype;
     }
