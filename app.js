@@ -1293,7 +1293,7 @@ function docForm(type, d) {
     ${customBlock}
     <div id="stdBlock" ${custom ? 'hidden' : ''}>
     <h4>Mahsulotlar</h4>
-    <div class="table-wrap"><table class="items-table">
+    <div class="table-wrap"><table class="items-table doc-items">
       <thead><tr><th>Mahsulot</th><th class="num">Omborda</th><th>Soni</th><th>Narxi</th><th class="num">Summa</th><th></th></tr></thead>
       <tbody id="itemRows">${items}</tbody>
     </table></div>
