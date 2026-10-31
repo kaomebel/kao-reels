@@ -65,6 +65,8 @@ Loginlar oddiy so'z bo'lishi mumkin (`sardor`, `bahodir`) — dastur ularni ichk
 - Rasmlar bazada nisbiy yo'l (`products/2026/abc.webp`) sifatida saqlanadi — fayllarni yangi xotiraga ko'chirish kifoya.
 - Dastur serverga faqat [`backend.js`](backend.js) orqali murojaat qiladi — server almashganda faqat shu fayl o'zgaradi.
 - **Sozlamalar → Zaxira nusxa** — barcha ma'lumotlar JSON faylga; boshqa tizimga tiklashda hujjat raqamlari ham to'g'ri davom etadi.
+- **Har kungi avtomatik zaxira:** Sozlamalar → Zaxira nusxa → botga /start yozib «Mening Telegramimni aniqlash» → «Hozir yuborish». Shundan keyin dastur har kuni (administrator birinchi ochganda) zaxira faylini administratorning shaxsiy Telegramiga yuboradi. Zaxira 2 kundan eski bo'lsa, bosh sahifada ogohlantirish chiqadi.
+- Tiklash va «Barcha ma'lumotlarni o'chirish» dan oldin joriy holat avtomatik yuklab olinadi; o'chirish «O'CHIRISH» deb yozib tasdiqlanadi; namuna ma'lumotlar faqat bo'sh dasturga yuklanadi.
 
 ## Ilovalar (Windows, Android, iPhone)
 

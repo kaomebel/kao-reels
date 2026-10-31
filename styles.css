@@ -1075,3 +1075,13 @@ button.primary:active:not(:disabled) { background: var(--accent-dark); }
 @media (max-width: 700px) {
   .no-cost .doc-items tr { grid-template-areas: "pick pick pick" "qty qty rm" "avail avail avail"; }
 }
+
+/* ---- Zaxira ---- */
+.backup-warn { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.backup-warn > span { flex: 1 1 220px; }
+.backup-status { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border-radius: 10px; margin: 8px 0 12px; }
+.backup-status.ok { background: var(--ok-soft, #e3f1e4); color: var(--text); }
+.backup-status.warn { background: var(--warn-soft); color: var(--text); }
+.backup-status .ic { flex: none; width: 20px; height: 20px; }
+.backup-status.ok .ic { color: var(--ok); }
+.backup-status.warn .ic { color: var(--warn); }

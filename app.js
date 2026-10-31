@@ -223,6 +223,8 @@ async function loadData() {
   } finally {
     showLoading(false);
   }
+  requestPersistentStorage();
+  setTimeout(autoBackup, 5000);
 }
 
 function showLoading(on, text = 'Yuklanmoqda...') {
@@ -2767,7 +2769,12 @@ function viewDashboard() {
         <div class="muted small">Ish stolida ikonka paydo bo'ladi, dastur alohida oynada ochiladi.</div></div>
         <button class="primary" data-act="installApp">${icon('download')}O'rnatish</button></div>` : '';
 
-  return installCard + usageWarn + `<div class="stats">${cards.map(([l, v, h, cls]) => `<div class="stat">
+  // Zaxira eskirgan bo'lsa — administratorga eslatma
+  const age = backupAgeDays();
+  const backupWarn = isAdmin() && age > 2
+    ? `<div class="card warn-card backup-warn">${icon('alert')}<span>${age === Infinity ? "Hali birorta ham zaxira nusxa olinmagan." : `Oxirgi zaxira nusxa ${Math.floor(age)} kun oldin olingan.`} Ma'lumot yo'qolmasligi uchun zaxira oling${db.telegram.backupChatId ? '' : ' yoki har kungi avtomatik zaxirani yoqing'}.</span>
+        <button class="small primary" data-act="backup">${icon('download')}Zaxira olish</button><a href="#settings/backup">Sozlash</a></div>` : '';
+  return installCard + backupWarn + usageWarn + `<div class="stats">${cards.map(([l, v, h, cls]) => `<div class="stat">
       <div class="stat-ic ${cls || ''}">${icon(cardIcon[l] || 'chart')}</div>
       <div class="label">${l}</div><div class="value ${cls || ''}">${v}</div><div class="muted small">${h}</div></div>`).join('')}</div>
     <div class="quick">${quick}</div>
@@ -3534,9 +3541,33 @@ function viewCategories() {
     <div class="toolbar"><button class="primary" data-act="catSave">${icon('check')}Saqlash</button></div>`;
 }
 
+function backupAutoCard() {
+  const tg = db.telegram;
+  const hasToken = !!tg.token;
+  const on = hasToken && tg.backupChatId;
+  return `<div class="card narrow backup-auto"><h3>${icon('send')}Har kungi avtomatik zaxira — Telegramga</h3>
+    <p class="muted">Dastur har kuni (siz uni birinchi ochganingizda) barcha ma'lumotlarning zaxira faylini <b>sizning shaxsiy Telegramingizga</b> yuboradi. Telefon yo'qolsa yoki buzilsa ham ma'lumotlar Telegramda saqlanib qoladi; tiklash uchun o'sha faylni «Zaxiradan tiklash» ga tanlaysiz.</p>
+    <div class="backup-status ${on ? 'ok' : 'warn'}">${icon(on ? 'check' : 'alert')}<span>${on
+      ? `Yoqilgan. Oxirgi yuborilgan: <b>${tg.lastBackupAt ? fmtDateTime(tg.lastBackupAt) : 'hali yuborilmagan'}</b>${tg.backupError ? `<br><span class="debt">Oxirgi urinish xatosi: ${esc(tg.backupError)}</span>` : ''}`
+      : 'Hali yoqilmagan.'}</span></div>
+    ${hasToken ? `<ol class="muted small">
+        <li>Telegramda o'z botingizni oching va <b>/start</b> yozing (guruhda emas, bot bilan shaxsiy chatda).</li>
+        <li>Pastdagi «Mening Telegramimni aniqlash» tugmasini bosing.</li>
+        <li>«Hozir yuborish» ni bosing — fayl Telegramingizga keladi.</li>
+      </ol>
+      <div class="toolbar">
+        <button data-act="backupDetect">${icon('user')}Mening Telegramimni aniqlash</button>
+        ${on ? `<button class="primary" data-act="backupSend">${icon('send')}Hozir yuborish</button>` : ''}
+      </div>` : `<p class="muted small">Avval <a href="#settings/telegram">Sozlamalar → Telegram</a> da bot yarating va tokenini kiriting (5 daqiqa), so'ng shu yerga qayting.</p>`}
+  </div>`;
+}
+
 function viewBackup() {
   const server = backend.kind === 'supabase';
-  return `<div class="card narrow"><h3>Zaxira nusxa</h3>
+  const last = lastBackupAt();
+  const empty = !db.products.length && !db.docs.length;
+  return backupAutoCard() + `<div class="card narrow"><h3>Zaxira nusxa</h3>
+    <p class="muted small">Oxirgi zaxira: <b>${last ? fmtDateTime(last) : "hali olinmagan"}</b>${storagePersisted === true ? " · Brauzer xotirasi doimiy (o'zi o'chirilmaydi)" : ''}</p>
     <p class="muted">${server
       ? "Ma'lumotlar serverda saqlanadi. Shunga qaramay, haftada bir marta zaxira nusxa olib qo'ying. Rasmlar serverdagi xotirada qoladi, faylga faqat ularning manzili yoziladi."
       : "Ma'lumotlar shu brauzerda saqlanadi. Ularni yo'qotmaslik uchun har kuni zaxira nusxa oling. Fayl rasmlarni ham o'z ichiga oladi va undan serverga ko'chirishda ham foydalanish mumkin."}</p>
@@ -3545,9 +3576,10 @@ function viewBackup() {
       <label class="filebtn">Zaxiradan tiklash<input type="file" id="restoreInput" accept=".json,application/json" hidden></label>
     </div>
     <p class="muted small">Tiklashda joriy ma'lumotlar fayldagisi bilan to'liq almashtiriladi.</p></div>
-    <div class="card narrow"><h3>Namuna ma'lumotlar</h3><p class="muted">Dasturni sinab ko'rish uchun bir nechta mahsulot, kontragent va hujjat qo'shadi.</p>
-      <button data-act="demo">Namuna ma'lumotlarni yuklash</button></div>
-    <div class="card narrow"><h3>Tozalash</h3><button class="danger" data-act="reset">Barcha ma'lumotlarni o'chirish</button></div>`;
+    ${empty ? `<div class="card narrow"><h3>Namuna ma'lumotlar</h3><p class="muted">Dasturni sinab ko'rish uchun bir nechta mahsulot, kontragent va hujjat qo'shadi (faqat bo'sh dasturda).</p>
+      <button data-act="demo">Namuna ma'lumotlarni yuklash</button></div>` : ''}
+    <div class="card narrow"><h3>Tozalash</h3><p class="muted small">Barcha ma'lumotlarni o'chiradi. Oldin zaxira avtomatik yuklab olinadi va «O'CHIRISH» deb yozib tasdiqlash so'raladi.</p>
+      <button class="danger" data-act="reset">Barcha ma'lumotlarni o'chirish</button></div>`;
 }
 
 let storageUsage = null;
@@ -3656,18 +3688,105 @@ async function runImport(data, merge) {
   }
 }
 
-async function backupData() {
+// ---------- Zaxira nusxa: ma'lumot yo'qolmasligi uchun ----------
+// Qo'lda yuklab olish + har kuni avtomatik ravishda administratorning shaxsiy Telegramiga yuborish.
+const BACKUP_KEY = 'biznes-tizim-last-backup';
+
+function lastBackupAt() {
+  let local = '';
+  try { local = localStorage.getItem(BACKUP_KEY) || ''; } catch (e) { /* xotira yopiq */ }
+  return [local, db.telegram?.lastBackupAt || ''].filter(Boolean).sort().pop() || '';
+}
+const backupAgeDays = () => (lastBackupAt() ? (Date.now() - Date.parse(lastBackupAt())) / 864e5 : Infinity);
+function markBackup() {
+  try { localStorage.setItem(BACKUP_KEY, new Date().toISOString()); } catch (e) { /* xotira yopiq */ }
+}
+const fmtDateTime = (iso) => (iso ? new Date(iso).toLocaleString('uz-UZ', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '');
+
+async function buildBackup(quiet = false) {
   let data;
   if (backend.kind === 'local') {
-    showLoading(true, 'Zaxira tayyorlanmoqda...');
-    try { data = await backend.exportWithPhotos(); } finally { showLoading(false); }
+    if (!quiet) showLoading(true, 'Zaxira tayyorlanmoqda...');
+    try { data = await backend.exportWithPhotos(); } finally { if (!quiet) showLoading(false); }
   } else {
     data = JSON.parse(JSON.stringify(db));
     data.seq = countersFromData(data);
   }
-  data.users = db.users.map(({ id, name, login, role }) => ({ id, name, login, role }));
+  data.users = db.users.map(({ id, name, login, role, perms }) => ({ id, name, login, role, perms }));
   data.exportedAt = new Date().toISOString();
+  return data;
+}
+
+async function backupData() {
+  const data = await buildBackup();
   download(`biznes-tizim-zaxira-${today()}.json`, JSON.stringify(data), 'application/json');
+  markBackup();
+  render();
+}
+
+// Zaxira faylini administratorning shaxsiy Telegram chatiga yuborish
+async function sendBackupToTelegram(quiet = false) {
+  const { token, backupChatId } = db.telegram;
+  if (!token || !backupChatId) throw new Error("Bot tokeni yoki sizning Telegram ID'ingiz kiritilmagan.");
+  const data = await buildBackup(quiet);
+  const stamp = new Date().toISOString().slice(0, 16).replace('T', '_').replace(':', '-');
+  const fd = new FormData();
+  fd.append('chat_id', backupChatId);
+  fd.append('document', new Blob([JSON.stringify(data)], { type: 'application/json' }), `biznes-tizim-zaxira-${stamp}.json`);
+  fd.append('caption', `📦 Biznes Tizim — zaxira nusxa\n${fmtDateTime(data.exportedAt)}\nMahsulot: ${data.products?.length || 0} · Hujjat: ${data.docs?.length || 0} · To'lov: ${data.payments?.length || 0}\n\nTiklash: Sozlamalar → Zaxira nusxa → Zaxiradan tiklash`);
+  if (!quiet) showLoading(true, 'Telegramga yuborilmoqda...');
+  try {
+    await telegramCall('sendDocument', fd);
+  } finally {
+    if (!quiet) showLoading(false);
+  }
+  db.telegram.lastBackupAt = data.exportedAt;
+  markBackup();
+  await save();
+}
+
+// Har kuni bir marta (administrator dasturni ochganda) o'zi yuboradi
+let autoBackupBusy = false;
+async function autoBackup() {
+  if (autoBackupBusy || !me || !isAdmin() || !db.telegram?.token || !db.telegram?.backupChatId) return;
+  const last = db.telegram.lastBackupAt ? Date.parse(db.telegram.lastBackupAt) : 0;
+  if (Date.now() - last < 20 * 3600e3) return;
+  autoBackupBusy = true;
+  try {
+    await sendBackupToTelegram(true);
+  } catch (e) {
+    console.warn('Avtomatik zaxira:', e);
+    db.telegram.backupError = e.message;
+  } finally {
+    autoBackupBusy = false;
+  }
+}
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') autoBackup(); });
+
+// Brauzerdan "doimiy xotira" so'raymiz: telefon xotirasi to'lsa ham dastur ma'lumotlari o'chirilmaydi
+let storagePersisted = null;
+async function requestPersistentStorage() {
+  try {
+    if (!navigator.storage?.persist) return;
+    storagePersisted = (await navigator.storage.persisted()) || (await navigator.storage.persist());
+  } catch (e) { /* qo'llab-quvvatlanmaydi */ }
+}
+
+// Shaxsiy chat ID: administrator botga /start yozadi, so'ng shu tugma bosiladi
+async function detectBackupChat() {
+  if (!db.telegram.token) return alert("Avval Sozlamalar → Telegram da bot tokenini kiriting.");
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${db.telegram.token}/getUpdates`);
+    const json = await res.json();
+    if (!json.ok) throw new Error(json.description);
+    const priv = json.result.map((u) => u.message?.chat).filter((c) => c && c.type === 'private').pop();
+    if (!priv) return alert("Topilmadi. Telegramda botingizni oching, «/start» yoki istalgan xabar yozing va qayta bosing.");
+    db.telegram.backupChatId = String(priv.id);
+    await save();
+    alert(`Topildi: ${[priv.first_name, priv.last_name].filter(Boolean).join(' ')} (${priv.id}). Endi «Hozir yuborish» ni bosing.`);
+  } catch (e) {
+    alert('Xato: ' + e.message);
+  }
 }
 
 async function migrateLocal() {
@@ -3684,7 +3803,8 @@ async function migrateLocal() {
     return;
   }
   await runImport(data, true);
-  if (confirm("Ko'chirish tugadi. Lokal nusxa shu brauzerdan o'chirilsinmi? (Serverdagi ma'lumotlarga ta'sir qilmaydi)")) {
+  // Lokal nusxa o'chirilmaydi — qo'shimcha zaxira bo'lib shu telefonda qoladi
+  if (false) {
     localStorage.removeItem(LOCAL_DATA_KEY);
     render();
   }
@@ -3818,8 +3938,9 @@ document.addEventListener('change', (e) => {
       alert("Faylni o'qib bo'lmadi: " + err.message);
       return;
     }
-    if (!confirm("Joriy ma'lumotlar zaxiradagisi bilan to'liq almashtiriladi. Davom etilsinmi?")) return;
-    runImport(data, false);
+    if (!confirm("Joriy ma'lumotlar zaxiradagisi bilan to'liq almashtiriladi. Avval joriy holatning zaxirasi yuklab olinadi. Davom etilsinmi?")) return;
+    // Xato fayl tanlansa ham hozirgi ma'lumot yo'qolmasin
+    backupData().then(() => runImport(data, false));
   });
 });
 
@@ -3911,14 +4032,30 @@ const ACTIONS = {
     alert('Saqlandi.');
   },
   backup: () => backupData(),
-  demo: () => loadDemo(),
-  reset: () => {
-    if (!confirm("Barcha ma'lumotlar o'chiriladi. Zaxira nusxa olganmisiz?")) return;
-    if (backend.kind === 'supabase' && !confirm("DIQQAT: serverdagi ma'lumotlar BARCHA qurilmalarda o'chadi va qaytarib bo'lmaydi. Rostdan ham o'chirilsinmi?")) return;
+  demo: () => {
+    // Haqiqiy ma'lumotlar orasiga namuna aralashib ketmasin
+    if (db.products.length || db.docs.length) return alert("Namuna ma'lumotlar faqat bo'sh dasturga yuklanadi — sizda allaqachon ma'lumotlar bor.");
+    loadDemo();
+  },
+  reset: async () => {
+    const word = prompt("Barcha mahsulot, hujjat, to'lov va kontragentlar o'chiriladi" + (backend.kind === 'supabase' ? ' — BARCHA qurilmalarda' : '') + ".\nOldin zaxira nusxa avtomatik yuklab olinadi.\n\nTasdiqlash uchun O'CHIRISH deb yozing:");
+    if ((word || '').trim().toUpperCase() !== "O'CHIRISH") return;
+    await backupData();
     db = Object.assign(emptyDb(), { users: db.users });
     save();
   },
   editUser: (ds) => editUser(ds.id),
+  backupDetect: () => detectBackupChat(),
+  backupSend: async () => {
+    try {
+      await sendBackupToTelegram();
+      db.telegram.backupError = '';
+      render();
+      alert('Zaxira nusxa Telegramingizga yuborildi.');
+    } catch (e) {
+      alert('Yuborib bo\'lmadi: ' + e.message);
+    }
+  },
   photoView: (ds) => {
     const p = product(ds.id);
     openModal({
@@ -4527,7 +4664,7 @@ Object.assign(ACTIONS, {
 // Ruxsatga bog'liq amallar (tugma ko'rinmasa ham bajarilmasin)
 const ACTION_PERMS = { newProduct: 'products', exportProducts: 'products' };
 const ADMIN_ACTIONS = ['deleteProduct', 'unarchive', 'exportProducts', 'tgProduct', 'deleteParty', 'deletePayment',
-  'tgSave', 'tgDetect', 'tgTest', 'tgAll', 'coSave', 'editWh', 'deleteWh', 'catSave', 'catAdd', 'catDel', 'catIconOpen', 'catIconSet', 'fsAdd', 'fsDel', 'fsFieldAdd', 'fsFieldDel', 'regAdd', 'regDel', 'chipRemove', 'backup', 'demo', 'reset', 'editUser', 'exportDocs',
+  'tgSave', 'tgDetect', 'tgTest', 'tgAll', 'coSave', 'editWh', 'deleteWh', 'catSave', 'catAdd', 'catDel', 'catIconOpen', 'catIconSet', 'fsAdd', 'fsDel', 'fsFieldAdd', 'fsFieldDel', 'regAdd', 'regDel', 'chipRemove', 'backup', 'backupDetect', 'backupSend', 'demo', 'reset', 'editUser', 'exportDocs',
   'serverSettings', 'refreshUsage', 'migrateLocal', 'rateRefresh', 'rateManual', 'rateAuto',
   'ldSel', 'ldFs', 'ldBold', 'ldCur', 'ldAlign', 'ldCenter', 'ldFull', 'ldTest', 'ldUndo', 'ldReset', 'ldSave'];
 
