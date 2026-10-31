@@ -43,7 +43,7 @@ Supabase rejimida barcha qurilmalar bitta bazada ishlaydi va bir qurilmadagi o'z
    - **Database password:** kuchli parol o'ylab toping va **albatta saqlab qo'ying** (keyinchalik boshqa serverga ko'chishda kerak bo'ladi).
    - **Region:** *Central EU (Frankfurt)* — O'zbekistonga yaqinlaridan biri.
    - *Create new project* → 1–2 daqiqa kuting.
-3. **Email tasdiqlashni o'chiring** (aks holda administrator qo'shgan sotuvchi emailini tasdiqlamaguncha kira olmaydi): *Authentication → Sign In / Providers → Email* → **Confirm email** — o'chiring → *Save*.
+3. **Email tasdiqlash** sozlamasiga tegish shart emas: loginlar serverdagi `create_login` funksiyasi orqali yaratiladi va darhol ishlaydi.
 4. **Bazani yarating:** chap menyuda *SQL Editor* → *New query* → shu repodagi [`supabase/schema.sql`](supabase/schema.sql) faylining butun matnini joylang → **Run**. "Success" chiqishi kerak. (Qayta ishga tushirish xavfsiz.)
 5. **Ulanish ma'lumotlarini oling:** *Project Settings → API* (yoki *API Keys*):
    - **Project URL** — `https://xxxxxxxx.supabase.co`

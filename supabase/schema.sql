@@ -93,6 +93,40 @@ create trigger on_auth_user_created
   after insert on auth.users
   for each row execute function public.handle_new_user();
 
+-- Login yaratish (elektron pochtasiz). Birinchi login — har kim (administrator bo'ladi),
+-- keyingilarini faqat administrator yaratadi. Supabase'dagi «Confirm email» sozlamasiga bog'liq emas.
+create or replace function public.create_login(p_email text, p_password text, p_name text) returns uuid
+language plpgsql security definer set search_path = public, auth, extensions as $$
+declare
+  uid uuid := gen_random_uuid();
+  em text := lower(trim(p_email));
+begin
+  perform pg_advisory_xact_lock(424242);
+  if exists (select 1 from public.profiles) and not public.is_admin() then
+    raise exception 'Ruxsat yo''q';
+  end if;
+  if coalesce(length(p_password), 0) < 6 then
+    raise exception 'Parol kamida 6 belgidan iborat bo''lishi kerak';
+  end if;
+  if exists (select 1 from auth.users where email = em) then
+    raise exception 'Bu login band';
+  end if;
+  insert into auth.users (instance_id, id, aud, role, email, encrypted_password, email_confirmed_at,
+    raw_app_meta_data, raw_user_meta_data, created_at, updated_at,
+    confirmation_token, recovery_token, email_change_token_new, email_change)
+  values ('00000000-0000-0000-0000-000000000000', uid, 'authenticated', 'authenticated', em,
+    crypt(p_password, gen_salt('bf')), now(),
+    '{"provider":"email","providers":["email"]}'::jsonb, jsonb_build_object('name', p_name), now(), now(),
+    '', '', '', '');
+  insert into auth.identities (id, user_id, provider_id, identity_data, provider, last_sign_in_at, created_at, updated_at)
+  values (gen_random_uuid(), uid, uid::text,
+    jsonb_build_object('sub', uid::text, 'email', em, 'email_verified', true), 'email', now(), now(), now());
+  return uid;
+end;
+$$;
+revoke execute on function public.create_login(text, text, text) from public;
+grant execute on function public.create_login(text, text, text) to anon, authenticated;
+
 -- Kirish oynasi birinchi ishga tushirishni aniqlashi uchun (kirmasdan chaqiriladi)
 create or replace function public.has_users() returns boolean
 language sql stable security definer set search_path = public as $$

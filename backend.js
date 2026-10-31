@@ -418,7 +418,18 @@ class SupabaseBackend {
     return this.loadProfile(data.user);
   }
 
+  // Login serverda yaratiladi (create_login): «Confirm email» yoqilgan bo'lsa ham ishlaydi.
+  // Eski sxemali serverda bu funksiya yo'q — u holda odatiy ro'yxatdan o'tish ishlatiladi.
+  async createLogin(login, password, name) {
+    const { data, error } = await this.sb.rpc('create_login', { p_email: toEmail(login), p_password: password, p_name: name });
+    if (!error) return data;
+    if (error.code === 'PGRST202' || /create_login/.test(error.message || '')) return null;
+    if (/login band/.test(error.message || '')) throw new Error('Bu login band — boshqasini tanlang.');
+    throw new Error(friendlyError(error));
+  }
+
   async createFirstAdmin({ name, login, password }) {
+    if (await this.createLogin(login, password, name)) return this.signIn(login, password);
     const { data, error } = await this.sb.auth.signUp({ email: toEmail(login), password, options: { data: { name } } });
     if (error) throw new Error(friendlyError(error));
     if (!data.session) throw new Error("Supabase'da «Confirm email» yoqilgan: Authentication → Sign In / Providers → Email → Confirm email ni o'chiring va qayta urinib ko'ring.");
@@ -431,7 +442,8 @@ class SupabaseBackend {
   }
 
   async saveUser(user, password, isNew) {
-    if (isNew) {
+    if (isNew) user.id = await this.createLogin(user.login, password, user.name);
+    if (isNew && !user.id) {
       // Alohida mijoz: administratorning o'z sessiyasi almashib ketmasligi uchun
       const tmp = window.supabase.createClient(this.cfg.url, this.cfg.key, {
         auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false, storageKey: 'bt-signup' },
