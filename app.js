@@ -1921,7 +1921,8 @@ function bindDocForm(type, editingId) {
       addr: f.needDelivery && f.aRegion && f.aRegion !== '__new' ? { region: f.aRegion, place: f.aPlace !== '__new' ? f.aPlace : '', spot: f.aSpot, detail: f.aDetail } : undefined,
       deliveryDate: f.deliveryDate,
       discount: discountOf(f),
-      payNow: num(f.payNow) || '',
+      // Avtomatik qo'yilgan to'liq summa zakladga o'tib ketmasin — faqat kassir yozgani
+      payNow: payTouched ? num(f.payNow) || '' : '',
       note: f.note,
       items: items.length ? items : undefined,
       draftParty: { phone: f.partyPhone, name: f.partyName, ctype: f.customerType },
