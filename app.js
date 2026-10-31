@@ -520,6 +520,21 @@ function refreshCtx() {
 
 // ---------- Modal oyna ----------
 
+// iPhone: klaviatura ochilib-yopilganda oyna ekranning ko'rinib turgan qismiga moslashadi —
+// tugmalar klaviatura ustida turadi va klaviatura yopilgach oyna joyiga qaytadi
+(function trackVisibleViewport() {
+  const vv = window.visualViewport;
+  if (!vv) return;
+  const root = document.documentElement.style;
+  const apply = () => {
+    root.setProperty('--vvh', `${Math.round(vv.height)}px`);
+    root.setProperty('--vvt', `${Math.round(vv.offsetTop)}px`);
+  };
+  vv.addEventListener('resize', apply);
+  vv.addEventListener('scroll', apply);
+  apply();
+})();
+
 let modalState = null;
 
 function openModal({ title, body, onSubmit, onOpen, extra = [], wide = false, submitText = 'Saqlash' }) {
@@ -534,6 +549,27 @@ function openModal({ title, body, onSubmit, onOpen, extra = [], wide = false, su
   $('#modalBody').scrollTop = 0;
   if (onOpen) onOpen();
   hydratePhotos($('#modalBody'));
+  cardTables($('#modalBody'));
+  // Telefonda oyna ochilishi bilan klaviatura yoki kalendar chiqib ketmasin — maydonni o'zingiz bosasiz
+  if (isTouch()) $('#modalTitle').focus({ preventScroll: true });
+}
+
+const isTouch = () => window.matchMedia('(pointer: coarse), (max-width: 700px)').matches;
+
+// Telefonda jadval qatorlari kartochkaga aylanadi: har bir katakka ustun nomi yoziladi (CSS ko'rsatadi)
+function cardTables(root) {
+  $$('table', root).forEach((table) => {
+    if (table.classList.contains('items-table')) return;
+    const heads = $$('thead th', table).map((th) => th.textContent.trim());
+    table.classList.add('m-cards');
+    $$('tbody tr, tfoot tr', table).forEach((tr) => {
+      let i = 0;
+      [...tr.cells].forEach((td) => {
+        td.dataset.label = td.colSpan > 1 ? '' : heads[i] || '';
+        i += td.colSpan || 1;
+      });
+    });
+  });
 }
 
 function closeModal() {
@@ -3468,6 +3504,7 @@ function render() {
   const caret = document.activeElement?.selectionStart;
   $('#view').innerHTML = (VIEWS[view] || ((v) => viewDocs(v)))(view);
   hydratePhotos($('#view'));
+  cardTables($('#view'));
   if (view === 'labelDesign') ldRefresh();
   else labelDraft = null;
   // Qidiruv maydonida yozayotganda fokusni saqlaymiz
