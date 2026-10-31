@@ -1267,3 +1267,7 @@ tr.sale-late > td:first-child { box-shadow: inset 4px 0 0 var(--danger); }
   .m-cards tr.sale-onway { border-left-color: var(--violet); }
   .m-cards tr.sale-late { border-left-color: var(--danger); }
 }
+
+.tg-fields { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 4px 12px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 12px; }
+.tg-fields .field-label { grid-column: 1 / -1; }
+.tg-fields label.check { min-height: 36px; display: flex; align-items: center; gap: 8px; }

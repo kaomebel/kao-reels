@@ -674,12 +674,33 @@ function refreshCtx() {
   const vv = window.visualViewport;
   if (!vv) return;
   const root = document.documentElement.style;
-  const apply = () => {
-    root.setProperty('--vvh', `${Math.round(vv.height)}px`);
-    root.setProperty('--vvt', `${Math.round(vv.offsetTop)}px`);
+  // Klaviatura yopiq bo'lsa — oyna butun ekranni egallaydi (100dvh). Aks holda iPhone ba'zan
+  // eski (klaviatura ochiq paytdagi) balandlikni qoldirib, tugmalar ekran o'rtasida qolib ketardi.
+  const typing = () => {
+    const el = document.activeElement;
+    return !!el && (el.isContentEditable || (/^(INPUT|TEXTAREA)$/.test(el.tagName) && !/^(checkbox|radio|button|submit|file|range|color)$/.test(el.type)));
   };
+  const apply = () => {
+    const full = document.documentElement.clientHeight || window.innerHeight;
+    const kb = typing() && vv.height < full - 120;
+    if (kb) {
+      root.setProperty('--vvh', `${Math.round(vv.height)}px`);
+      root.setProperty('--vvt', `${Math.round(vv.offsetTop)}px`);
+    } else {
+      root.removeProperty('--vvh');
+      root.removeProperty('--vvt');
+    }
+  };
+  // Klaviatura yopilish animatsiyasi tugaguncha bir necha marta qayta tekshiramiz
+  const settle = () => { apply(); [80, 250, 500, 900].forEach((t) => setTimeout(apply, t)); };
   vv.addEventListener('resize', apply);
   vv.addEventListener('scroll', apply);
+  document.addEventListener('focusin', settle);
+  document.addEventListener('focusout', settle);
+  window.addEventListener('orientationchange', settle);
+  window.addEventListener('pageshow', settle);
+  document.addEventListener('visibilitychange', settle);
+  window.trackViewportSettle = settle;
   apply();
 })();
 
@@ -694,6 +715,7 @@ function openModal({ title, body, onSubmit, onOpen, extra = [], wide = false, su
   $('#modalExtra').innerHTML = extra.map((b, i) => `<button type="button" class="${b.cls || ''}" data-extra="${i}">${esc(b.label)}</button>`).join('');
   modalState = { onSubmit, extra };
   if (!$('#modal').open) $('#modal').showModal();
+  window.trackViewportSettle?.();
   $('#modalBody').scrollTop = 0;
   if (onOpen) onOpen();
   hydratePhotos($('#modalBody'));
@@ -3315,20 +3337,36 @@ function stockLine(p) {
   return "❌ Omborda yo'q (buyurtma asosida)";
 }
 
+// Telegram xabaridagi qatorlar — administrator Sozlamalar → Telegram da yoqib/o'chiradi
+const TG_FIELDS = [
+  ['type', 'Turi'], ['code', 'Kod (artikul)'], ['price', 'Narxi'], ['size', "O'lchami"], ['color', 'Rangi'],
+  ['attrs', 'Xususiyatlar (material, mexanizm...)'], ['origin', 'Ishlab chiqarilgan joyi'], ['stock', "Omborda bor / yo'q"],
+  ['note', 'Izoh'], ['phone', 'Kompaniya telefoni'], ['tags', 'Heshteglar (#kategoriya)'],
+];
+const tgShow = (k) => !db.telegram.hide?.[k];
+// Belgi o'zgarsa — namuna xabar darhol yangilanadi (saqlash «Saqlash» tugmasi bilan)
+document.addEventListener('change', (e) => {
+  if (!e.target.classList?.contains('tg-field')) return;
+  db.telegram.hide = Object.fromEntries($$('.tg-field').filter((c) => !c.checked).map((c) => [c.dataset.k, true]));
+  const sample = db.products.find((p) => p.photos?.length) || db.products[0];
+  const box = $('.tg-preview > div');
+  if (box && sample) box.innerHTML = telegramCaption(sample).replace(/\n/g, '<br>');
+});
+
 function telegramCaption(p) {
   const lines = [`🛋 <b>${esc(p.name)}</b>`];
-  if (p.type) lines.push(`🪑 Turi: ${esc(p.type)}`);
-  if (p.code) lines.push(`🔖 Kod: ${esc(p.code)}`);
-  lines.push(`💰 Narxi: <b>${priceLabel(p)}</b>`);
-  if (p.size) lines.push(`📐 O'lchami: ${esc(p.size)} sm`);
-  if (p.color) lines.push(`🎨 Rangi: ${esc(p.color)}`);
-  productAttrs(p).forEach(([k, v]) => lines.push(`▫️ ${esc(k)}: ${esc(v)}`));
-  if (p.origin || p.maker) lines.push(`🏭 Ishlab chiqarilgan: ${esc([p.origin, p.maker].filter(Boolean).join(', '))}`);
-  lines.push(`📦 ${stockLine(p)}`);
-  if (p.note) lines.push('', esc(p.note));
-  if (db.company.phone) lines.push('', `📞 ${esc(db.company.phone)}`);
+  if (p.type && tgShow('type')) lines.push(`🪑 Turi: ${esc(p.type)}`);
+  if (p.code && tgShow('code')) lines.push(`🔖 Kod: ${esc(p.code)}`);
+  if (tgShow('price')) lines.push(`💰 Narxi: <b>${priceLabel(p)}</b>`);
+  if (p.size && tgShow('size')) lines.push(`📐 O'lchami: ${esc(p.size)} sm`);
+  if (p.color && tgShow('color')) lines.push(`🎨 Rangi: ${esc(p.color)}`);
+  if (tgShow('attrs')) productAttrs(p).forEach(([k, v]) => lines.push(`▫️ ${esc(k)}: ${esc(v)}`));
+  if ((p.origin || p.maker) && tgShow('origin')) lines.push(`🏭 Ishlab chiqarilgan: ${esc([p.origin, p.maker].filter(Boolean).join(', '))}`);
+  if (tgShow('stock')) lines.push(`📦 ${stockLine(p)}`);
+  if (p.note && tgShow('note')) lines.push('', esc(p.note));
+  if (db.company.phone && tgShow('phone')) lines.push('', `📞 ${esc(db.company.phone)}`);
   const tag = (t) => '#' + t.replace(/[^\p{L}\p{N}]+/gu, '_').replace(/^_+|_+$/g, '');
-  if (p.category || p.type) lines.push([p.category, p.type].filter(Boolean).map(tag).join(' '));
+  if ((p.category || p.type) && tgShow('tags')) lines.push([p.category, p.type].filter(Boolean).map(tag).join(' '));
   return lines.join('\n');
 }
 
@@ -4550,6 +4588,8 @@ function viewTelegram() {
     <div class="form-grid">
       <label class="full">Bot tokeni<input id="tgToken" value="${esc(tg.token)}" placeholder="123456789:AA..." autocomplete="off"></label>
       <label class="full">Guruh / kanal ID<input id="tgChat" value="${esc(tg.chatId)}" placeholder="-1001234567890 yoki @guruh_nomi"></label>
+      <div class="full tg-fields"><span class="field-label">Xabarda ko'rsatiladi (belgini olib tashlasangiz — chiqmaydi):</span>
+        ${TG_FIELDS.map(([k, label]) => `<label class="check"><input type="checkbox" class="tg-field" data-k="${k}" ${tg.hide?.[k] ? '' : 'checked'}> ${esc(label)}</label>`).join('')}</div>
       <label class="check full"><input type="checkbox" id="tgShowQty" ${tg.showQty ? 'checked' : ''}> Ombordagi sonini ko'rsatish (aks holda faqat "bor / yo'q")</label>
       <label class="check full"><input type="checkbox" id="tgTopics" ${tg.useTopics ? 'checked' : ''}> Temali guruh: har bir kategoriya alohida temaga joylansin</label>
     </div>
@@ -4592,6 +4632,7 @@ function tgReadForm() {
     chatId,
     showQty: $('#tgShowQty').checked,
     useTopics: $('#tgTopics').checked,
+    hide: Object.fromEntries($$('.tg-field').filter((c) => !c.checked).map((c) => [c.dataset.k, true])),
   });
 }
 
