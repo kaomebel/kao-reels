@@ -768,3 +768,47 @@ input.phone { font-variant-numeric: tabular-nums; letter-spacing: .3px; }
 .addr-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px; margin-top: 10px; }
 .addr-grid label { display: flex; flex-direction: column; gap: 5px; font-size: 13px; color: var(--muted); }
 .addr-grid label.full { grid-column: 1 / -1; }
+
+/* ---- Mahsulot tanlash paneli ---- */
+.it-pick { min-width: 240px; }
+.it-path:empty { display: none; }
+.pick-panel {
+  position: fixed;
+  z-index: 100;
+  max-height: min(360px, 60vh);
+  overflow-y: auto;
+  background: var(--card);
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  box-shadow: 0 14px 40px rgba(40, 25, 15, .25);
+}
+.pick-row, .pick-back {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 12px;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  white-space: normal;
+}
+.pick-row:hover { background: var(--accent-soft); color: var(--text); }
+.pick-row > span:first-child { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.pick-sub { color: var(--muted); font-size: 12px; }
+.pick-code { color: var(--accent-dark); font-size: 12px; font-weight: 600; }
+.pick-price, .pick-count { color: var(--muted); font-size: 13px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.pick-group b { font-weight: 600; }
+.pick-back { justify-content: flex-start; background: var(--card-2); color: var(--accent-dark); font-weight: 600; font-size: 13px; position: sticky; top: 0; z-index: 1; }
+.pick-empty { padding: 14px; color: var(--muted); text-align: center; }
+
+/* ---- Qarzga sotuv ---- */
+.debt-block { padding: 12px 14px; border: 1.5px solid var(--danger); border-radius: 12px; background: var(--danger-soft); }
+.debt-title { display: flex; align-items: center; gap: 8px; color: var(--danger); font-size: 15px; margin-bottom: 10px; }
+.debt-block .form-grid label { color: var(--text); }
+.form-grid label.check-line { flex-direction: row; align-items: center; justify-content: flex-start; gap: 8px; color: var(--text); font-size: 14px; font-weight: 600; cursor: pointer; }
+.addr-block .check-line .ic { width: 18px; height: 18px; color: var(--accent); }

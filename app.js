@@ -1171,11 +1171,15 @@ function partyOptions(kind) {
   return [['', '— tanlang —'], ...list.map((c) => [c.id, c.name + (c.phone ? ` (${c.phone})` : '')])];
 }
 
+const productLabel = (p) => (p ? p.name + (p.code ? ' · ' + p.code : '') : '');
+const productPath = (p) => [p.category || 'Kategoriyasiz', p.type].filter(Boolean).join(' › ');
+
 function itemRowHtml(t, it = {}, cur = 'UZS') {
-  const opts = db.products.filter((p) => !p.archived || p.id === it.productId).map((p) =>
-    `<option value="${p.id}" ${p.id === it.productId ? 'selected' : ''}>${esc(p.name)}${p.code ? ' · ' + esc(p.code) : ''}</option>`).join('');
+  const p = product(it.productId);
   return `<tr>
-    <td><select class="it-product"><option value="">— mahsulot —</option>${opts}</select></td>
+    <td class="it-pick"><input type="hidden" class="it-product" value="${esc(p ? p.id : '')}">
+      <input class="it-search" autocomplete="off" placeholder="Artikul yoki nomi — yoki tanlang" value="${esc(productLabel(p))}">
+      <div class="it-path muted small">${p ? esc(productPath(p)) : ''}</div></td>
     <td class="it-avail muted num"></td>
     <td><input class="it-qty" type="number" min="1" step="1" value="${it.qty || 1}"></td>
     <td><span class="money-wrap"><input class="it-price money" data-cur="${cur}" inputmode="decimal" value="${esc(fmtIn(it.price ?? '', cur))}"><span class="cur">${CUR_SIGN[cur]}</span></span>
@@ -1252,6 +1256,19 @@ function docForm(type, d) {
     foot += moneyField(isOrder ? "Oldindan to'lov (zaklad)" : t.pay === 'in' ? "Hozir to'landi" : "Hozir to'ladik", 'payNow', d.payNow ?? '', 'UZS', 'placeholder="0"');
     foot += selectField("To'lov usuli", 'payMethod', Object.entries(PAY_METHODS), 'cash');
   }
+  if (type === 'sale') {
+    // Qarzga sotuv: to'langan summa jamidan kam bo'lsa — qolgan summa, qaytarish sanasi va mas'ul
+    const sellers = db.users.filter((u) => u.active !== false).map((u) => [u.name, u.name]);
+    const resp = d.debtResponsible || me?.name || '';
+    if (resp && !sellers.some(([v]) => v === resp)) sellers.unshift([resp, resp]);
+    foot += `<div class="field full debt-block" id="debtBlock" hidden>
+      <div class="debt-title">${icon('alert')} <span><b id="debtAmount"></b> qolyapti — qarzga yoziladi</span></div>
+      <div class="form-grid">
+        ${field('Qachon beradi *', 'debtDue', d.debtDue, 'type="date"')}
+        ${selectField("Mas'ul sotuvchi", 'debtResponsible', sellers, resp)}
+      </div>
+    </div>`;
+  }
   foot += textArea('Izoh', 'note', d.note);
   if (!d.id && t.tgAsk) foot += tgQuestion();
 
@@ -1282,7 +1299,7 @@ function docForm(type, d) {
     <button type="button" class="small" id="addItemRow">${icon('plus')}Qator qo'shish</button>
     </div>
     <div class="form-grid" style="margin-top:12px">${foot}</div>
-    <div class="total-line" id="totalLine" data-paid="${d.id ? docPaid(d) : 0}">Jami: <b id="docTotal">0</b><span id="docRest"></span></div>`;
+    <div class="total-line" id="totalLine" data-paid="${prevPaid(d)}">Jami: <b id="docTotal">0</b><span id="docRest"></span></div>`;
 }
 
 function bindPartyLookup(kind) {
@@ -1508,6 +1525,157 @@ function bindCustomerLookup() {
   status();
 }
 
+// ---------- Mahsulot tanlash ----------
+// Katakka bosilganda: kategoriya → tur → mahsulot. Yozilsa: artikul yoki nom bo'yicha qidiruv.
+const picker = { input: null, cat: null, type: null };
+
+function pickerPanel() {
+  let panel = $('#pickPanel');
+  if (!panel) {
+    $('#modal').insertAdjacentHTML('beforeend', '<div id="pickPanel" class="pick-panel" hidden></div>');
+    panel = $('#pickPanel');
+    panel.addEventListener('mousedown', (e) => e.preventDefault()); // katak fokusini yo'qotmasin
+    panel.addEventListener('click', (e) => {
+      const el = e.target.closest('[data-pick]');
+      if (!el) return;
+      const { pick, value } = el.dataset;
+      if (pick === 'cat') { picker.cat = value; picker.type = null; }
+      else if (pick === 'type') picker.type = value;
+      else if (pick === 'back') { if (picker.type !== null) picker.type = null; else picker.cat = null; }
+      else if (pick === 'product') return choosePickedProduct(product(value));
+      picker.input.value = '';
+      renderPicker();
+      picker.input.focus();
+    });
+  }
+  return panel;
+}
+
+const activeProducts = () => db.products.filter((p) => !p.archived);
+
+function searchProducts(q) {
+  const s = q.trim().toLowerCase();
+  if (!s) return [];
+  const words = s.split(/\s+/);
+  return activeProducts()
+    .map((p) => {
+      const code = (p.code || '').toLowerCase();
+      const hay = [p.name, p.code, p.category, p.type, p.color, p.size].join(' ').toLowerCase();
+      const score = code === s ? 0 : code.startsWith(s) ? 1 : words.every((w) => hay.includes(w)) ? 2 : 9;
+      return { p, score };
+    })
+    .filter((x) => x.score < 9)
+    .sort((a, b) => a.score - b.score || a.p.name.localeCompare(b.p.name))
+    .map((x) => x.p);
+}
+
+function productRow(p) {
+  return `<button type="button" class="pick-row" data-pick="product" data-value="${p.id}">
+    <span><b>${esc(p.name)}</b>${p.code ? ` <span class="pick-code">${esc(p.code)}</span>` : ''}<span class="pick-sub">${esc(productPath(p))}${p.size ? ' · ' + esc(p.size) : ''}</span></span>
+    <span class="pick-price">${priceLabel(p)}</span></button>`;
+}
+
+function renderPicker() {
+  const panel = pickerPanel();
+  const q = picker.input.value;
+  const chosen = product(picker.input.parentElement.querySelector('.it-product').value);
+  let html;
+  if (q.trim() && q !== productLabel(chosen)) {
+    const found = searchProducts(q);
+    html = found.length ? found.slice(0, 30).map(productRow).join('') : '<div class="pick-empty">Topilmadi — artikul yoki nomni tekshiring</div>';
+  } else {
+    const list = activeProducts();
+    const crumbs = [picker.cat, picker.type].filter((x) => x !== null && x !== undefined);
+    const head = crumbs.length ? `<button type="button" class="pick-back" data-pick="back">‹ ${esc(['Barcha kategoriyalar', ...crumbs].join(' › '))}</button>` : '';
+    const count = (arr, key) => arr.reduce((m, p) => { const k = key(p); m.set(k, (m.get(k) || 0) + 1); return m; }, new Map());
+    const group = (label, n, pick, value) => `<button type="button" class="pick-row pick-group" data-pick="${pick}" data-value="${esc(value)}">
+      <span><b>${esc(label)}</b></span><span class="pick-count">${n} ›</span></button>`;
+    if (picker.cat === null) {
+      const cats = count(list, (p) => p.category || '');
+      const order = [...db.categories.filter((c) => cats.has(c)), ...[...cats.keys()].filter((c) => !db.categories.includes(c))];
+      html = order.map((c) => group(c || 'Kategoriyasiz', cats.get(c), 'cat', c)).join('') || '<div class="pick-empty">Mahsulot yo\'q</div>';
+    } else {
+      const inCat = list.filter((p) => (p.category || '') === picker.cat);
+      if (picker.type === null) {
+        const types = count(inCat, (p) => p.type || '');
+        const known = db.categoryTypes[picker.cat] || [];
+        const order = [...known.filter((x) => types.has(x)), ...[...types.keys()].filter((x) => x && !known.includes(x))];
+        html = head + order.map((x) => group(x, types.get(x), 'type', x)).join('')
+          + inCat.filter((p) => !p.type).map(productRow).join('');
+      } else {
+        html = head + inCat.filter((p) => (p.type || '') === picker.type).map(productRow).join('');
+      }
+    }
+  }
+  panel.innerHTML = html;
+  const r = picker.input.getBoundingClientRect();
+  const width = Math.max(r.width, Math.min(420, window.innerWidth - 24));
+  panel.style.left = Math.max(12, Math.min(r.left, window.innerWidth - width - 12)) + 'px';
+  panel.style.width = width + 'px';
+  const below = window.innerHeight - r.bottom;
+  if (below < 260 && r.top > below) { panel.style.top = ''; panel.style.bottom = (window.innerHeight - r.top + 4) + 'px'; }
+  else { panel.style.bottom = ''; panel.style.top = (r.bottom + 4) + 'px'; }
+  panel.hidden = false;
+}
+
+function choosePickedProduct(p) {
+  if (!p) return;
+  const td = picker.input.parentElement;
+  const hidden = td.querySelector('.it-product');
+  hidden.value = p.id;
+  picker.input.value = productLabel(p);
+  td.querySelector('.it-path').textContent = productPath(p);
+  closePicker();
+  hidden.dispatchEvent(new Event('change', { bubbles: true }));
+  td.closest('tr').querySelector('.it-qty')?.focus();
+}
+
+function closePicker() {
+  const panel = $('#pickPanel');
+  if (panel) panel.hidden = true;
+}
+
+document.addEventListener('focusin', (e) => {
+  if (!e.target.classList?.contains('it-search')) return;
+  picker.input = e.target;
+  picker.cat = null;
+  picker.type = null;
+  const p = product(e.target.parentElement.querySelector('.it-product').value);
+  if (p) { picker.cat = p.category || ''; picker.type = p.type || null; }
+  e.target.select();
+  renderPicker();
+});
+document.addEventListener('input', (e) => {
+  if (e.target.classList?.contains('it-search')) renderPicker();
+});
+document.addEventListener('keydown', (e) => {
+  if (!e.target.classList?.contains('it-search')) return;
+  // Esc faqat ro'yxatni yopsin — butun oynani (va kiritilganlarni) emas
+  if (e.key === 'Escape') { e.preventDefault(); closePicker(); return; }
+  if (e.key !== 'Enter') return;
+  e.preventDefault();
+  const found = searchProducts(e.target.value);
+  const exact = found.find((p) => (p.code || '').toLowerCase() === e.target.value.trim().toLowerCase());
+  if (exact || found.length === 1) choosePickedProduct(exact || found[0]);
+});
+document.addEventListener('focusout', (e) => {
+  if (!e.target.classList?.contains('it-search')) return;
+  setTimeout(() => {
+    if (document.activeElement !== e.target) {
+      closePicker();
+      // Tanlanmagan matn qolsa — avvalgi tanlovni qaytaramiz
+      const p = product(e.target.parentElement.querySelector('.it-product').value);
+      e.target.value = productLabel(p);
+    }
+  }, 150);
+});
+$('#modalBody').addEventListener('scroll', closePicker);
+$('#modal').addEventListener('close', closePicker);
+$('#modal').addEventListener('cancel', (e) => {
+  const panel = $('#pickPanel');
+  if (panel && !panel.hidden) { e.preventDefault(); closePicker(); }
+});
+
 function bindDocForm(type, editingId) {
   const t = DOC_TYPES[type];
   bindAddressBlock();
@@ -1551,15 +1719,28 @@ function bindDocForm(type, editingId) {
     $('#docTotal').innerHTML = curOf() === 'USD'
       ? `${fmtUsd(total)} <span class="muted">≈ ${money(total * rateOf())}</span>`
       : money(total);
+    // Sotuvda "Hozir to'landi" jami summa bilan o'zi to'lib turadi (kassir o'zgartirmaguncha)
+    const payNowEl = $('#modalBody [name=payNow]');
+    if (type === 'sale' && payNowEl && !payTouched) {
+      payNowEl.value = Math.max(0, total - num($('#totalLine').dataset.paid)) || '';
+      formatMoneyInput(payNowEl);
+    }
     // Mijoz to'lovi: oldin to'langan + hozir (zaklad) → qolgan summa
     if (t.pay === 'in' && curOf() === 'UZS') {
       const paid = num($('#totalLine').dataset.paid) + num($('#modalBody [name=payNow]')?.value);
       $('#docRest').innerHTML = paid || type === 'order'
         ? ` <span class="rest">· ${type === 'order' ? 'Zaklad' : "To'langan"}: <b>${money(paid)}</b> · Qolgan to'lov: <b class="${total - paid > 0 ? 'debt' : 'ok'}">${money(Math.max(0, total - paid))}</b></span>`
         : '';
+      const debtBlock = $('#debtBlock');
+      if (debtBlock) {
+        const rest = Math.max(0, total - paid);
+        debtBlock.hidden = rest <= 0;
+        $('#debtAmount').textContent = money(rest);
+      }
     }
   };
   const isCustom = () => orderKindOf() === 'custom';
+  let payTouched = !!editingId || num($('#modalBody [name=payNow]')?.value) > 0;
 
   body.addEventListener('change', (e) => {
     if (e.target.classList.contains('it-product')) {
@@ -1573,7 +1754,11 @@ function bindDocForm(type, editingId) {
   body.addEventListener('click', (e) => {
     if (!e.target.classList.contains('it-remove')) return;
     if ($$('tr', body).length > 1) e.target.closest('tr').remove();
-    else $('.it-product', e.target.closest('tr')).value = '';
+    else {
+      $('.it-product', e.target.closest('tr')).value = '';
+      $('.it-search', e.target.closest('tr')).value = '';
+      $('.it-path', e.target.closest('tr')).textContent = '';
+    }
     recalc();
   });
   $('#addItemRow').addEventListener('click', () => body.insertAdjacentHTML('beforeend', itemRowHtml(t, {}, curOf())));
@@ -1597,7 +1782,7 @@ function bindDocForm(type, editingId) {
     recalc();
   }));
   $('#customBlock')?.addEventListener('input', recalc);
-  $('#modalBody [name=payNow]')?.addEventListener('input', recalc);
+  $('#modalBody [name=payNow]')?.addEventListener('input', () => { payTouched = true; recalc(); });
   // "Xarid qildi" ↔ "Buyurtma berdi": kiritilganlarni saqlab, oynani boshqa turga o'tkazamiz
   $$('#modalBody [name=saleMode]').forEach((r) => r.addEventListener('change', () => {
     const f = Object.fromEntries(new FormData($('#modalForm')).entries());
@@ -1619,6 +1804,13 @@ function bindDocForm(type, editingId) {
   if (discount) discount.addEventListener('input', recalc);
   recalc();
   return stock;
+}
+
+// Hujjat bo'yicha avval to'langan summa (buyurtmadan sotuvda — buyurtmaga berilgan zaklad)
+function prevPaid(d) {
+  if (d.id) return docPaid(d);
+  const order = d.orderId && doc(d.orderId);
+  return order ? docPaid(order) : 0;
 }
 
 // Buyurtma turi: tanlangan radio yoki (individual buyurtmadan sotuvda) yashirin maydon
@@ -1699,6 +1891,24 @@ async function saveDoc(type, existing, preset, data, stock) {
     return false;
   }
   if (!existing && t.tgAsk && !tgAnswered(data)) return false;
+  // Qarzga sotuv: qolgan summa bo'lsa — qaytarish sanasi va aniq mijoz kerak
+  let debtRest = 0;
+  if (type === 'sale') {
+    const total = Math.max(0, items.reduce((sum, it) => sum + it.qty * it.price, 0) - num(data.discount));
+    debtRest = total - prevPaid(existing || preset) - num(data.payNow);
+    if (debtRest > 0) {
+      if (!data.debtDue) {
+        alert(`${money(debtRest)} qarz qolyapti. Mijoz qachon berishini kiriting.`);
+        $('#modalBody [name=debtDue]')?.focus();
+        return false;
+      }
+      if (!(data.partyName || '').trim() && !data.counterpartyId) {
+        alert("Qarzga sotish uchun mijoz ismi va telefon raqamini kiriting.");
+        $('#partyPhone')?.focus();
+        return false;
+      }
+    }
+  }
   if (type === 'order' && !data.deliveryDate) {
     alert('Buyurtmani bajarish muddatini kiriting.');
     $('#modalBody [name=deliveryDate]')?.focus();
@@ -1790,6 +2000,8 @@ async function saveDoc(type, existing, preset, data, stock) {
     items,
     currency: t.fx ? currency : undefined,
     rate: currency === 'USD' ? num(data.rate) : undefined,
+    debtDue: type === 'sale' && debtRest > 0 ? data.debtDue : undefined,
+    debtResponsible: type === 'sale' && debtRest > 0 ? data.debtResponsible : undefined,
     orderKind: type === 'order' || data.orderKind === 'custom' ? (data.orderKind === 'custom' ? 'custom' : 'standard') : d.orderKind,
     responsible: type === 'order' ? (data.responsible || '').trim() : d.responsible,
   });
@@ -2045,7 +2257,7 @@ function newPayment(dir, preset = {}) {
     body: `${linked ? `<p>Hujjat: <b>${esc(DOC_TYPES[linked.type].one)} ${esc(linked.no)}</b> · Jami ${money(docTotal(linked))} · To'langan ${money(docPaid(linked))}</p>` : ''}
       <div class="form-grid">
         ${field('Sana', 'date', today(), 'type="date" required')}
-        ${field("Summa (so'm) *", 'amount', rest || '', 'inputmode="numeric" required')}
+        ${moneyField('Summa *', 'amount', rest || '', 'UZS', 'required')}
         ${selectField("To'lov usuli", 'method', Object.entries(PAY_METHODS), 'cash')}
         ${selectField('Moddasi', 'purpose', purposes.map((p) => [p, p]), purpose)}
         ${selectField('Kontragent', 'counterpartyId', [['', "— yo'q (xarajat) —"], ...partyOptions().slice(1)], preset.counterpartyId || '', 'full')}
@@ -2321,6 +2533,15 @@ function viewDashboard() {
         ${low.length ? low.map((p) => `<tr class="click" data-act="editProduct" data-id="${p.id}"><td>${esc(p.name)}</td><td class="num debt">${qtyIn(ctx.stock, p.id) - qtyIn(ctx.reserve, p.id)}</td><td class="num">${p.minQty}</td></tr>`).join('') : emptyRow(3, 'Hammasi yetarli')}
       </tbody></table></div>
     </div>
+    ${(() => {
+      // Sotuvchi faqat o'zi mas'ul bo'lgan qarzlarni ko'radi
+      const mine = saleDebts().filter(({ d }) => isAdmin() || d.debtResponsible === me.name || (!d.debtResponsible && d.userId === me.id));
+      if (!mine.length) return '';
+      const late = mine.filter(({ d }) => d.debtDue && d.debtDue < today());
+      return `<div class="card"><h3>${icon('alert')}Qarz muddatlari — ${mine.length} ta, ${money(mine.reduce((s, x) => s + x.rest, 0))}${late.length ? ` <span class="badge cancel">${late.length} tasi muddati o'tgan</span>` : ''}</h3>
+        <div class="table-wrap"><table><thead><tr><th>Mijoz</th><th>Sotuv</th><th class="num">Qarz</th><th>Qachon beradi</th><th>Mas'ul</th><th></th></tr></thead>
+        <tbody>${debtRows(mine.slice(0, 8))}</tbody></table></div></div>`;
+    })()}
     <div class="card"><h3>${icon('clock')}Oxirgi hujjatlar</h3><table><thead><tr><th>Sana</th><th>Hujjat</th><th>Kontragent</th><th class="num">Summa</th></tr></thead><tbody>
       ${recent.length ? recent.map((d) => `<tr class="click" data-act="openDoc" data-id="${d.id}"><td>${fmtDate(d.date)}</td><td>${esc(DOC_TYPES[d.type].one)} ${esc(d.no)}</td>
         <td>${esc(party(d.counterpartyId)?.name || warehouse(d.warehouseId)?.name)}</td><td class="num">${d.type === 'inventory' ? '' : money(docTotal(d))}</td></tr>`).join('') : emptyRow(4, "Hali hujjat yo'q. Boshlash uchun mahsulot qo'shing.")}
@@ -2499,13 +2720,41 @@ function viewParties() {
     <p class="muted small">Balans: qizil — kontragent bizga qarzdor, sariq — biz qarzdormiz.</p></div>`;
 }
 
+// Qarzga qilingan sotuvlar: qolgan summa, qaytarish sanasi va mas'ul
+function saleDebts() {
+  return db.docs.filter((d) => d.type === 'sale')
+    .map((d) => ({ d, rest: docTotal(d) - docPaid(d) }))
+    .filter((x) => x.rest > 0.5)
+    .sort((a, b) => (a.d.debtDue || '9999').localeCompare(b.d.debtDue || '9999'));
+}
+
+function debtRows(list, withPay = true) {
+  const t = today();
+  return list.map(({ d, rest }) => {
+    const c = party(d.counterpartyId) || {};
+    const late = d.debtDue && d.debtDue < t;
+    return `<tr class="click" data-act="openDoc" data-id="${d.id}">
+      <td><b>${esc(c.name)}</b><div class="muted small dt">${esc(c.phone || '')}</div></td>
+      <td>${esc(d.no)}<div class="muted small">${fmtDate(d.date)}</div></td>
+      <td class="num debt">${money(rest)}</td>
+      <td class="${late ? 'debt' : ''}">${d.debtDue ? fmtDate(d.debtDue) + (late ? '<div class="small">muddati o\'tgan</div>' : '') : '<span class="muted">—</span>'}</td>
+      <td>${esc(d.debtResponsible || userName(d.userId))}</td>
+      ${withPay ? `<td class="actions"><button class="small" data-act="debtPay" data-id="${d.id}">${icon('arrowIn')}To'lov</button></td>` : ''}
+    </tr>`;
+  }).join('');
+}
+
 function viewDebts() {
   const rows = db.counterparties.map((c) => ({ c, b: partyBalance(c.id) })).filter((x) => x.b);
   const recv = rows.filter((x) => x.b > 0).sort((a, b) => b.b - a.b);
   const pay = rows.filter((x) => x.b < 0).sort((a, b) => a.b - b.b);
   const table = (list, cls) => list.length ? list.map(({ c, b }) => `<tr class="click" data-act="statement" data-id="${c.id}"><td>${esc(c.name)}</td><td>${esc(c.phone)}</td><td class="num ${cls}">${money(Math.abs(b))}</td></tr>`).join('') : emptyRow(3, "Qarz yo'q");
   const sum = (list) => list.reduce((s, x) => s + Math.abs(x.b), 0);
-  return `<div class="grid2">
+  const sales = saleDebts();
+  return `<div class="card"><h3>${icon('clock')}Qarzga sotuvlar — qaytarish muddati bilan</h3>
+      <div class="table-wrap"><table><thead><tr><th>Mijoz</th><th>Sotuv</th><th class="num">Qarz</th><th>Qachon beradi</th><th>Mas'ul</th><th></th></tr></thead>
+      <tbody>${debtRows(sales) || emptyRow(6, "Qarzga sotuv yo'q")}</tbody></table></div></div>
+    <div class="grid2">
     <div class="card"><h3>Bizga qarzdorlar — ${money(sum(recv))}</h3><table><thead><tr><th>Kontragent</th><th>Telefon</th><th class="num">Qarz</th></tr></thead><tbody>${table(recv, 'debt')}</tbody></table></div>
     <div class="card"><h3>Bizning qarzlarimiz — ${money(sum(pay))}</h3><table><thead><tr><th>Kontragent</th><th>Telefon</th><th class="num">Qarz</th></tr></thead><tbody>${table(pay, 'warn')}</tbody></table></div>
   </div>`;
@@ -3333,6 +3582,7 @@ const ACTIONS = {
   serverSettings: () => openServerSettings(),
   rateRefresh: () => refreshRate(true),
   contract: (ds) => printContract(ds.id),
+  debtPay: (ds) => { const d = doc(ds.id); newPayment('in', { counterpartyId: d.counterpartyId, docId: d.id }); },
   installApp: async () => {
     if (!installPrompt) return;
     installPrompt.prompt();
