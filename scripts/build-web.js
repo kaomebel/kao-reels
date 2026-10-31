@@ -21,4 +21,15 @@ const swPath = path.join(out, 'sw.js');
 fs.writeFileSync(swPath, fs.readFileSync(swPath, 'utf8')
   .replace("const CACHE = 'biznes-tizim-dev';", `const CACHE = 'biznes-tizim-${version}';`)
   .replace("'./app.js',", "'./app.js', './version.js',"));
+// Windows ilovasi saytdan yangi versiyani yuklab olishi uchun fayllar ro'yxati
+const list = [];
+(function walk(dir) {
+  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, e.name);
+    if (e.isDirectory()) walk(full);
+    else list.push(path.relative(out, full).split(path.sep).join('/'));
+  }
+})(out);
+list.push('files.json');
+fs.writeFileSync(path.join(out, 'files.json'), JSON.stringify(list.sort()));
 console.log('www/ tayyor, versiya', version);

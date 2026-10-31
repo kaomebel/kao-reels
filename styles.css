@@ -812,3 +812,8 @@ input.phone { font-variant-numeric: tabular-nums; letter-spacing: .3px; }
 .debt-block .form-grid label { color: var(--text); }
 .form-grid label.check-line { flex-direction: row; align-items: center; justify-content: flex-start; gap: 8px; color: var(--text); font-size: 14px; font-weight: 600; cursor: pointer; }
 .addr-block .check-line .ic { width: 18px; height: 18px; color: var(--accent); }
+
+.update-banner { background: var(--accent-soft, var(--warn-soft)); }
+.update-banner a { color: inherit; font-weight: 600; }
+.update-banner button { margin-left: 8px; }
+.ver-foot { padding: 18px 24px 28px; color: var(--muted); font-size: 12px; text-align: center; }

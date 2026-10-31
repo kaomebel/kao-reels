@@ -66,6 +66,8 @@ Har push'da GitHub Actions ikkita ilovani yig'adi: repo → **Actions** → *Ilo
 - **Biznes-Tizim-Android** — `Biznes-Tizim.apk`. Telefonga yuboring (Telegram orqali ham bo'ladi), ochib o'rnating. Telefon "noma'lum manbadan o'rnatish"ga ruxsat so'raydi — ruxsat bering.
 - **iPhone/iPad** — App Store'ga chiqarish uchun Apple Developer hisobi kerak (yiliga 99 $). Shungacha iPhone'da veb-versiyani Safari orqali o'rnatish mumkin (pastda).
 
+**Yangilanish:** sayt va brauzer orqali o'rnatilgan ilova (PWA) o'zi yangilanadi. Windows ilovasi har ochilganda saytdan yangi versiyani o'zi yuklab oladi (ma'lumotlar joyida qoladi). Android `.apk` o'z ichidagi fayllardan ochiladi va yangilanmaydi — telefonda saytni Chrome'da ochib «Ilovani o'rnatish» qilish tavsiya etiladi; eski nusxada «Yangi versiya chiqdi» ogohlantirishi chiqadi. Joriy versiya har sahifaning pastida yozilgan.
+
 Birinchi ochilganda har bir ilovada *Serverga ulanish* orqali Supabase URL va kalitini kiritasiz (yoki ular `config.js` ga yozilgan bo'lsa, so'ralmaydi).
 
 Telefon ilovasida zaxira faylini yuklab olish va chek chop etish ishlamaydi — buni Windows ilovasi yoki brauzerdan bajaring.

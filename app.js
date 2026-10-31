@@ -3714,6 +3714,36 @@ if ('serviceWorker' in navigator && location.protocol.startsWith('http') && !win
 }
 $('#modal').addEventListener('close', () => { if (reloadPending) location.reload(); });
 
+// Versiya har sahifa pastida ko'rinadi — qaysi nusxa ochilganini bilish oson bo'lsin
+$('#verFoot').textContent = `Biznes Tizim · versiya ${APP_VERSION}`;
+
+// Saytdagi versiya bilan solishtiramiz: eski nusxa ochilgan bo'lsa ogohlantiramiz.
+// Brauzer/o'rnatilgan sayt o'zi yangilanadi; Android ilovasi esa o'z ichidagi fayllardan ochiladi.
+async function compareWithSite() {
+  const site = hostedUrl() || window.BT_CONFIG?.siteUrl;
+  if (!site || APP_VERSION === 'dev' || !navigator.onLine) return;
+  let remote = '';
+  try {
+    const res = await fetch(new URL(`version.js?t=${Date.now()}`, site), { cache: 'no-store' });
+    remote = /"([^"]+)"/.exec(await res.text())?.[1] || '';
+  } catch (e) { return; }
+  if (!remote || remote <= APP_VERSION) return;
+  if (hostedUrl()) {
+    // Bir marta o'zi yangilab ko'ramiz (takror aylanib qolmasligi uchun shu versiyaga bir marta)
+    let tried = '';
+    try { tried = sessionStorage.getItem('bt-update-tried'); sessionStorage.setItem('bt-update-tried', remote); } catch (e) { /* */ }
+    if (tried !== remote) { await checkForUpdate(); reloadForUpdate(); return; }
+  }
+  const b = $('#updateBanner');
+  b.innerHTML = window.Capacitor
+    ? `Yangi versiya chiqdi (${esc(remote)}). Bu Android ilovasi o'zi yangilanmaydi — <a href="${esc(site)}" target="_blank" rel="noopener">saytni Chrome'da oching</a> va «Ilovani o'rnatish» ni bosing: u har doim o'zi yangilanadi.`
+    : `Yangi versiya chiqdi (${esc(remote)}). <button type="button" class="small" data-act="reloadApp">Yangilash</button>`;
+  b.hidden = false;
+}
+ACTIONS.reloadApp = async () => { await checkForUpdate(); location.reload(); };
+setTimeout(compareWithSite, 4000);
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') compareWithSite(); });
+
 // Ekranni pastga tortib yangilash (o'rnatilgan ilovada brauzerning o'z "tortish"i yo'q)
 (function pullToRefresh() {
   const el = $('#ptr');
