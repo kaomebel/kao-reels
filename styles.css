@@ -216,8 +216,13 @@ h1, h2, h3, h4 { text-wrap: balance; }
   gap: 4px;
   padding: 10px 24px 0;
   overflow-x: auto;
+  /* faqat yonga suriladi — tepa-pastga emas */
+  overflow-y: hidden;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
   border-bottom: 1px solid var(--border);
 }
+.subnav::-webkit-scrollbar, #sections::-webkit-scrollbar { display: none; }
 .subnav a {
   padding: 8px 12px 10px;
   color: var(--muted);
@@ -914,3 +919,7 @@ input::-webkit-date-and-time-value { text-align: left; }
 }
 .money-wrap input.disc-k { padding-right: 84px; }
 .disc-hint:empty { display: none; }
+
+@media (max-width: 900px) {
+  #sections { overflow-y: hidden; overscroll-behavior: contain; }
+}
