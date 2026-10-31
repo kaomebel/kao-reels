@@ -54,6 +54,23 @@ const DEFAULT_CATEGORY_TYPES = {
 
 const DEFAULT_COLORS = ['Dub beliy', 'Belaya korona', 'Oq gladkiy', 'Dub votan', 'Dub sonoma', 'Dub kraft', "Yong'oq", 'Venge', 'Kulrang', 'Antratsit', 'Qora', 'Bej', 'Kapuchino', 'Oltin'];
 
+// Yetkazish manzillari: viloyat → shahar/tuman → mahalla/joy. Asosiy savdo hududi — Farg'ona
+// viloyati va Farg'ona shahri — ro'yxatda doim birinchi turadi va oldindan tanlangan bo'ladi.
+const P = (name, spots = []) => ({ name, spots });
+const DEFAULT_REGIONS = [
+  { name: "Farg'ona viloyati", places: [P("Farg'ona shahri", ['Joydam']), P("Marg'ilon shahri", ['Yovqachar']), P("Qo'qon shahri"), P('Quvasoy shahri'),
+    P('Quva tumani', ['Akbarobod']), P('Oltiariq tumani'), P("Bag'dod tumani"), P('Beshariq tumani'), P('Buvayda tumani'), P("Dang'ara tumani"),
+    P("Farg'ona tumani"), P('Furqat tumani'), P("Qo'shtepa tumani"), P('Rishton tumani'), P("So'x tumani"), P('Toshloq tumani'),
+    P("Uchko'prik tumani"), P("O'zbekiston tumani"), P('Yozyovon tumani')] },
+  { name: 'Andijon viloyati', places: [P('Andijon shahri'), P('Xonobod shahri'), P('Asaka tumani', ['Shahar markazi']), P('Andijon tumani'),
+    P('Baliqchi tumani'), P("Bo'ston tumani"), P('Buloqboshi tumani'), P('Izboskan tumani'), P('Jalaquduq tumani'), P("Xo'jaobod tumani"),
+    P("Qo'rg'ontepa tumani"), P('Marhamat tumani'), P("Oltinko'l tumani"), P('Paxtaobod tumani'), P('Shahrixon tumani'), P("Ulug'nor tumani")] },
+  { name: 'Namangan viloyati', places: [P('Namangan shahri'), P('Chortoq tumani'), P('Chust tumani'), P('Kosonsoy tumani'), P('Mingbuloq tumani'),
+    P('Namangan tumani'), P('Norin tumani'), P('Pop tumani'), P("To'raqo'rg'on tumani"), P("Uchqo'rg'on tumani"), P('Uychi tumani'), P("Yangiqo'rg'on tumani")] },
+  ...['Toshkent shahri', 'Toshkent viloyati', 'Samarqand viloyati', 'Buxoro viloyati', 'Navoiy viloyati', 'Qashqadaryo viloyati',
+    'Surxondaryo viloyati', 'Jizzax viloyati', 'Sirdaryo viloyati', 'Xorazm viloyati', "Qoraqalpog'iston Respublikasi"].map((name) => ({ name, places: [] })),
+];
+
 // Mijoz turlari (Sozlamalarda o'zgartiriladi)
 const DEFAULT_CUSTOMER_TYPES = ['Chakana xaridor', 'Mebelchi', 'Domchi', "Do'konchi", 'Optomchi', "Uy to'ldiruvchi"];
 
@@ -73,6 +90,7 @@ function emptyDb() {
     materials: DEFAULT_MATERIALS.slice(),
     colors: DEFAULT_COLORS.slice(),
     customerTypes: DEFAULT_CUSTOMER_TYPES.slice(),
+    regions: JSON.parse(JSON.stringify(DEFAULT_REGIONS)),
     currency: { rate: 0, date: '', source: '', updatedAt: '', manual: false },
     company: { name: 'KAO Mebel', phone: '', address: '' },
     telegram: { token: '', chatId: '', onReceipt: true, onNewProduct: true, showQty: true, log: [] },
@@ -1223,10 +1241,9 @@ function docForm(type, d) {
       <label><input type="radio" name="orderKind" value="standard" ${custom ? '' : 'checked'}><span>Standart — mavjud tovarlardan</span></label>
       <label><input type="radio" name="orderKind" value="custom" ${custom ? 'checked' : ''}><span>Nostandart — individual buyurtma</span></label>
     </div></div>`;
-    head += field('Yetkazish manzili', 'address', d.address, '', 'wide2');
+    head += addressBlock(d, true, false);
   } else if (t.delivery) {
-    head += field('Yetkazish sanasi', 'deliveryDate', d.deliveryDate, 'type="date"');
-    head += field('Yetkazish manzili', 'address', d.address, '', 'wide2');
+    head += addressBlock(d, !!(d.address || d.addr), true);
   }
 
   let foot = '';
@@ -1337,6 +1354,88 @@ function readCustomerType(d) {
   return v || '';
 }
 
+// ---------- Yetkazish manzili ----------
+const regionOf = (name) => db.regions.find((r) => r.name === name);
+const placeOf = (region, name) => regionOf(region)?.places.find((p) => p.name === name);
+const optList = (names, value, newLabel) => [...names.map((n) => [n, n]), ['__new', newLabel]]
+  .map(([v, x]) => `<option value="${esc(v)}" ${v === value ? 'selected' : ''}>${esc(x)}</option>`).join('');
+
+// withDate — sotuvda yetkazish sanasi ham shu blok ichida (buyurtmada u "Bajarish muddati")
+function addressBlock(d, enabled, withDate) {
+  const a = d.addr || {};
+  const region = a.region || db.regions[0]?.name || '';
+  const place = a.place || regionOf(region)?.places[0]?.name || '';
+  return `<div class="field full addr-block" id="addrBlock">
+    ${withDate ? `<label class="check-line"><input type="checkbox" name="needDelivery" id="needDelivery" ${enabled ? 'checked' : ''}> ${icon('truck')} Yetkazib beriladi</label>` : `<input type="hidden" name="needDelivery" value="on"><span class="field-label">${icon('truck')} Yetkazish manzili</span>`}
+    <div class="addr-grid" id="addrGrid" ${enabled ? '' : 'hidden'}>
+      <label>Viloyat<select name="aRegion" id="aRegion">${optList(db.regions.map((r) => r.name), region, '+ Yangi viloyat...')}</select>
+        <input name="aRegionNew" class="addr-new" placeholder="Viloyat nomi" hidden></label>
+      <label>Shahar / tuman<select name="aPlace" id="aPlace">${optList((regionOf(region)?.places || []).map((x) => x.name), place, '+ Yangi shahar/tuman...')}</select>
+        <input name="aPlaceNew" class="addr-new" placeholder="Shahar yoki tuman nomi" hidden></label>
+      <label>Mahalla / joy<input name="aSpot" id="aSpot" list="aSpotList" autocomplete="off" placeholder="Masalan: Joydam" value="${esc(a.spot || '')}">
+        <datalist id="aSpotList">${(placeOf(region, place)?.spots || []).map((x) => `<option value="${esc(x)}">`).join('')}</datalist></label>
+      ${withDate ? field('Yetkazish sanasi', 'deliveryDate', d.deliveryDate, 'type="date"') : ''}
+      ${field("Aniq manzil: ko'cha, uy, mo'ljal", 'aDetail', a.detail ?? (d.addr ? '' : d.address || ''), 'placeholder="Mustaqillik ko\'chasi 12, maktab yonida"', 'full')}
+    </div>
+  </div>`;
+}
+
+function bindAddressBlock() {
+  const region = $('#aRegion');
+  if (!region) return;
+  const place = $('#aPlace');
+  const spots = () => {
+    $('#aSpotList').innerHTML = (placeOf(region.value, place.value)?.spots || []).map((x) => `<option value="${esc(x)}">`).join('');
+  };
+  const toggleNew = (sel) => {
+    const input = sel.parentElement.querySelector('.addr-new');
+    input.hidden = sel.value !== '__new';
+    if (!input.hidden) input.focus();
+  };
+  region.addEventListener('change', () => {
+    toggleNew(region);
+    place.innerHTML = optList((regionOf(region.value)?.places || []).map((x) => x.name), regionOf(region.value)?.places[0]?.name, '+ Yangi shahar/tuman...');
+    toggleNew(place);
+    spots();
+  });
+  place.addEventListener('change', () => { toggleNew(place); spots(); });
+  $('#needDelivery')?.addEventListener('change', (e) => { $('#addrGrid').hidden = !e.target.checked; });
+}
+
+// Mijoz tanlanganda uning saqlangan manzili blokka qo'yiladi
+function fillAddress(addr) {
+  if (!addr || !$('#aRegion')) return;
+  const region = $('#aRegion');
+  if (![...region.options].some((o) => o.value === addr.region)) region.insertAdjacentHTML('afterbegin', `<option>${esc(addr.region)}</option>`);
+  region.value = addr.region;
+  region.dispatchEvent(new Event('change'));
+  const place = $('#aPlace');
+  if (addr.place && ![...place.options].some((o) => o.value === addr.place)) place.insertAdjacentHTML('afterbegin', `<option>${esc(addr.place)}</option>`);
+  place.value = addr.place || place.value;
+  place.dispatchEvent(new Event('change'));
+  $('#modalBody [name=aSpot]').value = addr.spot || '';
+  $('#modalBody [name=aDetail]').value = addr.detail || '';
+}
+
+// Formadagi manzilni o'qiydi; yangi viloyat/tuman/mahallani ro'yxatga qo'shadi
+function readAddress(data) {
+  if (!data.aRegion || !data.needDelivery) return null;
+  const region = (data.aRegion === '__new' ? data.aRegionNew : data.aRegion || '').trim();
+  const placeName = (data.aPlace === '__new' ? data.aPlaceNew : data.aPlace || '').trim();
+  const spot = (data.aSpot || '').trim();
+  const detail = (data.aDetail || '').trim();
+  if (!region) return null;
+  let r = regionOf(region);
+  if (!r) { r = { name: region, places: [] }; db.regions.push(r); }
+  if (placeName) {
+    let pl = r.places.find((x) => x.name === placeName);
+    if (!pl) { pl = { name: placeName, spots: [] }; r.places.push(pl); }
+    if (spot && !pl.spots.includes(spot)) pl.spots.push(spot);
+  }
+  const addr = { region, place: placeName, spot, detail };
+  return { addr, text: [region, placeName, spot, detail].filter(Boolean).join(', ') };
+}
+
 function bindCustomerLookup() {
   const phone = $('#partyPhone');
   const name = $('#partyName');
@@ -1363,6 +1462,7 @@ function bindCustomerLookup() {
       if (![...typeSel.options].some((o) => o.value === c.ctype)) typeSel.insertAdjacentHTML('afterbegin', `<option>${esc(c.ctype)}</option>`);
       typeSel.value = c.ctype;
     }
+    if (c.addr) fillAddress(c.addr);
     box.hidden = true;
     status();
   };
@@ -1410,6 +1510,7 @@ function bindCustomerLookup() {
 
 function bindDocForm(type, editingId) {
   const t = DOC_TYPES[type];
+  bindAddressBlock();
   if (t.party === 'customer') bindCustomerLookup();
   else if (t.party) bindPartyLookup(t.party);
   const stock = computeStock(editingId);
@@ -1505,7 +1606,7 @@ function bindDocForm(type, editingId) {
       date: f.date,
       counterpartyId: f.counterpartyId || (f.partyName ? '' : 'retail'),
       warehouseId: f.warehouseId,
-      address: f.address,
+      addr: f.needDelivery && f.aRegion && f.aRegion !== '__new' ? { region: f.aRegion, place: f.aPlace !== '__new' ? f.aPlace : '', spot: f.aSpot, detail: f.aDetail } : undefined,
       deliveryDate: f.deliveryDate,
       discount: num(f.discount),
       payNow: num(f.payNow) || '',
@@ -1622,6 +1723,7 @@ async function saveDoc(type, existing, preset, data, stock) {
     return false;
   }
 
+  const delivery = t.delivery ? readAddress(data) : null;
   let counterpartyId = data.counterpartyId && data.counterpartyId !== '__new' ? data.counterpartyId : null;
   if (t.party === 'customer') {
     const digits = fieldPhoneDigits(data.partyPhone);
@@ -1633,8 +1735,10 @@ async function saveDoc(type, existing, preset, data, stock) {
     if (c && c.id !== 'retail') {
       if (phone && !c.phone) c.phone = phone;
       if (ctype && c.ctype !== ctype) c.ctype = ctype;
+      // Mijozning manzili yangilanadi — keyingi safar o'zi to'ladi
+      if (delivery) Object.assign(c, { addr: delivery.addr, address: delivery.text });
     } else if (name) {
-      c = { id: uid(), name, kind: 'customer', ctype, phone, address: data.address?.trim() || '', inn: '', note: '', created: today() };
+      c = { id: uid(), name, kind: 'customer', ctype, phone, address: delivery?.text || '', addr: delivery?.addr, inn: '', note: '', created: today() };
       db.counterparties.push(c);
     } else if (digits) {
       alert('Mijoz ismini kiriting.');
@@ -1678,8 +1782,9 @@ async function saveDoc(type, existing, preset, data, stock) {
     warehouseId: data.warehouseId,
     toWarehouseId: t.move ? data.toWarehouseId : undefined,
     status: t.statuses ? data.status : undefined,
-    deliveryDate: t.delivery ? data.deliveryDate : undefined,
-    address: t.delivery ? data.address.trim() : undefined,
+    deliveryDate: t.delivery && (delivery || type === 'order') ? data.deliveryDate : undefined,
+    address: t.delivery ? delivery?.text || '' : undefined,
+    addr: t.delivery ? delivery?.addr : undefined,
     discount: num(data.discount),
     note: data.note.trim(),
     items,
@@ -1715,6 +1820,7 @@ function createFrom(id) {
     counterpartyId: base.counterpartyId,
     warehouseId: base.warehouseId,
     address: base.address,
+    addr: base.addr,
     deliveryDate: base.deliveryDate,
     discount: base.discount,
     currency: base.currency,
@@ -2824,6 +2930,14 @@ function viewCategories() {
       <p class="muted">Mahsulot kartochkasida tanlanadigan ranglar (masalan, Dub beliy, Belaya korona, Oq gladkiy).</p>
       <div id="colorEditor">${chipEditor(db.colors, "+ Rang qo'shish (Enter)")}</div>
     </div>
+    <div class="card narrow"><h3>${icon('truck')}Yetkazish manzillari</h3>
+      <p class="muted">Viloyatlar va ularning shahar/tumanlari. Birinchi turgan viloyat va uning birinchi shahri savdoda oldindan tanlanadi. Mahallalar savdoda yozilganda o'zi qo'shiladi.</p>
+      <div id="regionRows">${db.regions.map((r) => `<div class="cat-row reg-row" data-orig="${esc(r.name)}">
+        <div class="cat-head"><input class="cat-name" value="${esc(r.name)}" placeholder="Viloyat nomi">
+          <button type="button" class="small danger icon-only" data-act="regDel" title="Viloyatni olib tashlash">${icon('trash')}</button></div>
+        ${chipEditor(r.places.map((x) => x.name), "+ Shahar/tuman qo'shish (Enter)")}</div>`).join('')}</div>
+      <button type="button" data-act="regAdd">${icon('plus')}Viloyat qo'shish</button>
+    </div>
     <div class="card narrow"><h3>${icon('users')}Mijoz turlari</h3>
       <p class="muted">Savdoda mijoz turi shu ro'yxatdan tanlanadi (Mebelchi, Domchi, Optomchi...).</p>
       <div id="ctypeEditor">${chipEditor(db.customerTypes, "+ Mijoz turi qo'shish (Enter)")}</div>
@@ -3167,6 +3281,13 @@ const ACTIONS = {
     db.categoryTypes = types;
     db.colors = $$('#colorEditor .chip').map((c) => c.dataset.v);
     db.customerTypes = $$('#ctypeEditor .chip').map((c) => c.dataset.v);
+    // Viloyatlar: mavjud shahar/tumanlarning mahallalari saqlanib qoladi
+    const oldRegions = db.regions;
+    db.regions = $$('#regionRows .reg-row').map((row) => {
+      const name = $('.cat-name', row).value.trim();
+      const old = oldRegions.find((r) => r.name === row.dataset.orig) || { places: [] };
+      return { name, places: $$('.chip', row).map((c) => old.places.find((x) => x.name === c.dataset.v) || { name: c.dataset.v, spots: [] }) };
+    }).filter((r) => r.name);
     save();
     alert('Saqlandi.');
   },
@@ -3191,6 +3312,14 @@ const ACTIONS = {
   },
   chipToggle: (ds, el) => { el.classList.toggle('on'); syncChips(el.closest('.chips')); },
   chipRemove: (ds, el) => el.closest('.chip').remove(),
+  regAdd: () => {
+    $('#regionRows').insertAdjacentHTML('beforeend', `<div class="cat-row reg-row" data-orig="">
+      <div class="cat-head"><input class="cat-name" placeholder="Viloyat nomi">
+        <button type="button" class="small danger icon-only" data-act="regDel" title="Olib tashlash">${icon('trash')}</button></div>
+      ${chipEditor([], "+ Shahar/tuman qo'shish (Enter)")}</div>`);
+    $('#regionRows .reg-row:last-child .cat-name').focus();
+  },
+  regDel: (ds, el) => el.closest('.reg-row').remove(),
   catAdd: () => {
     $('#catRows').insertAdjacentHTML('beforeend', catRow('', []));
     $('#catRows .cat-row:last-child .cat-name').focus();
@@ -3231,7 +3360,7 @@ const ACTIONS = {
 
 // Sotuvchi tugmani ko'rmasa ham, bu amallarni bajara olmasligi kerak
 const ADMIN_ACTIONS = ['newProduct', 'deleteProduct', 'unarchive', 'exportProducts', 'tgProduct', 'deleteParty', 'deletePayment',
-  'tgSave', 'tgDetect', 'tgTest', 'tgAll', 'coSave', 'editWh', 'deleteWh', 'catSave', 'catAdd', 'catDel', 'chipRemove', 'backup', 'demo', 'reset', 'editUser', 'exportDocs',
+  'tgSave', 'tgDetect', 'tgTest', 'tgAll', 'coSave', 'editWh', 'deleteWh', 'catSave', 'catAdd', 'catDel', 'regAdd', 'regDel', 'chipRemove', 'backup', 'demo', 'reset', 'editUser', 'exportDocs',
   'serverSettings', 'refreshUsage', 'migrateLocal', 'rateRefresh', 'rateManual', 'rateAuto'];
 
 document.addEventListener('click', (e) => {

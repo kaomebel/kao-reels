@@ -760,3 +760,11 @@ input.phone { font-variant-numeric: tabular-nums; letter-spacing: .3px; }
 .total-line .rest b.debt { color: var(--danger); }
 .total-line .rest b.ok { color: var(--ok); }
 #modalExtra button.primary-soft { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-dark); font-weight: 600; }
+
+/* ---- Yetkazish manzili ---- */
+.addr-block { padding: 12px 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--card-2); }
+.addr-block .field-label, .check-line { display: flex; align-items: center; gap: 8px; color: var(--text); font-size: 14px; font-weight: 600; }
+.check-line input { width: auto; accent-color: var(--accent); }
+.addr-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px; margin-top: 10px; }
+.addr-grid label { display: flex; flex-direction: column; gap: 5px; font-size: 13px; color: var(--muted); }
+.addr-grid label.full { grid-column: 1 / -1; }
