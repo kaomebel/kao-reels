@@ -68,6 +68,21 @@
     </form>
   </dialog>
 
+  <!-- Ichki oyna: asosiy oyna ustidan ochiladi (masalan, sotuv paytida tezkor kirim) -->
+  <dialog id="subModal">
+    <form id="subForm" novalidate>
+      <h3 id="subTitle" tabindex="-1"></h3>
+      <div id="subBody"></div>
+      <div class="modal-actions">
+        <div></div>
+        <div>
+          <button type="button" id="subCancel">Bekor qilish</button>
+          <button type="submit" class="primary" id="subSubmit">Saqlash</button>
+        </div>
+      </div>
+    </form>
+  </dialog>
+
   <script src="version.js" onerror="void 0"></script>
   <script src="config.js"></script>
   <script src="vendor/supabase.js"></script>

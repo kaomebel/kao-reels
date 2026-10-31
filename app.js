@@ -717,6 +717,96 @@ function closeModal() {
   $('#modal').close();
 }
 
+// Ichki oyna — asosiy oyna (masalan, sotuv) yopilmasdan uning ustida ochiladi
+let subState = null;
+function openSubModal({ title, body, onSubmit, onOpen, submitText = 'Saqlash' }) {
+  $('#subTitle').textContent = title;
+  $('#subBody').innerHTML = body;
+  $('#subSubmit').textContent = submitText;
+  subState = { onSubmit };
+  if (!$('#subModal').open) $('#subModal').showModal();
+  if (onOpen) onOpen();
+  if (isTouch()) $('#subTitle').focus({ preventScroll: true });
+}
+$('#subCancel').addEventListener('click', () => $('#subModal').close());
+$('#subForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const bad = $$('[required]', e.target).find((el) => !el.value.trim());
+  if (bad) { bad.focus(); return; }
+  const btn = $('#subSubmit');
+  const label = btn.textContent;
+  btn.disabled = true;
+  try {
+    const data = Object.fromEntries(new FormData(e.target).entries());
+    const ok = await subState?.onSubmit?.(data);
+    if (ok !== false) $('#subModal').close();
+  } catch (ex) {
+    alert('Xato: ' + ex.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = label;
+  }
+});
+
+// ---------- Sotuv paytida tezkor kirim ----------
+// Sotuvda kerakli mahsulot omborda yo'q (yoki bazada umuman yo'q) bo'lsa — sotuv oynasidan chiqmasdan
+// shu yerning o'zida kirim qilinadi; sotuv qatori o'sha mahsulot bilan to'ldiriladi.
+let docFormCtx = null; // { quick, warehouseId(), refresh(), row }
+
+function quickEntry({ productId, name = '', qty = 1, row }) {
+  if (!can('enter')) return alert("Kirim qilish uchun ruxsatingiz yo'q. Administratordan «Kirim qilish» ruxsatini so'rang.");
+  const p = product(productId);
+  if (!p && !can('products')) return alert("Bu mahsulot bazada yo'q. Yangi mahsulot qo'shish uchun «Mahsulotlar» ruxsati kerak — administratorga murojaat qiling.");
+  const wh = docFormCtx?.warehouseId?.() || db.warehouses[0]?.id;
+  const showCost = can('costs');
+  openSubModal({
+    title: p ? `Kirim: ${p.name}` : 'Yangi mahsulotni kirim qilish',
+    submitText: 'Kirim qilish',
+    body: `<div class="form-grid">
+        ${p ? `<p class="full muted">Omborda hozir: <b>${qtyIn(computeStock(), p.id, wh)}</b> ${esc(p.unit || 'dona')}. Kirim qilingach, sotuvga qaytasiz.</p>`
+          : `${field('Nomi *', 'qName', name, 'required', 'full')}
+             ${selectField('Kategoriya', 'qCategory', [['', '—'], ...db.categories.map((c) => [c, c])], '')}
+             ${moneyField('Sotish narxi *', 'qSale', '', 'UZS', 'required')}`}
+        <label>Soni${qtyStepper('q-qty', Math.max(1, Math.ceil(qty)))}</label>
+        ${selectField('Ombor', 'qWh', db.warehouses.map((w) => [w.id, w.name]), wh)}
+        ${showCost ? moneyField('Kelish narxi (bittasi)', 'qBuy', p ? Math.round(ctx.cost[p.id] || toUZS(p.buyPrice || 0, p.priceCurrency)) || '' : '', 'UZS') : ''}
+      </div>`,
+    onOpen: () => {
+      const q = $('#subBody .q-qty');
+      q.name = 'qQty';
+      if (!p) setTimeout(() => $('#subBody [name=qName]').focus(), 50);
+    },
+    onSubmit: async (d) => {
+      const n = Math.max(1, Math.round(num(d.qQty)));
+      let prod = p;
+      if (!prod) {
+        const nm = d.qName.trim();
+        if (!(num(d.qSale) > 0)) { alert('Sotish narxini kiriting.'); return false; }
+        prod = { id: uid(), created: today(), name: nm, code: '', category: d.qCategory || '', type: '', size: '', color: '', material: '', origin: '', maker: '',
+          unit: 'dona', priceCurrency: 'UZS', salePrice: num(d.qSale), minPrice: 0, buyPrice: showCost ? num(d.qBuy) : 0, minQty: 0, note: '', photos: [] };
+        db.products.push(prod);
+      }
+      const buy = showCost ? num(d.qBuy) : 0;
+      db.docs.push({
+        id: uid(), type: 'enter', no: await nextNo('enter'), date: today(), created: new Date().toISOString(), warehouseId: d.qWh, userId: me?.id,
+        items: [{ productId: prod.id, qty: n, price: buy }], // narxsiz qator o'rtacha tannarxga ta'sir qilmaydi
+        note: 'Sotuv paytida tezkor kirim', currency: 'UZS', discount: 0,
+      });
+      await save();
+      if (stockFromServer()) await refreshServerStock();
+      refreshCtx();
+      // Sotuv qatoriga shu mahsulotni qo'yamiz va qoldiqni yangilaymiz
+      const tr = row && row.isConnected ? row : null;
+      if (tr && $('.it-product', tr).value !== prod.id) {
+        picker.input = $('.it-search', tr);
+        choosePickedProduct(prod);
+      }
+      docFormCtx?.refresh?.();
+      if (!p) alert(`«${prod.name}» qo'shildi va ${n} dona kirim qilindi.`);
+    },
+  });
+}
+
 $('#modalForm').addEventListener('submit', async (e) => {
   e.preventDefault();
   const form = e.target;
@@ -2122,6 +2212,12 @@ function pickerPanel() {
       else if (pick === 'type') picker.type = value;
       else if (pick === 'back') { if (picker.type !== null) picker.type = null; else picker.cat = null; }
       else if (pick === 'product') return choosePickedProduct(product(value));
+      else if (pick === 'quickNew') {
+        const row = picker.input.closest('tr');
+        const name = picker.input.value.trim();
+        closePicker();
+        return quickEntry({ name, row });
+      }
       picker.input.value = '';
       renderPicker();
       picker.input.focus();
@@ -2165,6 +2261,9 @@ function renderPicker() {
   if (q.trim() && q !== productLabel(chosen)) {
     const found = searchProducts(q);
     html = found.length ? found.slice(0, 30).map(productRow).join('') : '<div class="pick-empty">Topilmadi — artikul yoki nomni tekshiring</div>';
+    if (docFormCtx?.quick && can('enter') && can('products')) {
+      html += `<button type="button" class="pick-row pick-quick" data-pick="quickNew"><span class="pick-ic">${icon('plus')}</span><span><b>«${esc(q.trim())}» — yangi mahsulot sifatida kirim qilish</b><span class="pick-sub">Sotuvdan chiqmasdan omborga kiritiladi</span></span></button>`;
+    }
   } else {
     const list = pickProducts();
     const crumbs = [picker.cat, picker.type].filter((x) => x !== null && x !== undefined);
@@ -2249,7 +2348,7 @@ document.addEventListener('focusout', (e) => {
     }
   }, 150);
 });
-$('#modal').addEventListener('close', closePicker);
+$('#modal').addEventListener('close', () => { closePicker(); docFormCtx = null; });
 $('#modal').addEventListener('cancel', (e) => {
   const panel = $('#pickPanel');
   if (panel && !panel.hidden) { e.preventDefault(); closePicker(); }
@@ -2258,6 +2357,8 @@ $('#modal').addEventListener('cancel', (e) => {
 function bindDocForm(type, editingId) {
   const t = DOC_TYPES[type];
   pickKits = t.price === 'sale';
+  // Sotuv va buyurtmada: mahsulot yetmasa — shu yerning o'zida kirim qilish tugmasi
+  const quick = (type === 'sale' || type === 'order') && can('enter');
   bindAddressBlock();
   if (t.party === 'customer') bindCustomerLookup();
   else if (t.party) bindPartyLookup(t.party);
@@ -2289,7 +2390,12 @@ function bindDocForm(type, editingId) {
       const line = num($('.it-qty', tr).value) * num(priceEl.value);
       sum += line;
       $('.it-sum', tr).textContent = p ? fmtIn(round2(line), curOf()) : '';
-      $('.it-avail', tr).textContent = p ? qtyIn(stock, p.id, whSel.value) : '';
+      const avail = p ? qtyIn(stock, p.id, whSel.value) : '';
+      const short = quick && p && !isKit(p) && avail < num($('.it-qty', tr).value);
+      // Faqat o'zgarganda yozamiz — aks holda bosilayotgan «Kirim» tugmasi almashib, bosish yo'qoladi
+      const availHtml = p ? `${avail}${short ? ` <button type="button" class="small it-enter" title="Shu yerning o'zida omborga kirim qilish">${icon('plus')}Kirim</button>` : ''}` : '';
+      const availCell = $('.it-avail', tr);
+      if (availCell.dataset.html !== availHtml) { availCell.innerHTML = availHtml; availCell.dataset.html = availHtml; }
       // Savdoda: sotuvchi eng kam narxni ko'radi, undan pastga tushsa ogohlantiriladi
       const min = p && t.price === 'sale' && type !== 'salesReturn' ? minPriceUZS(p) : 0;
       $('.it-min', tr).textContent = min ? `eng kami: ${fmt(min)}` : '';
@@ -2336,6 +2442,12 @@ function bindDocForm(type, editingId) {
   });
   body.addEventListener('input', recalc);
   body.addEventListener('click', (e) => {
+    const enterBtn = e.target.closest('.it-enter');
+    if (enterBtn) {
+      const tr = enterBtn.closest('tr');
+      const pid = $('.it-product', tr).value;
+      return quickEntry({ productId: pid, qty: num($('.it-qty', tr).value) - qtyIn(stock, pid, whSel.value), row: tr });
+    }
     if (!e.target.classList.contains('it-remove')) return;
     const chosen = product($('.it-product', e.target.closest('tr')).value);
     if (chosen && !confirm(`«${chosen.name}» ro'yxatdan olib tashlansinmi?`)) return;
@@ -2390,6 +2502,17 @@ function bindDocForm(type, editingId) {
   whSel.addEventListener('change', recalc);
   if (discount) discount.addEventListener('input', recalc);
   recalc();
+  docFormCtx = {
+    quick,
+    warehouseId: () => whSel.value,
+    // Tezkor kirimdan keyin: qoldiqni qayta hisoblab, qatorlarni yangilaymiz
+    refresh: () => {
+      const st = computeStock(editingId);
+      Object.keys(stock).forEach((k) => delete stock[k]);
+      Object.assign(stock, st);
+      recalc();
+    },
+  };
   return stock;
 }
 
