@@ -116,6 +116,7 @@ function emptyDb() {
     materials: DEFAULT_MATERIALS.slice(),
     colors: DEFAULT_COLORS.slice(),
     featureSets: JSON.parse(JSON.stringify(DEFAULT_FEATURE_SETS)),
+    categoryIcons: {},
     customerTypes: DEFAULT_CUSTOMER_TYPES.slice(),
     regions: JSON.parse(JSON.stringify(DEFAULT_REGIONS)),
     currency: { rate: 0, date: '', source: '', updatedAt: '', manual: false },
@@ -889,6 +890,40 @@ function bindSizeField() {
       sync();
     });
   });
+}
+
+// --- Kategoriya ikonkalari ---
+// Tanlab olinadigan mebel ikonkalari (Sozlamalar → Ro'yxatlar)
+const FURNITURE_ICONS = ['bed', 'sofa', 'armchair', 'pouf', 'kitchen', 'dining', 'table', 'chair', 'officeChair', 'desk', 'wardrobe', 'dresser', 'bookshelf', 'tvStand', 'mirror', 'crib', 'mattress', 'lamp', 'safe', 'box'];
+// Nomidagi so'z bo'yicha o'zi tanlanadi (birinchi mos kelgani); o'zgartirilgani db.categoryIcons da
+const ICON_RULES = [
+  [/ofis kreslo|rahbar kreslo|kompyuter kreslo|ofis stul/i, 'officeChair'],
+  [/yotoq|karavot/i, 'bed'], [/beshik|bolalar/i, 'crib'], [/matras|topper/i, 'mattress'],
+  [/oshxona garnitur|oshxona$/i, 'kitchen'], [/divan/i, 'sofa'], [/kreslo/i, 'armchair'], [/puf/i, 'pouf'],
+  [/stol va stul|stol-stul|to'plam.*stul/i, 'dining'], [/stul/i, 'chair'],
+  [/ofis|yozuv stol|kompyuter stol|xodim stol|rahbar stol|resepshn/i, 'desk'], [/stol/i, 'table'],
+  [/shkaf|garderob/i, 'wardrobe'], [/kitob|javon|vitrina/i, 'bookshelf'], [/komod|tumb|tumba/i, 'dresser'],
+  [/tv|mehmonxona/i, 'tvStand'], [/trelyaj|oyna|ko'zgu|dahliz/i, 'mirror'], [/chiroq|lampa|lyustra/i, 'lamp'], [/seyf/i, 'safe'],
+];
+const guessIcon = (name) => ICON_RULES.find(([re]) => re.test(name || ''))?.[1] || '';
+const categoryIcon = (cat) => db.categoryIcons?.[cat] || guessIcon(cat) || 'box';
+const typeIcon = (cat, type) => guessIcon(type) || categoryIcon(cat);
+const productIcon = (p) => (p.type ? typeIcon(p.category, p.type) : categoryIcon(p.category));
+
+// Ro'yxatlar ustidagi kategoriya tugmalari (ikonka + nomi + soni)
+function categoryBar(filterKey, list) {
+  const cur = filterVal(filterKey);
+  const counts = list.reduce((m, p) => m.set(p.category || '', (m.get(p.category || '') || 0) + 1), new Map());
+  const btn = (v, label, ic, n) => `<button type="button" class="cat-chip ${v === cur ? 'on' : ''}" data-act="catFilter" data-f="${filterKey}" data-v="${esc(v)}">${icon(ic)}<span>${esc(label)}</span>${n != null ? `<small>${n}</small>` : ''}</button>`;
+  return `<div class="cat-bar">${btn('', 'Hammasi', 'dashboard', list.length)}${db.categories.map((c) => btn(c, c, categoryIcon(c), counts.get(c) || 0)).join('')}</div>`;
+}
+
+function typeBar(filterKey, cat, list) {
+  const cur = filterVal(filterKey);
+  const types = [...new Set([...(db.categoryTypes[cat] || []), ...list.map((p) => p.type).filter(Boolean)])];
+  const n = (t) => list.filter((p) => p.type === t).length;
+  const btn = (v, label, ic, k) => `<button type="button" class="cat-chip sm ${v === cur ? 'on' : ''}" data-act="catFilter" data-f="${filterKey}" data-v="${esc(v)}">${icon(ic)}<span>${esc(label)}</span><small>${k}</small></button>`;
+  return `<div class="cat-bar type-bar">${btn('', 'Barcha turlar', categoryIcon(cat), list.length)}${types.map((t) => btn(t, t, typeIcon(cat, t), n(t))).join('')}</div>`;
 }
 
 // --- Kategoriyaga xos xususiyatlar ---
@@ -1748,7 +1783,7 @@ function searchProducts(q) {
 
 function productRow(p) {
   return `<button type="button" class="pick-row" data-pick="product" data-value="${p.id}">
-    <span><b>${esc(p.name)}</b>${p.code ? ` <span class="pick-code">${esc(p.code)}</span>` : ''}<span class="pick-sub">${esc(productPath(p))}${p.size ? ' · ' + esc(p.size) : ''}</span></span>
+    <span class="pick-ic">${icon(productIcon(p))}</span><span><b>${esc(p.name)}</b>${p.code ? ` <span class="pick-code">${esc(p.code)}</span>` : ''}<span class="pick-sub">${esc(productPath(p))}${p.size ? ' · ' + esc(p.size) : ''}</span></span>
     <span class="pick-price">${priceLabel(p)}</span></button>`;
 }
 
@@ -1765,19 +1800,19 @@ function renderPicker() {
     const crumbs = [picker.cat, picker.type].filter((x) => x !== null && x !== undefined);
     const head = crumbs.length ? `<button type="button" class="pick-back" data-pick="back">‹ ${esc(['Barcha kategoriyalar', ...crumbs].join(' › '))}</button>` : '';
     const count = (arr, key) => arr.reduce((m, p) => { const k = key(p); m.set(k, (m.get(k) || 0) + 1); return m; }, new Map());
-    const group = (label, n, pick, value) => `<button type="button" class="pick-row pick-group" data-pick="${pick}" data-value="${esc(value)}">
-      <span><b>${esc(label)}</b></span><span class="pick-count">${n} ›</span></button>`;
+    const group = (label, n, pick, value, ic) => `<button type="button" class="pick-row pick-group" data-pick="${pick}" data-value="${esc(value)}">
+      <span class="pick-ic">${icon(ic)}</span><span><b>${esc(label)}</b></span><span class="pick-count">${n} ›</span></button>`;
     if (picker.cat === null) {
       const cats = count(list, (p) => p.category || '');
       const order = [...db.categories.filter((c) => cats.has(c)), ...[...cats.keys()].filter((c) => !db.categories.includes(c))];
-      html = order.map((c) => group(c || 'Kategoriyasiz', cats.get(c), 'cat', c)).join('') || '<div class="pick-empty">Mahsulot yo\'q</div>';
+      html = order.map((c) => group(c || 'Kategoriyasiz', cats.get(c), 'cat', c, categoryIcon(c))).join('') || '<div class="pick-empty">Mahsulot yo\'q</div>';
     } else {
       const inCat = list.filter((p) => (p.category || '') === picker.cat);
       if (picker.type === null) {
         const types = count(inCat, (p) => p.type || '');
         const known = db.categoryTypes[picker.cat] || [];
         const order = [...known.filter((x) => types.has(x)), ...[...types.keys()].filter((x) => x && !known.includes(x))];
-        html = head + order.map((x) => group(x, types.get(x), 'type', x)).join('')
+        html = head + order.map((x) => group(x, types.get(x), 'type', x, typeIcon(picker.cat, x))).join('')
           + inCat.filter((p) => !p.type).map(productRow).join('');
       } else {
         html = head + inCat.filter((p) => (p.type || '') === picker.type).map(productRow).join('');
@@ -2804,7 +2839,7 @@ function viewProducts() {
     const rs = qtyIn(ctx.reserve, p.id);
     return `<tr>
       ${thumbCell(p)}
-      <td class="click" data-act="editProduct" data-id="${p.id}"><b>${esc(p.name)}</b><div class="muted small">${esc([p.code, p.category, p.type].filter(Boolean).join(' · '))}</div>
+      <td class="click" data-act="editProduct" data-id="${p.id}"><b>${esc(p.name)}</b><div class="muted small prod-path">${icon(productIcon(p))}${esc([p.code, p.category, p.type].filter(Boolean).join(' · '))}</div>
         ${p.size || p.color || productAttrs(p).length ? `<div class="prod-meta">${p.size ? `<span class="dt">${esc(p.size)} sm</span>` : ''}${p.color ? `<span>${esc(p.color)}</span>` : ''}${productAttrs(p).map(([k, v]) => `<span title="${esc(k)}">${esc(v)}</span>`).join('')}</div>` : ''}
         ${p.origin || p.maker ? `<div class="muted small prod-origin">${icon('warehouse')}${esc([p.maker, p.origin].filter(Boolean).join(', '))}</div>` : ''}</td>
       ${admin ? `<td class="num">${money(ctx.cost[p.id])}</td>` : ''}
@@ -2818,11 +2853,11 @@ function viewProducts() {
   }).join('');
 
   return toolbar('products', {
-    extra: `<select data-filter="products.cat"><option value="">Barcha kategoriyalar</option>${db.categories.map((c) => `<option ${c === cat ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select>
-      ${cat ? `<select data-filter="products.type"><option value="">Barcha turlar</option>${(db.categoryTypes[cat] || []).map((t) => `<option ${t === ptype ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select>` : ''}
-      <select data-filter="products.arch"><option value="">Faol</option><option value="1" ${arch ? 'selected' : ''}>Arxiv</option></select>`,
+    extra: `<select data-filter="products.arch"><option value="">Faol</option><option value="1" ${arch ? 'selected' : ''}>Arxiv</option></select>`,
     buttons: admin ? `<button class="primary" data-act="newProduct">${icon('plus')}Mahsulot</button><button data-act="exportProducts">${icon('download')}CSV</button>` : '',
-  }) + `<div class="card"><div class="table-wrap"><table><thead><tr><th></th><th>Mahsulot</th>
+  }) + categoryBar('products.cat', db.products.filter((p) => !!p.archived === arch))
+    + (cat ? typeBar('products.type', cat, db.products.filter((p) => !!p.archived === arch && p.category === cat)) : '')
+    + `<div class="card"><div class="table-wrap"><table><thead><tr><th></th><th>Mahsulot</th>
     ${admin ? '<th class="num">Tannarx</th>' : ''}<th class="num">Sotish narxi</th><th class="num">Qoldiq</th><th></th></tr></thead>
     <tbody>${rows || emptyRow(6, "Mahsulot yo'q")}</tbody></table></div></div>`;
 }
@@ -2859,16 +2894,15 @@ function viewStock() {
       const cost = ctx.cost[p.id];
       const sale = salePriceUZS(p);
       tq += st; tc += st * cost; ts += st * sale;
-      return `<tr class="click" data-act="productHistory" data-id="${p.id}">${thumbCell(p)}<td><b>${esc(p.name)}</b><div class="muted small">${esc([p.code, p.category, p.type].filter(Boolean).join(' · '))}</div></td>
+      return `<tr class="click" data-act="productHistory" data-id="${p.id}">${thumbCell(p)}<td><b>${esc(p.name)}</b><div class="muted small prod-path">${icon(productIcon(p))}${esc([p.code, p.category, p.type].filter(Boolean).join(' · '))}</div></td>
         <td class="num ${st - rs <= (p.minQty || 0) ? 'debt' : ''}">${st}</td><td class="num">${rs || ''}</td><td class="num">${st - rs}</td>
         ${admin ? `<td class="num">${fmt(cost)}</td><td class="num">${fmt(st * cost)}</td>` : ''}<td class="num">${fmt(sale)}</td><td class="num">${fmt(st * sale)}</td></tr>`;
     }).join('');
   return toolbar('stock', {
     extra: `<select data-filter="stock.wh"><option value="">Barcha omborlar</option>${db.warehouses.map((w) => `<option value="${w.id}" ${w.id === wh ? 'selected' : ''}>${esc(w.name)}</option>`).join('')}</select>
-      <select data-filter="stock.cat"><option value="">Barcha kategoriyalar</option>${db.categories.map((c) => `<option ${c === cat ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select>
       <select data-filter="stock.pos"><option value="">Hammasi</option><option value="1" ${onlyPos ? 'selected' : ''}>Faqat bor</option></select>`,
     buttons: `<button data-act="print">${icon('print')}Chop etish</button>`,
-  }) + `<div class="card"><div class="table-wrap"><table><thead><tr><th></th><th>Nomi</th><th class="num">Qoldiq</th><th class="num">Rezerv</th><th class="num">Mavjud</th>
+  }) + categoryBar('stock.cat', activeProducts()) + `<div class="card"><div class="table-wrap"><table><thead><tr><th></th><th>Nomi</th><th class="num">Qoldiq</th><th class="num">Rezerv</th><th class="num">Mavjud</th>
     ${admin ? '<th class="num">Tannarx</th><th class="num">Tannarx summa</th>' : ''}<th class="num">Sotish narxi</th><th class="num">Sotish summa</th></tr></thead>
     <tbody>${rows || emptyRow(9, "Ma'lumot yo'q")}</tbody>
     <tfoot><tr><td colspan="2">Jami</td><td class="num">${tq}</td><td colspan="2"></td>${admin ? `<td></td><td class="num">${fmt(tc)}</td>` : ''}<td></td><td class="num">${fmt(ts)}</td></tr></tfoot></table></div></div>`;
@@ -3394,9 +3428,12 @@ document.addEventListener('change', (e) => {
 });
 
 function catRow(name, types) {
-  return `<div class="cat-row" data-orig="${esc(name)}">
-    <div class="cat-head"><input class="cat-name" value="${esc(name)}" placeholder="Kategoriya nomi">
+  const chosen = db.categoryIcons?.[name] || '';
+  return `<div class="cat-row" data-orig="${esc(name)}" data-icon="${esc(chosen)}">
+    <div class="cat-head"><button type="button" class="cat-ic-btn" data-act="catIconOpen" title="Ikonkani tanlash">${icon(chosen || categoryIcon(name))}</button>
+      <input class="cat-name" value="${esc(name)}" placeholder="Kategoriya nomi">
       <button type="button" class="small danger icon-only" data-act="catDel" title="Kategoriyani olib tashlash">${icon('trash')}</button></div>
+    <div class="cat-ic-grid" hidden>${FURNITURE_ICONS.map((ic) => `<button type="button" class="${ic === (chosen || categoryIcon(name)) ? 'on' : ''}" data-act="catIconSet" data-ic="${ic}">${icon(ic)}</button>`).join('')}</div>
     ${chipEditor(types, '+ Tur qo\'shish (Enter)')}
   </div>`;
 }
@@ -3768,6 +3805,12 @@ const ACTIONS = {
     renames.forEach(([from, to]) => db.products.forEach((p) => { if (p.category === from) p.category = to; }));
     db.categories = categories;
     db.categoryTypes = types;
+    // Qo'lda tanlangan ikonkalar (tanlanmagani nomidan o'zi aniqlanadi)
+    db.categoryIcons = {};
+    $$('#catRows .cat-row').forEach((row) => {
+      const name = $('.cat-name', row).value.trim();
+      if (name && row.dataset.icon) db.categoryIcons[name] = row.dataset.icon;
+    });
     // Turga xos xususiyatlar (kategoriya nomi o'zgargan bo'lsa — bog'lanish ham yangilanadi)
     const renamePath = (a) => renames.reduce((x, [from, to]) => (x === from ? to : x.startsWith(from + ' › ') ? to + x.slice(from.length) : x), a);
     db.featureSets = $$('#fsRows .fs-row').map((row) => ({
@@ -3819,6 +3862,23 @@ const ACTIONS = {
         <p class="muted">${esc([p.size && p.size + ' sm', p.color, priceLabel(p)].filter(Boolean).join(' · '))}</p>`,
       extra: isAdmin() ? [{ label: 'Kartochkani ochish', onClick: () => editProduct(p.id) }] : [],
     });
+  },
+  catIconOpen: (ds, el) => {
+    const grid = $('.cat-ic-grid', el.closest('.cat-row'));
+    grid.hidden = !grid.hidden;
+  },
+  catIconSet: ({ ic }, el) => {
+    const row = el.closest('.cat-row');
+    row.dataset.icon = ic;
+    $('.cat-ic-btn', row).innerHTML = icon(ic);
+    $$('.cat-ic-grid button', row).forEach((b) => b.classList.toggle('on', b === el));
+    $('.cat-ic-grid', row).hidden = true;
+  },
+  catFilter: ({ f, v }) => {
+    filters[f] = v;
+    // Kategoriya almashsa — tur filtri tozalanadi
+    if (f.endsWith('.cat')) filters[f.replace('.cat', '.type')] = '';
+    render();
   },
   chipToggle: (ds, el) => { el.classList.toggle('on'); syncChips(el.closest('.chips')); },
   chipOne: (ds, el) => {
@@ -4070,7 +4130,6 @@ function labelList() {
 }
 
 function viewLabels() {
-  const cat = filterVal('labels.cat');
   const list = labelList();
   const first = product(Object.keys(labelQty).find((id) => labelQty[id] > 0)) || list[0];
   const rows = list.map((p) => {
@@ -4082,13 +4141,12 @@ function viewLabels() {
     </tr>`;
   }).join('');
   return toolbar('labels', {
-    extra: `<select data-filter="labels.cat"><option value="">Barcha kategoriyalar</option>${db.categories.map((c) => `<option ${c === cat ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select>
-      <button data-act="lqStock" title="Ro'yxatdagi har bir mahsulotga omborda nechta bo'lsa, shuncha">Omborda borcha</button>
+    extra: `<button data-act="lqStock" title="Ro'yxatdagi har bir mahsulotga omborda nechta bo'lsa, shuncha">Omborda borcha</button>
       <button data-act="lqOne">Hammasiga 1 tadan</button>
       <button data-act="lqClear">Tozalash</button>`,
     buttons: `${labelModeSelect()}<button class="primary" data-act="lqPrint" id="lqPrintBtn">${icon('print')}Chop etish (${labelTotal()})</button>
       ${isAdmin() ? `<button data-act="ldOpen">${icon('edit')}Dizaynni sozlash</button>` : ''}`,
-  }) + `<div class="lbl-page">
+  }) + categoryBar('labels.cat', activeProducts()) + `<div class="lbl-page">
     <div class="card lbl-sample"><h3>Ko'rinishi</h3>${first ? `<div class="lbl-view">${labelHtml(first, labelTpl())}</div>` : '<p class="muted">Mahsulot yo\'q</p>'}
       <p class="muted small">${labelTpl().w}×${labelTpl().h} mm${isAdmin() ? ' · o\'lcham va joylashuv «Dizaynni sozlash» da o\'zgaradi' : ''}</p></div>
     <div class="card"><div class="table-wrap"><table><thead><tr><th></th><th>Mahsulot</th><th class="num">Narx</th><th class="num">Qoldiq</th><th class="num">Nusxa</th></tr></thead>
@@ -4401,7 +4459,7 @@ Object.assign(ACTIONS, {
 
 // Sotuvchi tugmani ko'rmasa ham, bu amallarni bajara olmasligi kerak
 const ADMIN_ACTIONS = ['newProduct', 'deleteProduct', 'unarchive', 'exportProducts', 'tgProduct', 'deleteParty', 'deletePayment',
-  'tgSave', 'tgDetect', 'tgTest', 'tgAll', 'coSave', 'editWh', 'deleteWh', 'catSave', 'catAdd', 'catDel', 'fsAdd', 'fsDel', 'fsFieldAdd', 'fsFieldDel', 'regAdd', 'regDel', 'chipRemove', 'backup', 'demo', 'reset', 'editUser', 'exportDocs',
+  'tgSave', 'tgDetect', 'tgTest', 'tgAll', 'coSave', 'editWh', 'deleteWh', 'catSave', 'catAdd', 'catDel', 'catIconOpen', 'catIconSet', 'fsAdd', 'fsDel', 'fsFieldAdd', 'fsFieldDel', 'regAdd', 'regDel', 'chipRemove', 'backup', 'demo', 'reset', 'editUser', 'exportDocs',
   'serverSettings', 'refreshUsage', 'migrateLocal', 'rateRefresh', 'rateManual', 'rateAuto',
   'ldSel', 'ldFs', 'ldBold', 'ldCur', 'ldAlign', 'ldCenter', 'ldFull', 'ldTest', 'ldUndo', 'ldReset', 'ldSave'];
 

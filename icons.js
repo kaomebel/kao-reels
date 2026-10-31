@@ -41,6 +41,25 @@ const ICONS = {
   phone: '<rect x="7" y="2" width="10" height="20" rx="2.5"/><path d="M11 18h2"/>',
   homeAdd: '<rect x="4" y="4" width="16" height="16" rx="4"/><path d="M12 8v8M8 12h8"/>',
   more: '<circle cx="12" cy="5" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="12" cy="19" r="1.3"/>',
+  // Mebel turlari (kategoriyalar yonida)
+  bed: '<path d="M3 19v-7.5A1.5 1.5 0 0 1 4.5 10h15a1.5 1.5 0 0 1 1.5 1.5V19"/><path d="M3 15.5h18"/><path d="M5.5 10V7.5A1.5 1.5 0 0 1 7 6h3.5A1.5 1.5 0 0 1 12 7.5V10"/><path d="M3 19v1.5M21 19v1.5"/>',
+  armchair: '<path d="M6.5 11V7a2 2 0 0 1 2-2h7a2 2 0 0 1 2 2v4"/><path d="M4.5 10.5a1.8 1.8 0 0 1 2 1.8V15h11v-2.7a1.8 1.8 0 1 1 3.5.4V17a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-4.3a1.8 1.8 0 0 1 1.5-2.2z"/><path d="M6 18v2M18 18v2"/>',
+  kitchen: '<rect x="3.5" y="3.5" width="17" height="17" rx="1.5"/><path d="M3.5 9.5h17M12 9.5v11"/><circle cx="8" cy="6.5" r=".9"/><circle cx="12" cy="6.5" r=".9"/><path d="M9.5 14h.5M14 14h.5"/>',
+  dining: '<path d="M2.5 9.5h13"/><path d="M4.5 9.5V20M13.5 9.5V20"/><path d="M18.5 4v16"/><path d="M18.5 13h3v7"/>',
+  table: '<path d="M3 8h18"/><path d="M5 8v12M19 8v12"/><path d="M5 13h14"/>',
+  chair: '<path d="M8 3v18"/><path d="M8 12.5h9V21"/><path d="M8 4h3.5"/><path d="M8 8h3.5"/>',
+  officeChair: '<rect x="7.5" y="3" width="9" height="8" rx="2.5"/><path d="M5 12.5h14"/><path d="M5 10v2.5M19 10v2.5"/><path d="M12 12.5V17"/><path d="M7 20.5l5-3.5 5 3.5"/><path d="M12 17v3.5"/>',
+  wardrobe: '<rect x="4" y="3" width="16" height="17" rx="1.5"/><path d="M12 3v17"/><path d="M10 10.5v2.5M14 10.5v2.5"/><path d="M6 20v1.5M18 20v1.5"/>',
+  dresser: '<rect x="4" y="4" width="16" height="15" rx="1.5"/><path d="M4 9h16M4 14h16"/><path d="M11 6.5h2M11 11.5h2M11 16.5h2"/><path d="M6 19v1.5M18 19v1.5"/>',
+  crib: '<path d="M4 5v15M20 5v15"/><path d="M4 9h16M4 17h16"/><path d="M8 9v8M12 9v8M16 9v8"/>',
+  desk: '<path d="M2.5 12.5h19"/><path d="M4.5 12.5V20M19.5 12.5V20"/><rect x="8" y="4" width="8" height="5.5" rx="1"/><path d="M12 9.5v3"/><path d="M14.5 15.5h5"/>',
+  mattress: '<rect x="2.5" y="8" width="19" height="9" rx="2.5"/><path d="M2.5 12.5h19"/><path d="M7 10.2h.01M12 10.2h.01M17 10.2h.01M7 14.8h.01M12 14.8h.01M17 14.8h.01"/>',
+  tvStand: '<rect x="5" y="3" width="14" height="9" rx="1.2"/><path d="M10 12v2.5M14 12v2.5"/><rect x="2.5" y="14.5" width="19" height="5" rx="1"/><path d="M12 14.5v5"/>',
+  mirror: '<ellipse cx="12" cy="9" rx="5" ry="6"/><path d="M12 15v4"/><path d="M8 20.5h8"/><path d="M10 6.5l2.5-1.5"/>',
+  bookshelf: '<rect x="4" y="3" width="16" height="18" rx="1"/><path d="M4 9h16M4 15h16"/><path d="M7 5v4M9.5 5v4M14 11v4M16 11.5l1.5 3.5M7.5 17v4M10 17v4"/>',
+  lamp: '<path d="M8 3h8l3 7H5z"/><path d="M12 10v9"/><path d="M8 21h8"/>',
+  safe: '<rect x="4" y="3.5" width="16" height="16" rx="1.5"/><circle cx="12" cy="11.5" r="3"/><path d="M12 8.5v1M12 13.5v1M9 11.5h1M14 11.5h1"/><path d="M6 19.5V21M18 19.5V21"/>',
+  pouf: '<ellipse cx="12" cy="8" rx="7" ry="2.5"/><path d="M5 8v8c0 1.4 3.1 2.5 7 2.5s7-1.1 7-2.5V8"/>',
 };
 
 function icon(name, cls = '') {
