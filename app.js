@@ -3599,10 +3599,26 @@ function viewTelegram() {
   </tbody></table></div>`;
 }
 
+// Guruh manzili: raqamli ID (-100...) yoki ochiq guruh nomi (@nomi). t.me/nomi → @nomi.
+// Yopiq guruhning taklif havolasi (t.me/+...) ishlamaydi — uning o'rniga ID aniqlanadi.
+function tgChatValue(v) {
+  v = v.trim();
+  const m = v.match(/^(?:https?:\/\/)?(?:t\.me|telegram\.me)\/([A-Za-z0-9_]{4,})\/?$/);
+  if (m) return '@' + m[1];
+  if (/t\.me\/(\+|joinchat)/.test(v)) return '';
+  return v;
+}
+
 function tgReadForm() {
+  const raw = $('#tgChat').value.trim();
+  const chatId = tgChatValue(raw);
+  if (raw && !chatId) {
+    $('#tgChat').value = '';
+    alert("Bu guruhning taklif havolasi — u orqali bot yubora olmaydi.\n\nGuruhga «/start@kaomebel_uz_bot» yoki istalgan xabar yozing, so'ng «Guruh ID sini aniqlash» tugmasini bosing — ID o'zi yoziladi.");
+  }
   Object.assign(db.telegram, {
     token: $('#tgToken').value.trim(),
-    chatId: $('#tgChat').value.trim(),
+    chatId,
     showQty: $('#tgShowQty').checked,
     useTopics: $('#tgTopics').checked,
   });
@@ -3637,11 +3653,16 @@ async function tgDetect() {
     const json = await res.json();
     if (!json.ok) throw new Error(json.description);
     const chats = new Map();
+    const moved = new Set();
     json.result.forEach((u) => {
-      const c = (u.message || u.my_chat_member || u.channel_post || {}).chat;
+      const msg = u.message || u.my_chat_member || u.channel_post || {};
+      const c = msg.chat;
+      // Temalar yoqilganda oddiy guruh superguruhga aylanadi va ID si o'zgaradi
+      if (msg.migrate_to_chat_id) moved.add(c.id);
       if (c && c.type !== 'private') chats.set(c.id, { title: c.title, forum: !!c.is_forum });
     });
-    if (!chats.size) return alert("Guruh topilmadi. Bot guruhga qo'shilganini tekshiring va guruhga yangi xabar yozib, qayta urinib ko'ring.");
+    moved.forEach((id) => chats.delete(id));
+    if (!chats.size) return alert("Guruh topilmadi. Bot guruhga qo'shilganini tekshiring, guruhga «/start@kaomebel_uz_bot» deb yozing va qayta urinib ko'ring.");
     const [id, { title, forum }] = [...chats.entries()].pop();
     $('#tgChat').value = id;
     if (forum) $('#tgTopics').checked = true;
