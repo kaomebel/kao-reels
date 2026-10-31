@@ -506,3 +506,8 @@ create policy backups_select on storage.objects for select to authenticated
 --     headers := '{"Content-Type": "application/json", "Authorization": "Bearer <ANON_KEY>"}'::jsonb, body := '{}'::jsonb);
 -- $cron$);
 revoke execute on function public.handle_new_user(), public.keep_history() from public, anon, authenticated;
+
+-- Bir martalik xizmat kalitlari (supabase/functions/tg-topics kabi xizmat funksiyalari uchun)
+create table if not exists public.ops_nonce (id text primary key, created_at timestamptz not null default now());
+alter table public.ops_nonce enable row level security;
+revoke all on public.ops_nonce from anon, authenticated;

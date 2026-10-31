@@ -2790,7 +2790,17 @@ async function telegramCall(method, body) {
 
 // Temali (forum) guruh: har bir kategoriya o'z temasiga joylanadi. Tema bo'lmasa, bot uni o'zi yaratadi
 // (botga «Mavzularni boshqarish» huquqi kerak). Tema raqamlari sozlamalarda saqlanadi.
-const topicName = (p) => (p.category || 'Boshqa mahsulotlar').slice(0, 128);
+// Tema nomi oldida kategoriyaga mos smaylik (oddiy emoji — hech qanday cheklov yo'q)
+const TOPIC_TITLE_EMOJI = {
+  bed: '🛏', mattress: '🛌', crib: '🧸', sofa: '🛋', armchair: '🛋', pouf: '🛋', tvStand: '📺',
+  kitchen: '🍳', dining: '🍽', table: '🍽', chair: '🪑', officeChair: '💺', desk: '💼', bookshelf: '📚',
+  wardrobe: '🚪', dresser: '🗄', mirror: '🪞', lamp: '💡', safe: '🔐', box: '📦',
+};
+const topicKey = (p) => p.category || 'Boshqa mahsulotlar';
+function topicTitle(category) {
+  const key = category === KIT_CATEGORY ? 'box' : category === 'Mehmonxona' ? 'sofa' : categoryIcon(category);
+  return `${TOPIC_TITLE_EMOJI[key] || '🏠'} ${category}`.slice(0, 128);
+}
 // Tema ikonkasi: Telegram botlarga ruxsat bergan ikonkalardan kategoriyaga eng mosi (Premium shart emas).
 // Ro'yxat getForumTopicIconStickers dan olinadi; birinchi mos kelgani tanlanadi.
 const TOPIC_EMOJI = {
@@ -2825,25 +2835,24 @@ async function tgTopicIcons() {
   const errors = [];
   for (const [name, thread] of topics) {
     const icon_custom_emoji_id = await topicIconFor(name);
-    if (!icon_custom_emoji_id) continue;
     try {
-      await telegramCall('editForumTopic', { chat_id: db.telegram.chatId, message_thread_id: thread, icon_custom_emoji_id });
+      await telegramCall('editForumTopic', Object.assign({ chat_id: db.telegram.chatId, message_thread_id: thread, name: topicTitle(name) }, icon_custom_emoji_id ? { icon_custom_emoji_id } : {}));
     } catch (e) {
       if (!/TOPIC_NOT_MODIFIED/i.test(e.message)) errors.push(`${name}: ${e.message}`);
     }
     await new Promise((r) => setTimeout(r, 800));
   }
-  alert(errors.length ? 'Ba\'zilari o\'zgarmadi:\n' + errors.join('\n') : 'Temalarga ikonkalar qo\'yildi.');
+  alert(errors.length ? 'Ba\'zilari o\'zgarmadi:\n' + errors.join('\n') : 'Temalar yangilandi: ikonka va smaylik qo\'yildi.');
 }
 
 async function telegramTopic(p, fresh = false) {
   const tg = db.telegram;
   if (!tg.useTopics) return null;
   tg.topics = tg.topics || {};
-  const name = topicName(p);
+  const name = topicKey(p);
   if (tg.topics[name] && !fresh) return tg.topics[name];
   const icon = await topicIconFor(p.category || '');
-  const res = await telegramCall('createForumTopic', Object.assign({ chat_id: tg.chatId, name }, icon ? { icon_custom_emoji_id: icon } : {}));
+  const res = await telegramCall('createForumTopic', Object.assign({ chat_id: tg.chatId, name: topicTitle(name) }, icon ? { icon_custom_emoji_id: icon } : {}));
   tg.topics[name] = res.result.message_thread_id;
   telegramLog(`Tema yaratildi: ${name}`, true);
   commit();
@@ -3630,7 +3639,7 @@ function viewTelegram() {
     </div>
     ${tg.useTopics ? `<div class="tg-topics"><p class="muted small">Botga guruhda <b>«Mavzularni boshqarish»</b> (Manage topics) huquqini bering — kategoriya temasi bo'lmasa, bot uni o'zi yaratadi.</p>
       <table><tbody>${db.categories.map((c) => `<tr><td>${icon(categoryIcon(c))} ${esc(c)}</td><td class="num muted small">${tg.topics?.[c] ? `tema #${tg.topics[c]}` : 'birinchi e\'londa yaratiladi'}</td></tr>`).join('')}</tbody></table>
-      <div class="toolbar" style="margin-top:8px"><button data-act="tgTopicsCreate">Temalarni hozir yaratish</button><button data-act="tgTopicIcons">Temalarga ikonka qo'yish</button>${Object.keys(tg.topics || {}).length ? '<button data-act="tgTopicsReset">Temalarni qayta bog\'lash</button>' : ''}</div></div>` : ''}
+      <div class="toolbar" style="margin-top:8px"><button data-act="tgTopicsCreate">Temalarni hozir yaratish</button><button data-act="tgTopicIcons">Temalarni bezash (ikonka va smaylik)</button>${Object.keys(tg.topics || {}).length ? '<button data-act="tgTopicsReset">Temalarni qayta bog\'lash</button>' : ''}</div></div>` : ''}
     <div class="toolbar" style="margin-top:12px">
       <button class="primary" data-act="tgSave">Saqlash</button>
       <button data-act="tgDetect">Guruh ID sini aniqlash</button>
