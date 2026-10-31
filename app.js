@@ -135,6 +135,7 @@ function emptyDb() {
     featureSets: JSON.parse(JSON.stringify(DEFAULT_FEATURE_SETS)),
     categoryIcons: {},
     expenseCats: JSON.parse(JSON.stringify(DEFAULT_EXPENSE_CATS)),
+    uiOrder: { sections: [], tabs: {} },
     customerTypes: DEFAULT_CUSTOMER_TYPES.slice(),
     regions: JSON.parse(JSON.stringify(DEFAULT_REGIONS)),
     currency: { rate: 0, date: '', source: '', updatedAt: '', manual: false },
@@ -3001,6 +3002,42 @@ function deletePayment(id) {
   save();
 }
 
+// ---------- Interfeys: bo'limlar va tablar tartibi ----------
+// Administrator tugmalar ketma-ketligini o'zgartiradi — hamma xodimlarda shu tartib bo'ladi.
+function viewLayout() {
+  const secs = orderBy(SECTIONS.filter((s) => !s.hideInNav), db.uiOrder?.sections, (s) => s.id);
+  const arrows = (kind, sec, i, n) => `<span class="lo-arrows">
+      <button type="button" class="small icon-only" data-act="loMove" data-kind="${kind}" data-sec="${sec}" data-i="${i}" data-d="-1" ${i === 0 ? 'disabled' : ''} title="Yuqoriga">▲</button>
+      <button type="button" class="small icon-only" data-act="loMove" data-kind="${kind}" data-sec="${sec}" data-i="${i}" data-d="1" ${i === n - 1 ? 'disabled' : ''} title="Pastga">▼</button></span>`;
+  const open = filterVal('layout.open');
+  return `<div class="card narrow"><h3>Tugmalar tartibi</h3>
+    <p class="muted small">▲ ▼ bilan bo'limlar (asosiy menyu) va ularning ichidagi tablar ketma-ketligini o'zgartiring. O'zgarish darhol saqlanadi va barcha xodimlarda ko'rinadi. Birinchi bo'lim — dastur ochilganda chiqadigan sahifa.</p>
+    <div class="lo-list">${secs.map((s, i) => {
+      const views = s.views ? orderBy(s.views.slice(), db.uiOrder?.tabs?.[s.id], (v) => v[0]) : [];
+      return `<div class="lo-sec">
+        <div class="lo-row"><span class="lo-ic">${icon(s.icon)}</span><b>${esc(s.title)}</b>
+          ${views.length > 1 ? `<button type="button" class="small lo-tabs-btn" data-act="loOpen" data-sec="${s.id}" title="Ichidagi tablar tartibi">${open === s.id ? '▴ yopish' : `▾ ${views.length} tab`}</button>` : '<span></span>'}
+          ${arrows('sec', '', i, secs.length)}</div>
+        ${open === s.id ? `<div class="lo-tabs">${views.map((v, j) => `<div class="lo-row lo-tab"><span class="lo-ic"></span><span>${esc(viewTitle(v))}</span><span></span>${arrows('tab', s.id, j, views.length)}</div>`).join('')}</div>` : ''}
+      </div>`;
+    }).join('')}</div>
+    <div class="toolbar" style="margin-top:12px"><button data-act="loReset">Asl tartibga qaytarish</button></div></div>`;
+}
+
+function moveLayout({ kind, sec, i, d }) {
+  const o = (db.uiOrder = Object.assign({ sections: [], tabs: {} }, db.uiOrder));
+  let ids;
+  if (kind === 'sec') ids = orderBy(SECTIONS.filter((s) => !s.hideInNav), o.sections, (s) => s.id).map((s) => s.id);
+  else ids = orderBy(SECTIONS.find((s) => s.id === sec).views.slice(), o.tabs?.[sec], (v) => v[0]).map((v) => v[0]);
+  const a = +i;
+  const b = a + +d;
+  if (b < 0 || b >= ids.length) return;
+  [ids[a], ids[b]] = [ids[b], ids[a]];
+  if (kind === 'sec') o.sections = ids;
+  else o.tabs = Object.assign({}, o.tabs, { [sec]: ids });
+  save();
+}
+
 // ---------- Xarajatlar ----------
 // Xarajat — kontragentga bog'liq bo'lmagan chiqim to'lovi (expense: true). Kassadan ayiriladi
 // va «Foyda va zarar» hisobotida xarajat sifatida olinadi.
@@ -3308,7 +3345,7 @@ const SECTIONS = [
   { id: 'expenses', icon: 'arrowOut', title: 'Xarajatlar', views: [['expenses', 'Xarajatlar', 'money|expenses'], ['expenseCats', 'Moddalar', 'A']] },
   { id: 'reports', icon: 'chart', title: 'Hisobotlar', views: [['profit', 'Foyda va zarar', 'reports'], ['top', 'Savdo tahlili', 'reports']] },
   { id: 'install', icon: 'phone', title: "Telefonga o'rnatish", hideInNav: true },
-  { id: 'settings', icon: 'settings', title: 'Sozlamalar', views: [['users', 'Foydalanuvchilar', 'A'], ['currency', 'Valyuta kursi', 'A'], ['server', 'Server', 'A'], ['telegram', 'Telegram', 'A'], ['company', 'Kompaniya', 'A'], ['categories', "Ro'yxatlar", 'A'], ['backup', 'Zaxira nusxa', 'A'], ['profile', 'Profil']] },
+  { id: 'settings', icon: 'settings', title: 'Sozlamalar', views: [['users', 'Foydalanuvchilar', 'A'], ['currency', 'Valyuta kursi', 'A'], ['server', 'Server', 'A'], ['telegram', 'Telegram', 'A'], ['company', 'Kompaniya', 'A'], ['categories', "Ro'yxatlar", 'A'], ['backup', 'Zaxira nusxa', 'A'], ['layout', 'Interfeys', 'A'], ['profile', 'Profil']] },
 ];
 
 function viewTitle(v) {
@@ -3316,8 +3353,14 @@ function viewTitle(v) {
 }
 
 const canView = (need) => !need || isAdmin() || (need !== 'A' && need.split('|').some(can));
-const visibleViews = (s) => s.views && s.views.filter((v) => canView(v[2]));
-const visibleSections = () => SECTIONS.filter((s) => (s.admin ? isAdmin() : !s.views || visibleViews(s).length));
+// Administrator belgilagan tartib (Sozlamalar → Interfeys); ro'yxatda yo'qlari oxirida, asl tartibida
+function orderBy(list, keys, keyOf) {
+  if (!keys?.length) return list;
+  const pos = (x) => { const i = keys.indexOf(keyOf(x)); return i < 0 ? keys.length : i; };
+  return list.map((x, i) => [x, i]).sort((a, b) => pos(a[0]) - pos(b[0]) || a[1] - b[1]).map(([x]) => x);
+}
+const visibleViews = (s) => s.views && orderBy(s.views.filter((v) => canView(v[2])), db.uiOrder?.tabs?.[s.id], (v) => v[0]);
+const visibleSections = () => orderBy(SECTIONS.filter((s) => (s.admin ? isAdmin() : !s.views || visibleViews(s).length)), db.uiOrder?.sections, (s) => s.id);
 
 function currentRoute() {
   const [sec, view] = location.hash.slice(1).split('/');
@@ -4587,7 +4630,7 @@ const VIEWS = {
   dashboard: viewDashboard, products: viewProducts, stock: viewStock, parties: viewParties, debts: viewDebts,
   payments: viewPayments, cash: viewCash, profit: viewProfit, top: viewTop, users: viewUsers,
   telegram: viewTelegram, company: viewCompany, warehouses: viewWarehouses, categories: viewCategories, backup: viewBackup,
-  server: viewServer, profile: viewProfile, kits: viewKits, expenses: viewExpenses, expenseCats: viewExpenseCats, currency: viewCurrency, install: viewInstall, labels: viewLabels, labelDesign: viewLabelDesign,
+  server: viewServer, profile: viewProfile, layout: viewLayout, kits: viewKits, expenses: viewExpenses, expenseCats: viewExpenseCats, currency: viewCurrency, install: viewInstall, labels: viewLabels, labelDesign: viewLabelDesign,
 };
 
 function render() {
@@ -4675,6 +4718,9 @@ const ACTIONS = {
   newProduct: () => newProduct(),
   newKit: () => editKit(null),
   newExpense: (ds) => newExpense(ds.cat),
+  loMove: (ds) => moveLayout(ds),
+  loOpen: (ds) => { filters['layout.open'] = filterVal('layout.open') === ds.sec ? '' : ds.sec; render(); },
+  loReset: () => { if (!confirm("Bo'limlar va tablar asl tartibga qaytarilsinmi?")) return; db.uiOrder = { sections: [], tabs: {} }; save(); },
   expFilter: (ds) => { filters['expenses.cat'] = ds.cat || ''; render(); },
   ecAdd: () => { db.expenseCats = readExpenseCats(); db.expenseCats.push({ emoji: '📦', name: '' }); render(); $$('.ec-name').pop()?.focus(); },
   ecDel: (ds) => { const cats = readExpenseCats(); const c = (db.expenseCats || [])[+ds.i]; if (c && !confirm(`«${c.name}» moddasi o'chirilsinmi?`)) return; db.expenseCats = cats.filter((x) => x.name !== c?.name); save(); },
@@ -5392,7 +5438,7 @@ Object.assign(ACTIONS, {
 // Ruxsatga bog'liq amallar (tugma ko'rinmasa ham bajarilmasin)
 const ACTION_PERMS = { newProduct: 'products', newKit: 'products', exportProducts: 'products' };
 const ADMIN_ACTIONS = ['deleteProduct', 'unarchive', 'exportProducts', 'tgProduct', 'deleteParty', 'deletePayment',
-  'ecAdd', 'ecDel', 'ecSave', 'tgSave', 'tgDetect', 'tgTest', 'tgAll', 'tgTopicsCreate', 'tgTopicsReset', 'tgTopicIcons', 'coSave', 'editWh', 'deleteWh', 'catSave', 'catAdd', 'catDel', 'catIconOpen', 'catIconSet', 'fsAdd', 'fsDel', 'fsFieldAdd', 'fsFieldDel', 'regAdd', 'regDel', 'chipRemove', 'backup', 'backupDetect', 'backupSend', 'demo', 'reset', 'editUser', 'exportDocs',
+  'ecAdd', 'ecDel', 'ecSave', 'loMove', 'loReset', 'tgSave', 'tgDetect', 'tgTest', 'tgAll', 'tgTopicsCreate', 'tgTopicsReset', 'tgTopicIcons', 'coSave', 'editWh', 'deleteWh', 'catSave', 'catAdd', 'catDel', 'catIconOpen', 'catIconSet', 'fsAdd', 'fsDel', 'fsFieldAdd', 'fsFieldDel', 'regAdd', 'regDel', 'chipRemove', 'backup', 'backupDetect', 'backupSend', 'demo', 'reset', 'editUser', 'exportDocs',
   'serverSettings', 'refreshUsage', 'migrateLocal', 'rateRefresh', 'rateManual', 'rateAuto',
   'ldSel', 'ldFs', 'ldBold', 'ldCur', 'ldAlign', 'ldCenter', 'ldFull', 'ldTest', 'ldUndo', 'ldReset', 'ldSave'];
 

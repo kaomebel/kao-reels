@@ -1195,3 +1195,17 @@ fieldset[disabled] .qty-step .qs { opacity: .35; }
 }
 .pick-quick .pick-sub { display: block; margin-top: 2px; }
 .pick-quick b { font-size: 14px; }
+
+/* Interfeys: tugmalar tartibi */
+.lo-list { display: grid; gap: 6px; }
+.lo-sec { border: 1px solid var(--border); border-radius: 12px; background: var(--card); }
+.lo-row { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto auto; align-items: center; gap: 8px; padding: 6px 8px 6px 12px; }
+.lo-ic svg { width: 20px; height: 20px; color: var(--accent); }
+.lo-arrows { display: inline-flex; gap: 4px; }
+.lo-arrows button { min-width: 40px; min-height: 40px; font-size: 13px; }
+.lo-arrows button:disabled { opacity: .3; }
+.lo-tabs { border-top: 1px dashed var(--border); padding: 4px 0; background: var(--bg); border-radius: 0 0 12px 12px; }
+.lo-tab { font-size: 14px; }
+.lo-tabs-btn { white-space: nowrap; }
+.lo-row > b, .lo-row > span:nth-child(2) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lo-tabs-btn { padding: 4px 10px; min-height: 40px; font-size: 13px; }
