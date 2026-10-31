@@ -354,6 +354,8 @@ function esc(s) {
 }
 
 const product = (id) => db.products.find((p) => p.id === id);
+// Hujjat qatori nomi: katalogdagi mahsulot yoki individual buyurtma nomi
+const itemName = (it) => product(it.productId)?.name || it.name || "(o'chirilgan)";
 const party = (id) => db.counterparties.find((c) => c.id === id);
 const warehouse = (id) => db.warehouses.find((w) => w.id === id);
 const doc = (id) => db.docs.find((d) => d.id === id);
@@ -416,10 +418,11 @@ function applyDocStock(st, d, sign) {
     st[pid] = st[pid] || {};
     st[pid][wh] = (st[pid][wh] || 0) + sign * q;
   };
+  const items = d.items.filter((it) => it.productId); // individual buyurtma omborga ta'sir qilmaydi
   if (t.move) {
-    d.items.forEach((it) => { add(it.productId, d.warehouseId, -it.qty); add(it.productId, d.toWarehouseId, it.qty); });
+    items.forEach((it) => { add(it.productId, d.warehouseId, -it.qty); add(it.productId, d.toWarehouseId, it.qty); });
   } else if (t.stock) {
-    d.items.forEach((it) => add(it.productId, d.warehouseId, t.stock * it.qty));
+    items.forEach((it) => add(it.productId, d.warehouseId, t.stock * it.qty));
   }
 }
 
@@ -440,7 +443,7 @@ function computeStock(excludeId) {
 function computeReserve() {
   const rs = {};
   db.docs.filter((d) => d.type === 'order' && RESERVING.includes(d.status)).forEach((d) => {
-    d.items.forEach((it) => {
+    d.items.filter((it) => it.productId).forEach((it) => {
       rs[it.productId] = rs[it.productId] || {};
       rs[it.productId][d.warehouseId] = (rs[it.productId][d.warehouseId] || 0) + it.qty;
     });
@@ -1166,19 +1169,31 @@ function itemRowHtml(t, it = {}, cur = 'UZS') {
 
 function docForm(type, d) {
   const t = DOC_TYPES[type];
-  let head = field('Sana', 'date', d.date, 'type="date" required');
+  const isOrder = type === 'order';
+  // Individual buyurtma va undan qilingan sotuv katalogdan tashqari qator bilan ishlaydi
+  const custom = (isOrder || type === 'sale') && d.orderKind === 'custom';
+  let head = '';
+  // Yangi sotuvda: mijoz hozir xarid qildimi yoki buyurtma berdimi
+  if (!d.id && (type === 'sale' || isOrder)) {
+    head += `<div class="field full"><span class="field-label">Sotuv turi</span><div class="seg" role="radiogroup">
+      <label><input type="radio" name="saleMode" value="sale" ${type === 'sale' ? 'checked' : ''}><span>${icon('bag')}Xarid qildi</span></label>
+      <label><input type="radio" name="saleMode" value="order" ${isOrder ? 'checked' : ''}><span>${icon('clock')}Buyurtma berdi</span></label>
+    </div></div>`;
+  }
+  head += field('Sana', 'date', d.date, 'type="date" required');
   if (t.party === 'customer') {
     // Mijoz: telefon → ism (ostida mos mijozlar ro'yxati) → mijoz turi.
     // Ism va telefon bo'sh qolsa — "Chakana xaridor".
     const cur = party(d.counterpartyId);
     const known = cur && cur.id !== 'retail' ? cur : null;
-    head += phoneField('Telefon raqami', 'partyPhone', known ? known.phone : '', 'id="partyPhone"');
+    const draft = d.draftParty || {};
+    head += phoneField('Telefon raqami', 'partyPhone', known ? known.phone : draft.phone && phoneDigits(draft.phone) !== '998' ? draft.phone : '', 'id="partyPhone"');
     head += `<label class="party-name">Mijoz ismi
-        <input name="partyName" id="partyName" autocomplete="off" placeholder="Ism familiya" value="${esc(known ? known.name : '')}">
+        <input name="partyName" id="partyName" autocomplete="off" placeholder="Ism familiya" value="${esc(known ? known.name : draft.name || '')}">
         <div class="party-suggest" id="partySuggest" hidden></div>
       </label>
       <input type="hidden" name="counterpartyId" id="partyId" value="${esc(known ? known.id : '')}">`;
-    head += customerTypeField(known ? known.ctype : '');
+    head += customerTypeField(known ? known.ctype : draft.ctype || '');
     head += `<div class="full party-hint" id="partyHint"></div>`;
   } else if (t.party) {
     // Telefon yozilsa — saqlangan mijoz avtomatik topiladi; topilmasa, yangi mijoz ismi so'raladi
@@ -1199,7 +1214,17 @@ function docForm(type, d) {
         <label><input type="radio" name="currency" value="USD" ${cur === 'USD' ? 'checked' : ''}><span>Dollar ($)</span></label></div></div>
       <label id="rateField" ${cur === 'USD' ? '' : 'hidden'}>Kurs: 1 $ =<span class="money-wrap"><input name="rate" class="money" data-cur="USD" inputmode="decimal" value="${esc(fmtIn(d.rate || usdRate() || '', 'USD'))}"><span class="cur">so'm</span></span></label>`;
   }
-  if (t.delivery) {
+  if (isOrder) {
+    head += field('Bajarish muddati *', 'deliveryDate', d.deliveryDate, 'type="date" required');
+    const names = db.users.map((u) => u.name).filter(Boolean);
+    head += `<label>Mas'ul xodim<input name="responsible" list="respList" autocomplete="off" placeholder="Kim bajaradi" value="${esc(d.responsible || '')}">
+      <datalist id="respList">${names.map((n) => `<option value="${esc(n)}">`).join('')}</datalist></label>`;
+    head += `<div class="field full"><span class="field-label">Buyurtma turi</span><div class="seg seg-sm" role="radiogroup">
+      <label><input type="radio" name="orderKind" value="standard" ${custom ? '' : 'checked'}><span>Standart — mavjud tovarlardan</span></label>
+      <label><input type="radio" name="orderKind" value="custom" ${custom ? 'checked' : ''}><span>Nostandart — individual buyurtma</span></label>
+    </div></div>`;
+    head += field('Yetkazish manzili', 'address', d.address, '', 'wide2');
+  } else if (t.delivery) {
     head += field('Yetkazish sanasi', 'deliveryDate', d.deliveryDate, 'type="date"');
     head += field('Yetkazish manzili', 'address', d.address, '', 'wide2');
   }
@@ -1207,22 +1232,40 @@ function docForm(type, d) {
   let foot = '';
   if (t.money || type === 'order' || type === 'purchaseOrder') foot += moneyField('Chegirma', 'discount', d.discount || '', cur, 'placeholder="0"');
   if (!d.id && t.pay) {
-    foot += moneyField(t.pay === 'in' ? "Hozir to'landi" : "Hozir to'ladik", 'payNow', d.payNow ?? '', 'UZS', 'placeholder="0"');
+    foot += moneyField(isOrder ? "Oldindan to'lov (zaklad)" : t.pay === 'in' ? "Hozir to'landi" : "Hozir to'ladik", 'payNow', d.payNow ?? '', 'UZS', 'placeholder="0"');
     foot += selectField("To'lov usuli", 'payMethod', Object.entries(PAY_METHODS), 'cash');
   }
   foot += textArea('Izoh', 'note', d.note);
   if (!d.id && t.tgAsk) foot += tgQuestion();
 
-  const items = (d.items && d.items.length ? d.items : [{}]).map((it) => itemRowHtml(t, it, cur)).join('');
+  const stdItems = custom ? [] : d.items || [];
+  const items = (stdItems.length ? stdItems : [{}]).map((it) => itemRowHtml(t, it, cur)).join('');
+  // Individual buyurtma — katalogda yo'q mebel: tavsifi, o'lchami, rangi va narxi yoziladi
+  const ci = (custom && d.items && d.items[0]) || {};
+  const customBlock = isOrder || custom ? `<div id="customBlock" ${custom ? '' : 'hidden'}>
+      ${!isOrder ? '<input type="hidden" name="orderKind" value="custom">' : ''}
+      <h4>Individual buyurtma</h4>
+      <div class="form-grid">
+        ${field('Buyurtma nomi *', 'cName', ci.name, 'placeholder="Masalan: Oshxona garnituri, 3.2 m"', 'full')}
+        ${field("O'lchami (sm)", 'cSize', ci.size, 'placeholder="320 × 60 × 220"')}
+        ${field('Rangi', 'cColor', ci.color, 'placeholder="Oq gladkiy / Dub votan"')}
+        ${field('Soni', 'cQty', ci.qty || 1, 'type="number" min="1"')}
+        ${moneyField('Narxi (donasi)', 'cPrice', ci.price ?? '', 'UZS')}
+        ${textArea('Tavsifi: material, furnitura, qo\'shimcha talablar', 'cSpec', ci.spec)}
+      </div>
+    </div>` : '';
   return `<div class="form-grid">${head}</div>
+    ${customBlock}
+    <div id="stdBlock" ${custom ? 'hidden' : ''}>
     <h4>Mahsulotlar</h4>
     <div class="table-wrap"><table class="items-table">
       <thead><tr><th>Mahsulot</th><th class="num">Omborda</th><th>Soni</th><th>Narxi</th><th class="num">Summa</th><th></th></tr></thead>
       <tbody id="itemRows">${items}</tbody>
     </table></div>
     <button type="button" class="small" id="addItemRow">${icon('plus')}Qator qo'shish</button>
+    </div>
     <div class="form-grid" style="margin-top:12px">${foot}</div>
-    <div class="total-line">Jami: <b id="docTotal">0</b></div>`;
+    <div class="total-line" id="totalLine" data-paid="${d.id ? docPaid(d) : 0}">Jami: <b id="docTotal">0</b><span id="docRest"></span></div>`;
 }
 
 function bindPartyLookup(kind) {
@@ -1402,11 +1445,20 @@ function bindDocForm(type, editingId) {
       $('.it-min', tr).textContent = min ? `eng kami: ${fmt(min)}` : '';
       priceEl.classList.toggle('below-min', !!min && num(priceEl.value) < min);
     });
+    if (isCustom()) sum = num($('#modalBody [name=cQty]').value) * num($('#modalBody [name=cPrice]').value);
     const total = Math.max(0, sum - num(discount?.value));
     $('#docTotal').innerHTML = curOf() === 'USD'
       ? `${fmtUsd(total)} <span class="muted">≈ ${money(total * rateOf())}</span>`
       : money(total);
+    // Mijoz to'lovi: oldin to'langan + hozir (zaklad) → qolgan summa
+    if (t.pay === 'in' && curOf() === 'UZS') {
+      const paid = num($('#totalLine').dataset.paid) + num($('#modalBody [name=payNow]')?.value);
+      $('#docRest').innerHTML = paid || type === 'order'
+        ? ` <span class="rest">· ${type === 'order' ? 'Zaklad' : "To'langan"}: <b>${money(paid)}</b> · Qolgan to'lov: <b class="${total - paid > 0 ? 'debt' : 'ok'}">${money(Math.max(0, total - paid))}</b></span>`
+        : '';
+    }
   };
+  const isCustom = () => orderKindOf() === 'custom';
 
   body.addEventListener('change', (e) => {
     if (e.target.classList.contains('it-product')) {
@@ -1437,13 +1489,55 @@ function bindDocForm(type, editingId) {
     recalc();
   }));
   rateInput?.addEventListener('input', recalc);
+  // Standart / nostandart buyurtma
+  $$('#modalBody [name=orderKind]').forEach((r) => r.addEventListener('change', () => {
+    $('#customBlock').hidden = !isCustom();
+    $('#stdBlock').hidden = isCustom();
+    recalc();
+  }));
+  $('#customBlock')?.addEventListener('input', recalc);
+  $('#modalBody [name=payNow]')?.addEventListener('input', recalc);
+  // "Xarid qildi" ↔ "Buyurtma berdi": kiritilganlarni saqlab, oynani boshqa turga o'tkazamiz
+  $$('#modalBody [name=saleMode]').forEach((r) => r.addEventListener('change', () => {
+    const f = Object.fromEntries(new FormData($('#modalForm')).entries());
+    const items = readItems();
+    openDoc(r.value, null, {
+      date: f.date,
+      counterpartyId: f.counterpartyId || (f.partyName ? '' : 'retail'),
+      warehouseId: f.warehouseId,
+      address: f.address,
+      deliveryDate: f.deliveryDate,
+      discount: num(f.discount),
+      payNow: num(f.payNow) || '',
+      note: f.note,
+      items: items.length ? items : undefined,
+      draftParty: { phone: f.partyPhone, name: f.partyName, ctype: f.customerType },
+    });
+  }));
   whSel.addEventListener('change', recalc);
   if (discount) discount.addEventListener('input', recalc);
   recalc();
   return stock;
 }
 
+// Buyurtma turi: tanlangan radio yoki (individual buyurtmadan sotuvda) yashirin maydon
+const orderKindOf = () => $$('#modalBody [name=orderKind]').find((r) => r.type === 'hidden' || r.checked)?.value || 'standard';
+
 function readItems() {
+  // Individual (nostandart) buyurtma — bitta qator, katalogdagi mahsulotga bog'lanmagan
+  if (orderKindOf() === 'custom') {
+    const name = $('#modalBody [name=cName]').value.trim();
+    if (!name) return [];
+    return [{
+      productId: null,
+      name,
+      size: $('#modalBody [name=cSize]').value.trim(),
+      color: $('#modalBody [name=cColor]').value.trim(),
+      spec: $('#modalBody [name=cSpec]').value.trim(),
+      qty: Math.max(1, num($('#modalBody [name=cQty]').value)),
+      price: num($('#modalBody [name=cPrice]').value),
+    }];
+  }
   const items = [];
   $$('#itemRows tr').forEach((tr) => {
     const productId = $('.it-product', tr).value;
@@ -1467,6 +1561,7 @@ function openDoc(type, existing, preset = {}) {
   let stock;
   const extra = [];
   if (existing) {
+    if (type === 'order') extra.push({ label: 'Shartnoma', cls: 'primary-soft', onClick: () => printContract(existing.id) });
     extra.push({ label: 'Chop etish', onClick: () => printDoc(existing.id) });
     if (t.pay && (isAdmin() || t.pay === 'in')) extra.push({ label: "To'lov", onClick: () => newPayment(t.pay, { counterpartyId: existing.counterpartyId, docId: existing.id }) });
     if (t.next && canUseDoc(t.next)) extra.push({ label: `→ ${DOC_TYPES[t.next].one}`, onClick: () => createFrom(existing.id) });
@@ -1494,7 +1589,7 @@ async function saveDoc(type, existing, preset, data, stock) {
   const t = DOC_TYPES[type];
   const items = readItems();
   if (!items.length) {
-    alert('Kamida bitta mahsulot tanlang.');
+    alert(data.orderKind === 'custom' ? 'Individual buyurtma nomini kiriting.' : 'Kamida bitta mahsulot tanlang.');
     return false;
   }
   const currency = t.fx && data.currency === 'USD' ? 'USD' : 'UZS';
@@ -1503,6 +1598,11 @@ async function saveDoc(type, existing, preset, data, stock) {
     return false;
   }
   if (!existing && t.tgAsk && !tgAnswered(data)) return false;
+  if (type === 'order' && !data.deliveryDate) {
+    alert('Buyurtmani bajarish muddatini kiriting.');
+    $('#modalBody [name=deliveryDate]')?.focus();
+    return false;
+  }
 
   // Eng kam narxdan arzon sotish: sotuvchiga ruxsat yo'q, administrator tasdiqlaydi
   if (t.price === 'sale' && type !== 'salesReturn') {
@@ -1564,7 +1664,7 @@ async function saveDoc(type, existing, preset, data, stock) {
   // Ombordan chiqarishda yetarli qoldiq borligini tekshiramiz
   if (t.stock < 0 || t.move) {
     const need = {};
-    items.forEach((it) => { need[it.productId] = (need[it.productId] || 0) + it.qty; });
+    items.filter((it) => it.productId).forEach((it) => { need[it.productId] = (need[it.productId] || 0) + it.qty; });
     const short = Object.entries(need)
       .filter(([pid, q]) => qtyIn(stock, pid, data.warehouseId) < q)
       .map(([pid, q]) => `${product(pid).name}: kerak ${q}, bor ${qtyIn(stock, pid, data.warehouseId)}`);
@@ -1585,6 +1685,8 @@ async function saveDoc(type, existing, preset, data, stock) {
     items,
     currency: t.fx ? currency : undefined,
     rate: currency === 'USD' ? num(data.rate) : undefined,
+    orderKind: type === 'order' || data.orderKind === 'custom' ? (data.orderKind === 'custom' ? 'custom' : 'standard') : d.orderKind,
+    responsible: type === 'order' ? (data.responsible || '').trim() : d.responsible,
   });
 
   if (!existing) {
@@ -1617,6 +1719,8 @@ function createFrom(id) {
     discount: base.discount,
     currency: base.currency,
     rate: base.rate,
+    orderKind: base.orderKind,
+    responsible: base.responsible,
     items: base.items.map((it) => ({ ...it })),
     baseId: base.id,
     orderId: base.type === 'order' ? base.id : undefined,
@@ -1643,16 +1747,11 @@ function printDoc(id) {
   const t = DOC_TYPES[d.type];
   const c = party(d.counterpartyId) || {};
   const rows = d.items.map((it, i) => {
-    const p = product(it.productId) || {};
+    const p = product(it.productId) || { name: it.name, size: it.size, color: it.color };
     return `<tr><td>${i + 1}</td><td>${esc(p.name)}${p.code ? ' (' + esc(p.code) + ')' : ''}<br><small>${esc([p.size, p.color].filter(Boolean).join(', '))}</small></td><td>${it.qty} ${esc(p.unit || '')}</td><td>${fmtIn(it.price, d.currency)}</td><td>${fmtIn(Math.round(it.qty * it.price * 100) / 100, d.currency)}</td></tr>`;
   }).join('');
   const paid = t.pay ? docPaid(d) : 0;
-  const w = window.open('', '_blank');
-  if (!w) {
-    alert("Brauzer yangi oynani blokladi. Ushbu sayt uchun qalqib chiquvchi oynalarga ruxsat bering.");
-    return;
-  }
-  w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${esc(t.one)} ${esc(d.no)}</title>
+  printHtml(`<!doctype html><html><head><meta charset="utf-8"><title>${esc(t.one)} ${esc(d.no)}</title>
     <style>body{font-family:Arial,sans-serif;padding:24px;color:#000}table{width:100%;border-collapse:collapse;margin:12px 0}td,th{border:1px solid #888;padding:6px;text-align:left;vertical-align:top}h2{margin:0 0 4px}.r{text-align:right}</style>
     </head><body>
     <div><b>${esc(db.company.name)}</b> ${esc(db.company.phone)} ${esc(db.company.address)}</div>
@@ -1665,8 +1764,99 @@ function printDoc(id) {
     ${t.pay ? `<br>To'langan: ${money(paid)}<br>Qoldiq: ${money(Math.max(0, docTotal(d) - paid))}` : ''}</div>
     ${d.note ? `<p>${esc(d.note)}</p>` : ''}
     <p style="margin-top:48px">Topshirdi: ______________ &nbsp;&nbsp;&nbsp; Qabul qildi: ______________</p>
-    <script>window.onload=()=>window.print()<\/script></body></html>`);
-  w.document.close();
+    </body></html>`);
+}
+
+// Chop etish: yashirin ichki oyna orqali — telefonga o'rnatilgan ilovada ham ishlaydi
+function printHtml(html) {
+  const frame = document.createElement('iframe');
+  frame.setAttribute('aria-hidden', 'true');
+  frame.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden';
+  document.body.append(frame);
+  const fdoc = frame.contentDocument;
+  fdoc.open();
+  fdoc.write(html);
+  fdoc.close();
+  setTimeout(() => {
+    try {
+      frame.contentWindow.focus();
+      frame.contentWindow.print();
+    } catch (e) {
+      alert("Chop etib bo'lmadi: " + e.message);
+    }
+    setTimeout(() => frame.remove(), 60000);
+  }, 300);
+}
+
+const DEFAULT_CONTRACT_TERMS = [
+  'Sotuvchi buyurtmani shartnomada ko\'rsatilgan muddatda va kelishilgan sifatda bajaradi.',
+  "Xaridor qolgan to'lovni buyurtma topshirilayotganda to'liq to'laydi.",
+  "Individual (nostandart) buyurtmaning o'lchami, rangi va materiali xaridor bilan kelishilgan; ishlab chiqarish boshlangandan keyin ularni o'zgartirish qo'shimcha haq evaziga amalga oshiriladi.",
+  "Xaridor buyurtmani qabul qilayotganda ko'zdan kechiradi; ko'rinadigan kamchiliklar haqida shu vaqtning o'zida aytadi.",
+  "Mebelga kafolat muddati — 12 oy. Noto'g'ri foydalanish va mexanik shikastlanish kafolatga kirmaydi.",
+].join('\n');
+
+// Buyurtma bo'yicha ikki tomonlama shartnoma: bitta varaqda ikki nusxa (sotuvchi va xaridor uchun)
+function contractHtml(d) {
+  const c = party(d.counterpartyId) || {};
+  const co = db.company;
+  const total = docTotal(d);
+  const paid = docPaid(d);
+  const rest = Math.max(0, total - paid);
+  const custom = d.orderKind === 'custom';
+  const rows = d.items.map((it, i) => {
+    const p = product(it.productId) || {};
+    const size = it.size || p.size;
+    const color = it.color || p.color;
+    return `<tr><td>${i + 1}</td><td><b>${esc(itemName(it))}</b>${size || color ? `<br><small>${esc([size && size + ' sm', color].filter(Boolean).join(', '))}</small>` : ''}${it.spec ? `<br><small>${esc(it.spec)}</small>` : ''}</td>
+      <td class="r">${it.qty}</td><td class="r">${fmt(it.price)}</td><td class="r">${fmt(it.qty * it.price)}</td></tr>`;
+  }).join('');
+  const terms = String(co.contractTerms || DEFAULT_CONTRACT_TERMS).split('\n').map((x) => x.trim()).filter(Boolean);
+  const copy = (label) => `<section class="copy">
+    <div class="top"><div><b>${esc(co.name)}</b><br>${esc([co.address, co.phone].filter(Boolean).join(' · '))}</div><div class="r small">${label}</div></div>
+    <h1>BUYURTMA SHARTNOMASI № ${esc(d.no)}</h1>
+    <div class="c small">${fmtDate(d.date)}</div>
+    <table class="parties"><tr>
+      <td><b>Sotuvchi:</b> ${esc(co.name)}${d.responsible ? `<br>Mas'ul: ${esc(d.responsible)}` : ''}</td>
+      <td><b>Xaridor:</b> ${esc(c.name || '')}${c.phone ? `<br>Tel: ${esc(c.phone)}` : ''}${d.address || c.address ? `<br>Manzil: ${esc(d.address || c.address)}` : ''}</td>
+    </tr></table>
+    <p><b>1. Buyurtma.</b> ${custom ? 'Individual (nostandart) buyurtma' : 'Standart mahsulotlar'}:</p>
+    <table><tr><th>№</th><th>Nomi</th><th class="r">Soni</th><th class="r">Narxi</th><th class="r">Summa</th></tr>${rows}</table>
+    <p><b>2. Narx va to'lov.</b> Umumiy summa: <b>${money(total)}</b>${d.discount ? ` (chegirma ${money(d.discount)})` : ''}.
+      Oldindan to'lov (zaklad): <b>${money(paid)}</b>. Qolgan to'lov: <b>${money(rest)}</b>.</p>
+    <p><b>3. Muddat.</b> Buyurtma <b>${fmtDate(d.deliveryDate) || '______'}</b> gacha bajariladi${d.address ? `, yetkazish manzili: ${esc(d.address)}` : ''}.</p>
+    <p><b>4. Shartlar.</b></p>
+    <ol>${terms.map((x) => `<li>${esc(x)}</li>`).join('')}</ol>
+    <table class="sign"><tr>
+      <td>Sotuvchi: ____________________<br><small>${esc(d.responsible || co.name)}</small></td>
+      <td>Xaridor: ____________________<br><small>${esc(c.name || '')} — shartlar bilan tanishdim</small></td>
+    </tr></table>
+  </section>`;
+  return `<!doctype html><html><head><meta charset="utf-8"><title>Shartnoma ${esc(d.no)}</title>
+    <style>
+      @page { size: A4; margin: 10mm; }
+      body { font-family: Arial, sans-serif; font-size: 10.5px; color: #000; margin: 0; }
+      .copy { break-inside: avoid; page-break-inside: avoid; padding: 2mm 0 4mm; }
+      .cut { border-top: 1px dashed #777; margin: 3mm 0; text-align: center; font-size: 9px; color: #555; }
+      .top { display: flex; justify-content: space-between; gap: 10px; }
+      h1 { font-size: 14px; text-align: center; margin: 4px 0 0; }
+      .c { text-align: center; } .r { text-align: right; } .small { font-size: 9px; }
+      table { width: 100%; border-collapse: collapse; margin: 4px 0; }
+      th, td { border: 1px solid #999; padding: 3px 5px; text-align: left; vertical-align: top; }
+      .parties td, .sign td { border: none; width: 50%; padding: 4px 0; }
+      .sign td { padding-top: 14px; }
+      p { margin: 4px 0; } ol { margin: 2px 0 4px 16px; padding: 0; } li { margin: 1px 0; }
+    </style></head><body>
+    ${copy('1-nusxa — sotuvchi uchun')}
+    <div class="cut">✂ - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -</div>
+    ${copy('2-nusxa — xaridor uchun')}
+  </body></html>`;
+}
+
+function printContract(id) {
+  const d = doc(id);
+  if (!d) return;
+  printHtml(contractHtml(d));
 }
 
 // ---------- Inventarizatsiya ----------
@@ -2040,15 +2230,18 @@ function viewDocs(type) {
   const list = db.docs.filter((d) => d.type === type)
     .filter((d) => inPeriod(type, d.date))
     .filter((d) => !st || d.status === st)
-    .filter((d) => !q || [d.no, party(d.counterpartyId)?.name, party(d.counterpartyId)?.phone, d.note, ...d.items.map((it) => product(it.productId)?.name)].join(' ').toLowerCase().includes(q) || phoneMatch(party(d.counterpartyId)?.phone, q))
+    .filter((d) => !q || [d.no, party(d.counterpartyId)?.name, party(d.counterpartyId)?.phone, d.note, ...d.items.map(itemName)].join(' ').toLowerCase().includes(q) || phoneMatch(party(d.counterpartyId)?.phone, q))
     .sort((a, b) => b.date.localeCompare(a.date) || b.no.localeCompare(a.no));
 
   const statusFilter = t.statuses
     ? `<select data-filter="${type}.status"><option value="">Barcha holatlar</option>${Object.entries(t.statuses).map(([k, v]) => `<option value="${k}" ${k === st ? 'selected' : ''}>${v}</option>`).join('')}</select>`
     : '';
   const cols = ['№', 'Sana', t.party ? 'Kontragent' : 'Ombor', 'Mahsulotlar', 'Summa'];
-  if (t.pay) cols.push("To'langan");
+  const isOrder = type === 'order';
+  if (t.pay) cols.push(isOrder ? "Zaklad / qolgan" : "To'langan");
+  if (isOrder) cols.push('Muddat', "Mas'ul");
   if (t.statuses) cols.push('Holati');
+  if (isOrder) cols.push('');
   const total = list.reduce((s, d) => s + (type === 'inventory' ? 0 : docTotal(d)), 0);
 
   const rows = list.map((d) => {
@@ -2056,10 +2249,14 @@ function viewDocs(type) {
     const where = t.party ? esc(party(d.counterpartyId)?.name) : esc(warehouse(d.warehouseId)?.name) + (t.move ? ' → ' + esc(warehouse(d.toWarehouseId)?.name) : '');
     return `<tr class="click" data-act="openDoc" data-id="${d.id}">
       <td>${esc(d.no)}</td><td>${fmtDate(d.date)}${d.userId ? `<div class="muted small">${esc(userName(d.userId))}</div>` : ''}</td><td>${where}</td>
-      <td class="items-cell">${d.items.slice(0, 3).map((it) => `${esc(product(it.productId)?.name)} × ${it.qty}`).join('<br>')}${d.items.length > 3 ? `<br><span class="muted">yana ${d.items.length - 3} ta</span>` : ''}</td>
+      <td class="items-cell">${d.items.slice(0, 3).map((it) => `${esc(itemName(it))} × ${it.qty}`).join('<br>')}${d.items.length > 3 ? `<br><span class="muted">yana ${d.items.length - 3} ta</span>` : ''}</td>
       <td class="num">${type === 'inventory' ? '' : money(docTotal(d))}${d.currency === 'USD' ? `<div class="muted small">${fmtUsd(docTotalCur(d))} · ${fmtRate(d.rate)}</div>` : ''}</td>
-      ${t.pay ? `<td class="num">${paid >= docTotal(d) && paid > 0 ? badge("To'langan", 'done') : paid > 0 ? fmt(paid) : badge("To'lanmagan", 'cancel')}</td>` : ''}
+      ${t.pay ? (isOrder
+        ? `<td class="num">${fmt(paid)}<div class="small ${docTotal(d) - paid > 0 ? 'debt' : 'ok'}">qoldi ${fmt(Math.max(0, docTotal(d) - paid))}</div></td>`
+        : `<td class="num">${paid >= docTotal(d) && paid > 0 ? badge("To'langan", 'done') : paid > 0 ? fmt(paid) : badge("To'lanmagan", 'cancel')}</td>`) : ''}
+      ${isOrder ? `<td class="${d.deliveryDate && d.deliveryDate < today() && RESERVING.includes(d.status) ? 'debt' : ''}">${fmtDate(d.deliveryDate)}${d.orderKind === 'custom' ? '<div class="muted small">individual</div>' : ''}</td><td>${esc(d.responsible || '')}</td>` : ''}
       ${t.statuses ? `<td>${badge(t.statuses[d.status] || '', d.status)}</td>` : ''}
+      ${isOrder ? `<td class="actions"><button class="small icon-only" data-act="contract" data-id="${d.id}" title="Shartnomani chop etish">${icon('file')}</button></td>` : ''}
     </tr>`;
   }).join('');
 
@@ -2076,7 +2273,7 @@ function exportDocs(type) {
   const t = DOC_TYPES[type];
   const rows = [['№', 'Sana', 'Kontragent', 'Ombor', 'Mahsulot', 'Soni', 'Narxi', 'Summa', 'Holati']];
   db.docs.filter((d) => d.type === type).forEach((d) => d.items.forEach((it) => rows.push([
-    d.no, d.date, party(d.counterpartyId)?.name, warehouse(d.warehouseId)?.name, product(it.productId)?.name, it.qty, it.price, it.qty * it.price, t.statuses ? t.statuses[d.status] : '',
+    d.no, d.date, party(d.counterpartyId)?.name, warehouse(d.warehouseId)?.name, itemName(it), it.qty, it.price, it.qty * it.price, t.statuses ? t.statuses[d.status] : '',
   ])));
   download(`${type}-${today()}.csv`, toCsv(rows), 'text/csv;charset=utf-8');
 }
@@ -2253,13 +2450,14 @@ function profitRows(dateFilter) {
     const ls = linesSum(d);
     const k = ls ? docTotal(d) / ls : 1; // chegirmani qatorlarga taqsimlaymiz
     d.items.forEach((it) => {
-      const a = (acc[it.productId] = acc[it.productId] || { qty: 0, revenue: 0, cost: 0 });
+      const key = it.productId || 'custom:' + it.name;
+      const a = (acc[key] = acc[key] || { qty: 0, revenue: 0, cost: 0, name: it.name });
       a.qty += sign * it.qty;
       a.revenue += sign * it.qty * it.price * k;
       a.cost += sign * it.qty * (ctx.cost[it.productId] || 0);
     });
   });
-  return Object.entries(acc).map(([pid, a]) => ({ p: product(pid) || { name: "(o'chirilgan)" }, ...a, profit: a.revenue - a.cost }));
+  return Object.entries(acc).map(([pid, a]) => ({ p: product(pid) || { name: a.name ? `${a.name} (individual)` : "(o'chirilgan)" }, ...a, profit: a.revenue - a.cost }));
 }
 
 function viewProfit() {
@@ -2566,6 +2764,8 @@ function viewCompany() {
       <label class="full">Nomi<input id="coName" value="${esc(c.name)}"></label>
       <label>Telefon<input id="coPhone" class="phone" type="tel" inputmode="tel" placeholder="+998 90 123 45 67" value="${esc(c.phone)}"></label>
       <label>Manzil<input id="coAddress" value="${esc(c.address)}"></label>
+      <label class="full">Buyurtma shartnomasining shartlari (har bir qatorga bitta band)
+        <textarea id="coTerms" rows="7">${esc(c.contractTerms || DEFAULT_CONTRACT_TERMS)}</textarea></label>
     </div><div class="toolbar" style="margin-top:12px"><button class="primary" data-act="coSave">Saqlash</button></div></div>`;
 }
 
@@ -2944,7 +3144,7 @@ const ACTIONS = {
     if (confirm(`${ids.length} ta mahsulot guruhga yuborilsinmi? Telegram cheklovi sababli har biri ~4 soniyada (jami ~${Math.ceil(ids.length * 4 / 60)} daqiqa); shu vaqt sahifani yopmang.`)) { tgReadForm(); commit(); telegramPostProducts(ids, true); }
   },
   coSave: () => {
-    Object.assign(db.company, { name: $('#coName').value.trim(), phone: $('#coPhone').value.trim(), address: $('#coAddress').value.trim() });
+    Object.assign(db.company, { name: $('#coName').value.trim(), phone: $('#coPhone').value.trim(), address: $('#coAddress').value.trim(), contractTerms: $('#coTerms').value.trim() });
     save();
     alert('Saqlandi.');
   },
@@ -3003,6 +3203,7 @@ const ACTIONS = {
   },
   serverSettings: () => openServerSettings(),
   rateRefresh: () => refreshRate(true),
+  contract: (ds) => printContract(ds.id),
   installApp: async () => {
     if (!installPrompt) return;
     installPrompt.prompt();

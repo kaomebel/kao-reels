@@ -755,3 +755,8 @@ input.phone { font-variant-numeric: tabular-nums; letter-spacing: .3px; }
 .ptr.busy .ic { animation: spin .8s linear infinite; }
 /* O'rnatilgan ilovada brauzerning o'z "tortish"i bilan to'qnashmasin */
 @media (display-mode: standalone) { html, body { overscroll-behavior-y: contain; } }
+.total-line .rest { font-size: 15px; color: var(--muted); }
+.total-line .rest b { color: var(--text); }
+.total-line .rest b.debt { color: var(--danger); }
+.total-line .rest b.ok { color: var(--ok); }
+#modalExtra button.primary-soft { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-dark); font-weight: 600; }
