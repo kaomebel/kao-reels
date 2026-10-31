@@ -1058,3 +1058,20 @@ button.primary:active:not(:disabled) { background: var(--accent-dark); }
 .cat-ic-grid button { height: 46px; padding: 0; justify-content: center; }
 .cat-ic-grid button .ic { width: 24px; height: 24px; }
 .cat-ic-grid button.on { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+
+/* ---- Foydalanuvchi ruxsatlari ---- */
+.perm-box { display: grid; gap: 6px; }
+.perm-box[hidden] { display: none; }
+.perm-row { display: flex !important; flex-direction: row !important; align-items: flex-start; gap: 10px !important; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--card); color: var(--text) !important; cursor: pointer; }
+.perm-row:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); }
+.perm-row input { width: 20px; height: 20px; margin: 2px 0 0; flex: none; accent-color: var(--accent); }
+.perm-row span { display: grid; gap: 2px; }
+.perm-row b { font-size: 14px; }
+.perm-row small { color: var(--muted); font-size: 12.5px; }
+
+/* Tannarx ruxsati yo'q — kirim/ko'chirishda narx va summa ko'rinmaydi */
+.no-cost .doc-items th:nth-child(4), .no-cost .doc-items th:nth-child(5),
+.no-cost .doc-items td:nth-child(4), .no-cost .doc-items td:nth-child(5), .no-cost .it-min { display: none !important; }
+@media (max-width: 700px) {
+  .no-cost .doc-items tr { grid-template-areas: "pick pick pick" "qty qty rm" "avail avail avail"; }
+}

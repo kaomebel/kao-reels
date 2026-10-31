@@ -15,10 +15,16 @@ create table if not exists public.profiles (
   id uuid primary key references auth.users (id) on delete cascade,
   name text not null default '',
   login text not null default '',
-  role text not null default 'seller' check (role in ('admin', 'seller')),
+  role text not null default 'seller' check (role in ('admin', 'seller', 'purchaser')),
   active boolean not null default false,
+  -- Administrator belgilagan ruxsatlar (bo'sh bo'lsa — rolning odatiy ruxsatlari)
+  perms text[],
   created_at timestamptz not null default now()
 );
+-- Avvalgi versiyadan yangilashda: ruxsatlar ustuni va "Ta'minot xodimi" roli
+alter table public.profiles add column if not exists perms text[];
+alter table public.profiles drop constraint if exists profiles_role_check;
+alter table public.profiles add constraint profiles_role_check check (role in ('admin', 'seller', 'purchaser'));
 
 create or replace function public.is_active() returns boolean
 language sql stable security definer set search_path = public as $$
@@ -28,6 +34,36 @@ $$;
 create or replace function public.is_admin() returns boolean
 language sql stable security definer set search_path = public as $$
   select exists (select 1 from public.profiles where id = auth.uid() and active and role = 'admin');
+$$;
+
+-- Ruxsat bormi: administrator — hammasi; boshqalar — belgilangan ruxsatlar yoki rolning odatiylari
+-- (dasturdagi ROLE_PERMS bilan bir xil). Ruxsatlar: sale, enter, purchase, stockOps, products, costs, money, reports
+create or replace function public.has_perm(p text) returns boolean
+language sql stable security definer set search_path = public as $$
+  select exists (
+    select 1 from public.profiles
+    where id = auth.uid() and active and (
+      role = 'admin' or p = any(coalesce(perms, case role
+        when 'seller' then array['sale', 'enter']
+        when 'purchaser' then array['purchase', 'enter', 'products', 'costs']
+        else array[]::text[] end))));
+$$;
+
+-- Hujjat turi uchun kerakli ruxsat
+create or replace function public.doc_perm(t text) returns text
+language sql immutable as $$
+  select case
+    when t in ('order', 'sale', 'salesReturn') then 'sale'
+    when t in ('purchaseOrder', 'receipt', 'purchaseReturn') then 'purchase'
+    when t = 'enter' then 'enter'
+    when t in ('writeoff', 'move', 'inventory') then 'stockOps'
+  end;
+$$;
+
+-- Hujjat bilan ishlash mumkinmi (inventarizatsiya yakunida kirim va hisobdan chiqarish ham yaratiladi)
+create or replace function public.can_doc(t text) returns boolean
+language sql stable as $$
+  select public.has_perm(public.doc_perm(t)) or (t in ('enter', 'writeoff') and public.has_perm('stockOps'));
 $$;
 
 -- Birinchi ro'yxatdan o'tgan foydalanuvchi — faol administrator.
@@ -177,16 +213,17 @@ drop policy if exists profiles_update on public.profiles;
 create policy profiles_update on public.profiles for update to authenticated
   using (public.is_admin()) with check (public.is_admin());
 
--- Mahsulotlar va omborlar: hamma ko'radi, faqat administrator o'zgartiradi
+-- Mahsulotlar: hamma ko'radi, "Mahsulotlar" ruxsati borlar o'zgartiradi. Omborlar — faqat administrator
 drop policy if exists products_select on public.products;
 create policy products_select on public.products for select to authenticated using (public.is_active());
 drop policy if exists products_write on public.products;
 create policy products_write on public.products for all to authenticated
-  using (public.is_admin()) with check (public.is_admin());
+  using (public.has_perm('products')) with check (public.has_perm('products'));
 
+-- Kelish narxlari — faqat "Tannarx" ruxsati borlarga yuboriladi
 drop policy if exists costs_all on public.product_costs;
 create policy costs_all on public.product_costs for all to authenticated
-  using (public.is_admin()) with check (public.is_admin());
+  using (public.has_perm('costs')) with check (public.has_perm('costs'));
 
 drop policy if exists warehouses_select on public.warehouses;
 create policy warehouses_select on public.warehouses for select to authenticated using (public.is_active());
@@ -202,46 +239,51 @@ drop policy if exists settings_write on public.settings;
 create policy settings_write on public.settings for all to authenticated
   using (public.is_admin()) with check (public.is_admin());
 
--- Kontragentlar: sotuvchi faqat mijozlarni ko'radi va qo'shadi
+-- Kontragentlar: savdo xodimi — mijozlarni, xarid xodimi — ta'minotchilarni ko'radi va qo'shadi
 drop policy if exists cp_select on public.counterparties;
 create policy cp_select on public.counterparties for select to authenticated
-  using (public.is_admin() or (public.is_active() and kind in ('customer', 'both')));
+  using (public.is_admin() or public.has_perm('money')
+    or (kind in ('customer', 'both') and public.has_perm('sale'))
+    or (kind in ('supplier', 'both') and (public.has_perm('purchase') or public.has_perm('products'))));
 drop policy if exists cp_insert on public.counterparties;
 create policy cp_insert on public.counterparties for insert to authenticated
-  with check (public.is_admin() or (public.is_active() and kind = 'customer'));
+  with check (public.is_admin()
+    or (kind = 'customer' and public.has_perm('sale'))
+    or (kind = 'supplier' and (public.has_perm('purchase') or public.has_perm('products'))));
 drop policy if exists cp_update on public.counterparties;
 create policy cp_update on public.counterparties for update to authenticated
-  using (public.is_admin() or (public.is_active() and kind = 'customer'))
-  with check (public.is_admin() or (public.is_active() and kind = 'customer'));
+  using (public.is_admin() or (kind = 'customer' and public.has_perm('sale')) or (kind = 'supplier' and public.has_perm('purchase')))
+  with check (public.is_admin() or (kind = 'customer' and public.has_perm('sale')) or (kind = 'supplier' and public.has_perm('purchase')));
 drop policy if exists cp_delete on public.counterparties;
 create policy cp_delete on public.counterparties for delete to authenticated using (public.is_admin());
 
--- Hujjatlar: sotuvchi faqat savdo hujjatlarini ko'radi, o'z nomidan yaratadi, o'chira olmaydi
+-- Hujjatlar: xodim faqat ruxsati bor turdagi hujjatlarni ko'radi, o'z nomidan yaratadi, o'chira olmaydi
 drop policy if exists docs_select on public.docs;
 create policy docs_select on public.docs for select to authenticated
-  using (public.is_admin() or (public.is_active() and public.is_sales_type(type)));
+  using (public.is_admin() or public.can_doc(type));
 drop policy if exists docs_insert on public.docs;
 create policy docs_insert on public.docs for insert to authenticated
-  with check (public.is_admin() or (public.is_active() and public.is_sales_type(type) and user_id = auth.uid()::text));
+  with check (public.is_admin() or (public.can_doc(type) and user_id = auth.uid()::text));
 -- Buyurtma asosida jo'natish yaratilganda buyurtma holati o'zgaradi, shuning uchun
 -- sotuvchi boshqa sotuvchining savdo hujjatini ham yangilay oladi (dastur buni faqat holat uchun qiladi)
 drop policy if exists docs_update on public.docs;
 create policy docs_update on public.docs for update to authenticated
-  using (public.is_admin() or (public.is_active() and public.is_sales_type(type)))
-  with check (public.is_admin() or (public.is_active() and public.is_sales_type(type)));
+  using (public.is_admin() or public.can_doc(type))
+  with check (public.is_admin() or public.can_doc(type));
 drop policy if exists docs_delete on public.docs;
 create policy docs_delete on public.docs for delete to authenticated using (public.is_admin());
 
--- To'lovlar: sotuvchi faqat mijozlar bilan bog'liq to'lovlarni ko'radi va kiritadi
+-- To'lovlar: "Pul" ruxsati — hammasi; savdo xodimi — faqat mijozlar bilan bog'liq to'lovlar
 drop policy if exists pay_select on public.payments;
 create policy pay_select on public.payments for select to authenticated
-  using (public.is_admin() or (public.is_active() and public.is_customer(counterparty_id)));
+  using (public.is_admin() or public.has_perm('money') or (public.has_perm('sale') and public.is_customer(counterparty_id)));
 drop policy if exists pay_insert on public.payments;
 create policy pay_insert on public.payments for insert to authenticated
-  with check (public.is_admin() or (public.is_active() and user_id = auth.uid()::text and public.is_customer(counterparty_id)));
+  with check (public.is_admin() or (user_id = auth.uid()::text
+    and (public.has_perm('money') or (public.has_perm('sale') and public.is_customer(counterparty_id)))));
 drop policy if exists pay_update on public.payments;
 create policy pay_update on public.payments for update to authenticated
-  using (public.is_admin()) with check (public.is_admin());
+  using (public.has_perm('money')) with check (public.has_perm('money'));
 drop policy if exists pay_delete on public.payments;
 create policy pay_delete on public.payments for delete to authenticated using (public.is_admin());
 
@@ -256,7 +298,11 @@ begin
   if not public.is_active() then
     raise exception 'Ruxsat yo''q';
   end if;
-  if not public.is_admin() and kind not in ('order', 'sale', 'salesReturn', 'payIn', 'payOut') then
+  if not public.is_admin() and not (
+    public.can_doc(kind)
+    or (kind = 'payIn' and (public.has_perm('sale') or public.has_perm('money')))
+    or (kind = 'payOut' and (public.has_perm('sale') or public.has_perm('money')))
+  ) then
     raise exception 'Ruxsat yo''q';
   end if;
   insert into public.counters (id, value) values (kind, 1)
@@ -325,16 +371,16 @@ on conflict (id) do nothing;
 
 drop policy if exists photos_insert on storage.objects;
 create policy photos_insert on storage.objects for insert to authenticated
-  with check (bucket_id = 'photos' and public.is_admin());
+  with check (bucket_id = 'photos' and public.has_perm('products'));
 drop policy if exists photos_update on storage.objects;
 create policy photos_update on storage.objects for update to authenticated
-  using (bucket_id = 'photos' and public.is_admin());
+  using (bucket_id = 'photos' and public.has_perm('products'));
 drop policy if exists photos_delete on storage.objects;
 create policy photos_delete on storage.objects for delete to authenticated
-  using (bucket_id = 'photos' and public.is_admin());
+  using (bucket_id = 'photos' and public.has_perm('products'));
 drop policy if exists photos_select on storage.objects;
 create policy photos_select on storage.objects for select to authenticated
-  using (bucket_id = 'photos' and public.is_admin());
+  using (bucket_id = 'photos' and public.has_perm('products'));
 
 -- ---------- Jonli yangilanish (boshqa qurilmadagi o'zgarishlar darhol ko'rinadi) ----------
 

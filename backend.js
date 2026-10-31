@@ -12,6 +12,11 @@
  */
 
 const ENTITY_TABLES = ['warehouses', 'counterparties', 'products', 'docs', 'payments']; // yozish tartibi muhim
+// Ruxsatlar: administrator hamma narsani qila oladi, boshqalarga administrator o'zi belgilaydi.
+// Belgilanmagan bo'lsa — rolning standart ruxsatlari (serverdagi public.has_perm bilan bir xil)
+const ROLE_PERMS = { seller: ['sale', 'enter'], purchaser: ['purchase', 'enter', 'products', 'costs'] };
+const permsOf = (u) => (Array.isArray(u?.perms) ? u.perms : ROLE_PERMS[u?.role] || []);
+
 const SETTINGS_KEYS = ['categories', 'categoryTypes', 'materials', 'colors', 'customerTypes', 'featureSets', 'categoryIcons', 'regions', 'currency', 'company', 'telegram', 'legacyUsers'];
 const SERVER_CONFIG_KEY = 'biznes-tizim-server';
 const LOCAL_DATA_KEY = 'biznes-tizim-v1';
@@ -208,7 +213,7 @@ class LocalBackend {
   async saveUser(user, password, isNew) {
     if (this.users.some((x) => x.login === user.login && x.id !== user.id)) throw new Error('Bu login band.');
     const target = isNew ? Object.assign(user, { id: newId() }) : this.users.find((x) => x.id === user.id);
-    Object.assign(target, { name: user.name, login: user.login, role: user.role, active: user.active });
+    Object.assign(target, { name: user.name, login: user.login, role: user.role, active: user.active, perms: user.perms });
     if (password) await this.setPassword(target, password);
     if (isNew) this.data.users.push(target);
     this.writeData(this.data);
@@ -219,7 +224,7 @@ class LocalBackend {
   }
 
   async listUsers() {
-    return this.users.map(({ id, name, login, role, active }) => ({ id, name, login, role, active }));
+    return this.users.map(({ id, name, login, role, active, perms }) => ({ id, name, login, role, active, perms }));
   }
 
   // --- Ma'lumotlar ---
@@ -386,7 +391,7 @@ class SupabaseBackend {
       throw new Error("Hisobingiz hali faollashtirilmagan yoki bloklangan. Administratorga murojaat qiling.");
     }
     this.profile = data;
-    return { id: data.id, name: data.name, login: data.login, role: data.role, active: data.active };
+    return { id: data.id, name: data.name, login: data.login, role: data.role, active: data.active, perms: data.perms ?? undefined };
   }
 
   async restoreSession() {
@@ -424,7 +429,7 @@ class SupabaseBackend {
       user.id = data.user.id;
     }
     const { error } = await this.sb.from('profiles')
-      .update({ name: user.name, role: user.role, active: user.active })
+      .update({ name: user.name, role: user.role, active: user.active, perms: user.perms ?? null })
       .eq('id', user.id);
     if (error) throw new Error(friendlyError(error));
   }
@@ -435,13 +440,18 @@ class SupabaseBackend {
   }
 
   async listUsers() {
-    return this.fetchAll('profiles', 'id,name,login,role,active');
+    return this.fetchAll('profiles', 'id,name,login,role,active,perms');
   }
 
   // --- Ma'lumotlar ---
 
   get isAdmin() {
     return this.profile?.role === 'admin';
+  }
+
+  // Kelish narxlari (alohida jadval) — administrator va "tannarxni ko'rish" ruxsati borlarga
+  get canCosts() {
+    return this.isAdmin || permsOf(this.profile).includes('costs');
   }
 
   async fetchAll(table, columns = 'id,data') {
@@ -458,9 +468,9 @@ class SupabaseBackend {
   async load(defaults) {
     const [rows, costs, settings, profiles] = await Promise.all([
       Promise.all(ENTITY_TABLES.map((t) => this.fetchAll(t))),
-      this.isAdmin ? this.fetchAll('product_costs') : Promise.resolve([]),
+      this.canCosts ? this.fetchAll('product_costs') : Promise.resolve([]),
       this.fetchAll('settings'),
-      this.fetchAll('profiles', 'id,name,login,role,active'),
+      this.fetchAll('profiles', 'id,name,login,role,active,perms'),
     ]);
     const db = Object.assign({}, defaults);
     this.snap = {};
@@ -496,8 +506,8 @@ class SupabaseBackend {
         return [x.id, x];
       }));
     });
+    if (this.canCosts) out.product_costs = new Map((db.products || []).map((p) => [p.id, { buyPrice: p.buyPrice || 0 }]));
     if (this.isAdmin) {
-      out.product_costs = new Map((db.products || []).map((p) => [p.id, { buyPrice: p.buyPrice || 0 }]));
       out.settings = new Map(SETTINGS_KEYS.filter((k) => db[k] !== undefined).map((k) => [k, { value: db[k] }]));
     }
     return out;
@@ -588,7 +598,7 @@ class SupabaseBackend {
     if (table === 'profiles') {
       const i = db.users.findIndex((u) => u.id === id);
       if (eventType === 'DELETE') { if (i >= 0) db.users.splice(i, 1); } else {
-        const u = { id: row.id, name: row.name, login: row.login, role: row.role, active: row.active };
+        const u = { id: row.id, name: row.name, login: row.login, role: row.role, active: row.active, perms: row.perms ?? undefined };
         if (i >= 0) db.users[i] = u; else db.users.push(u);
       }
       return true;

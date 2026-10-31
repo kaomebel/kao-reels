@@ -232,7 +232,22 @@ function showLoading(on, text = 'Yuklanmoqda...') {
 
 // ---------- Foydalanuvchilar va kirish ----------
 
-const ROLES = { admin: 'Administrator', seller: 'Sotuvchi' };
+const ROLES = { admin: 'Administrator', seller: 'Sotuvchi', purchaser: "Ta'minot xodimi" };
+
+// Administrator har bir foydalanuvchiga qaysi bo'limlar ochiqligini belgilaydi
+const PERMS = {
+  sale: ['Sotish', "Sotuv, buyurtma, mijozdan qaytarish; mijozlar va ulardan to'lov olish"],
+  enter: ['Kirim qilish', "Omborga tovar kiritish (Kirim qilish hujjati)"],
+  purchase: ['Xaridlar', "Ta'minotchiga buyurtma, qabul qilish, qaytarish; ta'minotchilar"],
+  stockOps: ['Ombor amallari', "Hisobdan chiqarish, ko'chirish, inventarizatsiya"],
+  products: ['Mahsulotlar', "Mahsulot qo'shish va kartochkani o'zgartirish"],
+  costs: ['Tannarx', "Kelish narxi, tannarx va ombordagi tovar qiymatini ko'rish"],
+  money: ['Pul', "Kassa, xarajatlar, barcha kirim-chiqim to'lovlari va qarzlar"],
+  reports: ['Hisobotlar', 'Foyda va zarar, savdo tahlili'],
+};
+const can = (perm) => isAdmin() || permsOf(me).includes(perm);
+// Hujjat turi → kerakli ruxsat
+const DOC_PERM = { order: 'sale', sale: 'sale', salesReturn: 'sale', purchaseOrder: 'purchase', receipt: 'purchase', purchaseReturn: 'purchase', enter: 'enter', writeoff: 'stockOps', move: 'stockOps', inventory: 'stockOps' };
 
 let me = null;
 const isAdmin = () => me?.role === 'admin';
@@ -791,7 +806,7 @@ function productForm(p = {}, readonly = false) {
           <label><input type="radio" name="priceCurrency" value="USD" ${p.priceCurrency === 'USD' ? 'checked' : ''}><span>Dollar ($)</span></label>
         </div>
         <div class="price-grid">
-          ${isAdmin() ? moneyField('Kelish narxi', 'buyPrice', p.buyPrice ?? '', p.priceCurrency || 'UZS') : ''}
+          ${can('costs') ? moneyField('Kelish narxi', 'buyPrice', p.buyPrice ?? '', p.priceCurrency || 'UZS') : ''}
           ${moneyField('Sotish narxi (etiketka) *', 'salePrice', p.salePrice ?? '', p.priceCurrency || 'UZS', 'required')}
           ${moneyField('Eng kam narx (savdolashish chegarasi)', 'minPrice', p.minPrice ?? '', p.priceCurrency || 'UZS')}
         </div>
@@ -811,7 +826,7 @@ function makerOptions(p) {
   const known = list.some(([id]) => id === p.supplierId);
   if (p.maker && !known) list.push([p.supplierId || '__keep', p.maker]);
   const cur = known ? p.supplierId : p.maker ? p.supplierId || '__keep' : '';
-  return [['', '—'], ...list, ...(isAdmin() ? [['__new', "+ Yangi ishlab chiqaruvchi..."]] : [])]
+  return [['', '—'], ...list, ...(can('products') ? [['__new', "+ Yangi ishlab chiqaruvchi..."]] : [])]
     .map(([v, t]) => `<option value="${esc(v)}" ${v === cur ? 'selected' : ''}>${esc(t)}</option>`).join('');
 }
 
@@ -937,7 +952,7 @@ function chipOne(name, options, value, ctl = false) {
   return `<div class="field full"><span class="field-label">${esc(name)}</span>
     <div class="chips chips-pick chips-one" ${ctl ? 'data-ctl="1"' : ''}>
       ${all.map((m) => `<button type="button" class="chip ${m === value ? 'on' : ''}" data-act="chipOne" data-v="${esc(m)}">${esc(m)}</button>`).join('')}
-      ${isAdmin() ? `<input class="chip-add" placeholder="+ Boshqa" enterkeyhint="done">` : ''}
+      ${can('products') ? `<input class="chip-add" placeholder="+ Boshqa" enterkeyhint="done">` : ''}
     </div>
     <input type="hidden" name="attr:${esc(name)}" value="${esc(value || '')}"></div>`;
 }
@@ -995,7 +1010,7 @@ function readFeatureDraft() {
 function typeOptions(cat, value) {
   const types = (db.categoryTypes[cat] || []).slice();
   if (value && !types.includes(value)) types.push(value);
-  return [['', '—'], ...types.map((t) => [t, t]), ...(isAdmin() ? [['__new', '+ Yangi tur...']] : [])]
+  return [['', '—'], ...types.map((t) => [t, t]), ...(can('products') ? [['__new', '+ Yangi tur...']] : [])]
     .map(([v, t]) => `<option value="${esc(v)}" ${v === (value || '') ? 'selected' : ''}>${esc(t)}</option>`).join('');
 }
 
@@ -1023,7 +1038,7 @@ function chipPicker(id, options, value, addLabel) {
   const all = [...options, ...selected.filter((m) => !options.includes(m))];
   return `<div class="chips chips-pick" id="${id}">
     ${all.map((m) => `<button type="button" class="chip ${selected.includes(m) ? 'on' : ''}" data-act="chipToggle" data-v="${esc(m)}">${esc(m)}</button>`).join('')}
-    ${isAdmin() ? `<input class="chip-add" placeholder="${addLabel}" enterkeyhint="done">` : ''}
+    ${can('products') ? `<input class="chip-add" placeholder="${addLabel}" enterkeyhint="done">` : ''}
   </div>`;
 }
 
@@ -1192,8 +1207,8 @@ function newProduct() {
 
 function editProduct(id) {
   const p = product(id);
-  if (!isAdmin()) {
-    // Sotuvchi kartochkani faqat ko'radi
+  if (!can('products')) {
+    // Mahsulot ruxsati yo'q — kartochkani faqat ko'radi
     openModal({ title: p.name, body: `<fieldset disabled>${productForm(p, true)}</fieldset>`, wide: true, onOpen: () => bindProductForm(p, true), extra: [{ label: 'Etiketka', onClick: () => quickLabel(id) }] });
     return;
   }
@@ -1256,10 +1271,16 @@ function productHistory(id) {
 
 const KINDS = { customer: 'Mijoz', supplier: "Ta'minotchi", both: "Mijoz va ta'minotchi" };
 
+// Qanday kontragent qo'sha oladi: savdo — mijoz, xarid — ta'minotchi
+function partyKinds() {
+  if (isAdmin()) return Object.entries(KINDS);
+  return [...(can('sale') ? [['customer', KINDS.customer]] : []), ...(can('purchase') ? [['supplier', KINDS.supplier]] : [])];
+}
+
 function partyForm(c = {}) {
   return `<div class="form-grid">
     ${field('Nomi / F.I.O. *', 'name', c.name, 'required', 'full')}
-    ${selectField('Turi', 'kind', isAdmin() ? Object.entries(KINDS) : [['customer', KINDS.customer]], c.kind || 'customer')}
+    ${selectField('Turi', 'kind', partyKinds(), c.kind || partyKinds()[0][0])}
     ${phoneField('Telefon', 'phone', c.phone)}
     ${customerTypeField(c.ctype, 'Mijoz turi')}
     ${field('STIR (INN)', 'inn', c.inn)}
@@ -1379,6 +1400,10 @@ function itemRowHtml(t, it = {}, cur = 'UZS') {
 
 // Chegirma maydoni: savdoda ming so'mlarda (discountK = 1000), xaridlarda — to'liq summa
 const discountOf = (data) => num(data.discount) * (num(data.discountK) || 1);
+
+// Kirim / hisobdan chiqarish / ko'chirishda narx — kelish narxi; tannarx ruxsati yo'q xodimga ko'rsatilmaydi
+// (narxsiz qator tannarx hisobiga ta'sir qilmaydi)
+const hidesCost = (t) => t.price === 'buy' && !t.money && !can('costs');
 
 function docForm(type, d) {
   const t = DOC_TYPES[type];
@@ -1500,7 +1525,7 @@ function docForm(type, d) {
     </div>` : '';
   return `<div class="form-grid">${head}</div>
     ${customBlock}
-    <div id="stdBlock" ${custom ? 'hidden' : ''}>
+    <div id="stdBlock" class="${hidesCost(t) ? 'no-cost' : ''}" ${custom ? 'hidden' : ''}>
     <h4>Mahsulotlar</h4>
     <div class="table-wrap"><table class="items-table doc-items">
       <thead><tr><th>Mahsulot</th><th class="num">Omborda</th><th>Soni</th><th>Narxi</th><th class="num">Summa</th><th></th></tr></thead>
@@ -1509,7 +1534,7 @@ function docForm(type, d) {
     <button type="button" class="small" id="addItemRow">${icon('plus')}Qator qo'shish</button>
     </div>
     <div class="form-grid" style="margin-top:12px">${after}${tail}${foot}</div>
-    <div class="total-line" id="totalLine" data-paid="${prevPaid(d)}">Jami: <b id="docTotal">0</b><span id="docRest"></span></div>`;
+    <div class="total-line" id="totalLine" data-paid="${prevPaid(d)}" ${hidesCost(t) ? 'hidden' : ''}>Jami: <b id="docTotal">0</b><span id="docRest"></span></div>`;
 }
 
 function bindPartyLookup(kind) {
@@ -1902,6 +1927,7 @@ function bindDocForm(type, editingId) {
   // Mahsulot tanlanganda narxni hujjat valyutasida qo'yamiz
   const defaultPrice = (p) => {
     if (t.price === 'sale') return salePriceUZS(p);
+    if (hidesCost(t)) return '';
     const cur = curOf();
     if (cur === 'USD' && p.priceCurrency === 'USD' && p.buyPrice) return p.buyPrice;
     const som = ctx.cost[p.id] || toUZS(p.buyPrice || 0, p.priceCurrency);
@@ -2067,9 +2093,9 @@ function openDoc(type, existing, preset = {}) {
   const extra = [];
   if (existing) {
     if (type === 'order') extra.push({ label: 'Shartnoma', cls: 'primary-soft', onClick: () => printContract(existing.id) });
-    extra.push({ label: 'Chop etish', onClick: () => printDoc(existing.id) });
+    if (!hidesCost(t)) extra.push({ label: 'Chop etish', onClick: () => printDoc(existing.id) });
     if (['receipt', 'enter'].includes(type)) extra.push({ label: 'Etiketkalar', onClick: () => docLabels(existing.id) });
-    if (t.pay && (isAdmin() || t.pay === 'in')) extra.push({ label: "To'lov", onClick: () => newPayment(t.pay, { counterpartyId: existing.counterpartyId, docId: existing.id }) });
+    if (t.pay && (can('money') || (t.pay === 'in' && can('sale')))) extra.push({ label: "To'lov", onClick: () => newPayment(t.pay, { counterpartyId: existing.counterpartyId, docId: existing.id }) });
     if (t.next && canUseDoc(t.next)) extra.push({ label: `→ ${DOC_TYPES[t.next].one}`, onClick: () => createFrom(existing.id) });
     if (isAdmin()) extra.push({ label: "O'chirish", cls: 'danger', onClick: () => deleteDoc(existing.id) });
   }
@@ -2087,8 +2113,7 @@ function openDoc(type, existing, preset = {}) {
   });
 }
 
-const SELLER_DOCS = ['order', 'sale', 'salesReturn'];
-const canUseDoc = (type) => isAdmin() || SELLER_DOCS.includes(type);
+const canUseDoc = (type) => can(DOC_PERM[type]);
 const canEditDoc = (d) => isAdmin() || (canUseDoc(d.type) && d.userId === me?.id);
 
 async function saveDoc(type, existing, preset, data, stock) {
@@ -2134,7 +2159,7 @@ async function saveDoc(type, existing, preset, data, stock) {
       .filter(({ it, p }) => p && minPriceUZS(p) && it.price < minPriceUZS(p))
       .map(({ it, p }) => `${p.name}: ${fmt(it.price)} < eng kami ${fmt(minPriceUZS(p))} so'm`);
     if (low.length) {
-      if (!isAdmin()) {
+      if (!can('costs')) {
         alert("Narx eng kam narxdan past:\n" + low.join('\n') + "\n\nNarxni oshiring yoki administratorga murojaat qiling.");
         return false;
       }
@@ -2458,7 +2483,8 @@ function openInventory(existing) {
 // ---------- To'lovlar ----------
 
 function newPayment(dir, preset = {}) {
-  if (dir === 'out' && !isAdmin()) return alert("Chiqim to'lovlari faqat administrator uchun.");
+  if (dir === 'out' && !can('money')) return alert("Chiqim to'lovlari uchun ruxsatingiz yo'q.");
+  if (dir === 'in' && !can('money') && !can('sale')) return alert("To'lov qabul qilish uchun ruxsatingiz yo'q.");
   const purposes = dir === 'in' ? PAY_PURPOSES_IN : PAY_PURPOSES_OUT;
   const linked = preset.docId && doc(preset.docId);
   const rest = linked ? Math.max(0, docTotal(linked) - docPaid(linked)) : '';
@@ -2611,12 +2637,12 @@ function telegramOnStockIn(d) {
 // Uchinchi element 'A' — faqat administrator ko'radi
 const SECTIONS = [
   { id: 'dashboard', icon: 'dashboard', title: "Ko'rsatkichlar" },
-  { id: 'purchases', icon: 'truck', title: 'Xaridlar', admin: true, views: [['purchaseOrder'], ['receipt'], ['purchaseReturn']] },
-  { id: 'sales', icon: 'bag', title: 'Savdo', views: [['order'], ['sale'], ['salesReturn']] },
-  { id: 'goods', icon: 'sofa', title: 'Tovarlar', views: [['products', 'Mahsulotlar'], ['stock', 'Qoldiqlar'], ['enter', '', 'A'], ['writeoff', '', 'A'], ['move', '', 'A'], ['inventory', '', 'A'], ['warehouses', 'Omborlar', 'A'], ['labels', 'Etiketkalar'], ['labelDesign', 'Etiketka dizayni', 'A']] },
-  { id: 'parties', icon: 'users', title: 'Kontragentlar', views: [['parties', 'Kontragentlar'], ['debts', 'Qarzlar', 'A']] },
-  { id: 'money', icon: 'wallet', title: 'Pul', views: [['payments', "To'lovlar"], ['cash', 'Kassa va hisoblar', 'A']] },
-  { id: 'reports', icon: 'chart', title: 'Hisobotlar', admin: true, views: [['profit', 'Foyda va zarar'], ['top', 'Savdo tahlili']] },
+  { id: 'purchases', icon: 'truck', title: 'Xaridlar', views: [['purchaseOrder', '', 'purchase'], ['receipt', '', 'purchase'], ['purchaseReturn', '', 'purchase']] },
+  { id: 'sales', icon: 'bag', title: 'Savdo', views: [['order', '', 'sale'], ['sale', '', 'sale'], ['salesReturn', '', 'sale']] },
+  { id: 'goods', icon: 'sofa', title: 'Tovarlar', views: [['products', 'Mahsulotlar'], ['stock', 'Qoldiqlar'], ['enter', '', 'enter'], ['writeoff', '', 'stockOps'], ['move', '', 'stockOps'], ['inventory', '', 'stockOps'], ['warehouses', 'Omborlar', 'A'], ['labels', 'Etiketkalar'], ['labelDesign', 'Etiketka dizayni', 'A']] },
+  { id: 'parties', icon: 'users', title: 'Kontragentlar', views: [['parties', 'Kontragentlar', 'sale|purchase|money'], ['debts', 'Qarzlar', 'money']] },
+  { id: 'money', icon: 'wallet', title: 'Pul', views: [['payments', "To'lovlar", 'sale|money'], ['cash', 'Kassa va hisoblar', 'money']] },
+  { id: 'reports', icon: 'chart', title: 'Hisobotlar', views: [['profit', 'Foyda va zarar', 'reports'], ['top', 'Savdo tahlili', 'reports']] },
   { id: 'install', icon: 'phone', title: "Telefonga o'rnatish", hideInNav: true },
   { id: 'settings', icon: 'settings', title: 'Sozlamalar', admin: true, views: [['users', 'Foydalanuvchilar'], ['currency', 'Valyuta kursi'], ['server', 'Server'], ['telegram', 'Telegram'], ['company', 'Kompaniya'], ['categories', "Ro'yxatlar"], ['backup', 'Zaxira nusxa']] },
 ];
@@ -2625,8 +2651,9 @@ function viewTitle(v) {
   return v[1] || DOC_TYPES[v[0]].list;
 }
 
-const visibleSections = () => SECTIONS.filter((s) => isAdmin() || !s.admin);
-const visibleViews = (s) => s.views && s.views.filter((v) => isAdmin() || v[2] !== 'A');
+const canView = (need) => !need || isAdmin() || (need !== 'A' && need.split('|').some(can));
+const visibleViews = (s) => s.views && s.views.filter((v) => canView(v[2]));
+const visibleSections = () => SECTIONS.filter((s) => (s.admin ? isAdmin() : !s.views || visibleViews(s).length));
 
 function currentRoute() {
   const [sec, view] = location.hash.slice(1).split('/');
@@ -2687,7 +2714,7 @@ function viewDashboard() {
   const activeOrders = db.docs.filter((d) => d.type === 'order' && RESERVING.includes(d.status));
 
   const mySales = sales.filter((d) => d.date.startsWith(month) && d.userId === me.id);
-  const cards = isAdmin() ? [
+  const cards = (can('money') && can('costs')) ? [
     ['Bugungi savdo', money(daySales), `${sales.filter((d) => d.date === t).length} ta sotuv`],
     ['Shu oy savdosi', money(monthTotal), `${monthSales.length} ta sotuv`],
     ['Shu oy yalpi foydasi', money(gross), 'savdo − tannarx'],
@@ -2697,18 +2724,23 @@ function viewDashboard() {
     ['Ombordagi tovar', money(stockValue), `${db.products.length} xil mahsulot`],
     ['Faol buyurtmalar', activeOrders.length, `${money(sumOf(activeOrders))}`],
   ] : [
-    ['Bugungi savdo', money(daySales), `${sales.filter((d) => d.date === t).length} ta sotuv`],
-    ['Mening savdom (shu oy)', money(sumOf(mySales)), `${mySales.length} ta sotuv`],
-    ['Faol buyurtmalar', activeOrders.length, `${money(sumOf(activeOrders))}`],
-    ['Mijozlar qarzi', money(receivable), 'undirilishi kerak', 'debt'],
+    ...(can('sale') ? [
+      ['Bugungi savdo', money(daySales), `${sales.filter((d) => d.date === t).length} ta sotuv`],
+      ['Mening savdom (shu oy)', money(sumOf(mySales)), `${mySales.length} ta sotuv`],
+      ['Faol buyurtmalar', activeOrders.length, `${money(sumOf(activeOrders))}`],
+      ['Mijozlar qarzi', money(receivable), 'undirilishi kerak', 'debt'],
+    ] : []),
+    ...(can('money') ? [['Pul qoldig\'i', money(cash.cash + cash.card + cash.bank), `kassa ${fmt(cash.cash)} · karta ${fmt(cash.card)} · hisob ${fmt(cash.bank)}`], ['Bizning qarzlar', money(payable), 'kreditorlik', 'warn']] : []),
+    ...(can('costs') ? [['Ombordagi tovar', money(stockValue), `${db.products.length} xil mahsulot`]] : []),
+    ...(!can('sale') ? [['Mahsulotlar', db.products.filter((p) => !p.archived).length, 'faol mahsulot']] : []),
   ];
   const quick = [
-    ['sale', 'Sotish', 'bag', 'primary'], ['order', 'Buyurtma', 'receipt'],
-    ...(isAdmin() ? [['receipt', 'Qabul qilish', 'truck']] : []),
-  ].map(([type, label, ic, cls]) => `<button class="${cls || ''}" data-act="newDoc" data-type="${type}">${icon(ic)}${label}</button>`).join('') +
-    (isAdmin() ? `<button data-act="newProduct">${icon('sofa')}Mahsulot</button>` : '') +
-    `<button data-act="newPayment" data-dir="in">${icon('arrowIn')}Kirim to'lovi</button>` +
-    (isAdmin() ? `<button data-act="newPayment" data-dir="out">${icon('arrowOut')}Xarajat</button>` : '');
+    ['sale', 'Sotish', 'bag', 'primary'], ['order', 'Buyurtma', 'receipt'], ['receipt', 'Qabul qilish', 'truck'], ['enter', 'Kirim qilish', 'arrowIn'],
+  ].filter(([type]) => canUseDoc(type))
+    .map(([type, label, ic, cls]) => `<button class="${cls || ''}" data-act="newDoc" data-type="${type}">${icon(ic)}${label}</button>`).join('') +
+    (can('products') ? `<button data-act="newProduct">${icon('sofa')}Mahsulot</button>` : '') +
+    (can('sale') || can('money') ? `<button data-act="newPayment" data-dir="in">${icon('arrowIn')}Kirim to'lovi</button>` : '') +
+    (can('money') ? `<button data-act="newPayment" data-dir="out">${icon('arrowOut')}Xarajat</button>` : '');
 
   const low = db.products.filter((p) => !p.archived && qtyIn(ctx.stock, p.id) - qtyIn(ctx.reserve, p.id) <= (p.minQty || 0));
   const deliveries = db.docs
@@ -2749,7 +2781,7 @@ function viewDashboard() {
     </div>
     ${(() => {
       // Sotuvchi faqat o'zi mas'ul bo'lgan qarzlarni ko'radi
-      const mine = saleDebts().filter(({ d }) => isAdmin() || d.debtResponsible === me.name || (!d.debtResponsible && d.userId === me.id));
+      const mine = saleDebts().filter(({ d }) => can('money') || d.debtResponsible === me.name || (!d.debtResponsible && d.userId === me.id));
       if (!mine.length) return '';
       const late = mine.filter(({ d }) => d.debtDue && d.debtDue < today());
       return `<div class="card"><h3>${icon('alert')}Qarz muddatlari — ${mine.length} ta, ${money(mine.reduce((s, x) => s + x.rest, 0))}${late.length ? ` <span class="badge cancel">${late.length} tasi muddati o'tgan</span>` : ''}</h3>
@@ -2783,7 +2815,9 @@ function viewDocs(type) {
   if (isOrder) cols.push('Muddat', "Mas'ul");
   if (t.statuses) cols.push('Holati');
   if (isOrder) cols.push('');
-  const total = list.reduce((s, d) => s + (type === 'inventory' ? 0 : docTotal(d)), 0);
+  // Inventarizatsiyada summa yo'q; tannarx ruxsati yo'q xodimga kirim summasi ko'rsatilmaydi
+  const noSum = type === 'inventory' || hidesCost(t);
+  const total = list.reduce((s, d) => s + (noSum ? 0 : docTotal(d)), 0);
 
   const rows = list.map((d) => {
     const paid = t.pay ? docPaid(d) : 0;
@@ -2791,7 +2825,7 @@ function viewDocs(type) {
     return `<tr class="click" data-act="openDoc" data-id="${d.id}">
       <td>${esc(d.no)}</td><td>${fmtDate(d.date)}${d.userId ? `<div class="muted small">${esc(userName(d.userId))}</div>` : ''}</td><td>${where}</td>
       <td class="items-cell">${d.items.slice(0, 3).map((it) => `${esc(itemName(it))} × ${it.qty}`).join('<br>')}${d.items.length > 3 ? `<br><span class="muted">yana ${d.items.length - 3} ta</span>` : ''}</td>
-      <td class="num">${type === 'inventory' ? '' : money(docTotal(d))}${d.currency === 'USD' ? `<div class="muted small">${fmtUsd(docTotalCur(d))} · ${fmtRate(d.rate)}</div>` : ''}</td>
+      <td class="num">${noSum ? '' : money(docTotal(d))}${d.currency === 'USD' ? `<div class="muted small">${fmtUsd(docTotalCur(d))} · ${fmtRate(d.rate)}</div>` : ''}</td>
       ${t.pay ? (isOrder
         ? `<td class="num">${fmt(paid)}<div class="small ${docTotal(d) - paid > 0 ? 'debt' : 'ok'}">qoldi ${fmt(Math.max(0, docTotal(d) - paid))}</div></td>`
         : `<td class="num">${paid >= docTotal(d) && paid > 0 ? badge("To'langan", 'done') : paid > 0 ? fmt(paid) : badge("To'lanmagan", 'cancel')}</td>`) : ''}
@@ -2806,7 +2840,7 @@ function viewDocs(type) {
     buttons: `<button class="primary" data-act="newDoc" data-type="${type}">${icon('plus')}${esc(t.add || t.one)}</button>${isAdmin() ? `<button data-act="exportDocs" data-type="${type}">${icon('download')}CSV</button>` : ''}`,
   }) + `<div class="card"><div class="table-wrap"><table><thead><tr>${cols.map((c, i) => `<th class="${i === 4 || i === 5 ? 'num' : ''}">${c}</th>`).join('')}</tr></thead>
     <tbody>${rows || emptyRow(cols.length, "Tanlangan davrda hujjat yo'q")}</tbody>
-    ${list.length && type !== 'inventory' ? `<tfoot><tr><td colspan="4">Jami: ${list.length} ta</td><td class="num">${money(total)}</td><td colspan="${cols.length - 5}"></td></tr></tfoot>` : ''}
+    ${list.length && type !== 'inventory' ? `<tfoot><tr><td colspan="4">Jami: ${list.length} ta</td><td class="num">${noSum ? '' : money(total)}</td><td colspan="${cols.length - 5}"></td></tr></tfoot>` : ''}
     </table></div></div>`;
 }
 
@@ -2834,6 +2868,7 @@ function viewProducts() {
     .filter((p) => !q || [p.name, p.code, p.type, p.material, p.color, p.origin, p.maker, p.size, ...Object.values(p.attrs || {})].join(' ').toLowerCase().includes(q));
 
   const admin = isAdmin();
+  const showCost = can('costs');
   const rows = list.map((p) => {
     const st = qtyIn(ctx.stock, p.id);
     const rs = qtyIn(ctx.reserve, p.id);
@@ -2842,7 +2877,7 @@ function viewProducts() {
       <td class="click" data-act="editProduct" data-id="${p.id}"><b>${esc(p.name)}</b><div class="muted small prod-path">${icon(productIcon(p))}${esc([p.code, p.category, p.type].filter(Boolean).join(' · '))}</div>
         ${p.size || p.color || productAttrs(p).length ? `<div class="prod-meta">${p.size ? `<span class="dt">${esc(p.size)} sm</span>` : ''}${p.color ? `<span>${esc(p.color)}</span>` : ''}${productAttrs(p).map(([k, v]) => `<span title="${esc(k)}">${esc(v)}</span>`).join('')}</div>` : ''}
         ${p.origin || p.maker ? `<div class="muted small prod-origin">${icon('warehouse')}${esc([p.maker, p.origin].filter(Boolean).join(', '))}</div>` : ''}</td>
-      ${admin ? `<td class="num">${money(ctx.cost[p.id])}</td>` : ''}
+      ${showCost ? `<td class="num">${money(ctx.cost[p.id])}</td>` : ''}
       <td class="num">${priceLabel(p)}${p.priceCurrency === 'USD' ? `<div class="muted small">${fmtUsd(p.salePrice)}</div>` : ''}${p.minPrice ? `<div class="muted small">eng kami: ${priceLabel(p, 'minPrice')}</div>` : ''}</td>
       <td class="num ${st - rs <= (p.minQty || 0) ? 'debt' : ''}">${st}${rs ? `<div class="muted small">rezerv ${rs}</div>` : ''}</td>
       <td class="actions"><button class="small icon-only" data-act="labelOne" data-id="${p.id}" title="Etiketka chop etish">${icon('tag')}</button>${admin ? `
@@ -2854,11 +2889,11 @@ function viewProducts() {
 
   return toolbar('products', {
     extra: `<select data-filter="products.arch"><option value="">Faol</option><option value="1" ${arch ? 'selected' : ''}>Arxiv</option></select>`,
-    buttons: admin ? `<button class="primary" data-act="newProduct">${icon('plus')}Mahsulot</button><button data-act="exportProducts">${icon('download')}CSV</button>` : '',
+    buttons: can('products') ? `<button class="primary" data-act="newProduct">${icon('plus')}Mahsulot</button><button data-act="exportProducts">${icon('download')}CSV</button>` : '',
   }) + categoryBar('products.cat', db.products.filter((p) => !!p.archived === arch))
     + (cat ? typeBar('products.type', cat, db.products.filter((p) => !!p.archived === arch && p.category === cat)) : '')
     + `<div class="card"><div class="table-wrap"><table><thead><tr><th></th><th>Mahsulot</th>
-    ${admin ? '<th class="num">Tannarx</th>' : ''}<th class="num">Sotish narxi</th><th class="num">Qoldiq</th><th></th></tr></thead>
+    ${showCost ? '<th class="num">Tannarx</th>' : ''}<th class="num">Sotish narxi</th><th class="num">Qoldiq</th><th></th></tr></thead>
     <tbody>${rows || emptyRow(6, "Mahsulot yo'q")}</tbody></table></div></div>`;
 }
 
@@ -2871,7 +2906,7 @@ function thumbCell(p) {
 
 function exportProducts() {
   const rows = [['Kod', 'Nomi', 'Kategoriya', 'Turi', "O'lchami", 'Rangi', 'Ishlab chiqarilgan', 'Ishlab chiqaruvchi', "Tannarx (so'm)", 'Narx valyutasi', 'Sotish narxi', 'Eng kam narx', "Sotish narxi (so'm)", "Eng kam narx (so'm)", 'Qoldiq', 'Rezerv']];
-  db.products.forEach((p) => rows.push([p.code, p.name, p.category, p.type, p.size, p.color, p.origin, p.maker, Math.round(ctx.cost[p.id]),
+  db.products.forEach((p) => rows.push([p.code, p.name, p.category, p.type, p.size, p.color, p.origin, p.maker, can('costs') ? Math.round(ctx.cost[p.id]) : '',
     p.priceCurrency === 'USD' ? 'USD' : "so'm", p.salePrice, p.minPrice || '', salePriceUZS(p), minPriceUZS(p) || '', qtyIn(ctx.stock, p.id), qtyIn(ctx.reserve, p.id)]));
   download(`mahsulotlar-${today()}.csv`, toCsv(rows), 'text/csv;charset=utf-8');
 }
@@ -2883,7 +2918,7 @@ function viewStock() {
   const cat = filterVal('stock.cat');
   const q = filterVal('stock.q').toLowerCase();
   const onlyPos = filterVal('stock.pos') === '1';
-  const admin = isAdmin();
+  const admin = can('costs');
   let tq = 0, tc = 0, ts = 0;
   const rows = db.products
     .filter((p) => !p.archived && (!cat || p.category === cat))
@@ -2912,7 +2947,9 @@ function viewStock() {
 
 function viewParties() {
   const q = filterVal('parties.q').toLowerCase();
-  const kind = isAdmin() ? filterVal('parties.kind') : 'customer';
+  // Faqat bitta turdagi kontragentlarni ko'radigan xodimga — o'shalar
+  const kinds = partyKinds().map(([k]) => k);
+  const kind = isAdmin() || kinds.length > 1 ? filterVal('parties.kind') : kinds[0] === 'supplier' ? 'supplier' : 'customer';
   const ctype = filterVal('parties.ctype');
   const list = db.counterparties
     .filter((c) => !kind || c.kind === kind || c.kind === 'both')
@@ -2925,7 +2962,7 @@ function viewParties() {
       <td class="actions"><button class="small" data-act="statement" data-id="${c.id}">${icon('receipt')}Hisob-kitob</button>${isAdmin() ? `<button class="small danger icon-only" data-act="deleteParty" data-id="${c.id}" title="O'chirish">${icon('trash')}</button>` : ''}</td></tr>`;
   }).join('');
   return toolbar('parties', {
-    extra: (!isAdmin() ? '' : `<select data-filter="parties.kind"><option value="">Hammasi</option><option value="customer" ${kind === 'customer' ? 'selected' : ''}>Mijozlar</option><option value="supplier" ${kind === 'supplier' ? 'selected' : ''}>Ta'minotchilar</option></select>`)
+    extra: (!(isAdmin() || kinds.length > 1) ? '' : `<select data-filter="parties.kind"><option value="">Hammasi</option><option value="customer" ${kind === 'customer' ? 'selected' : ''}>Mijozlar</option><option value="supplier" ${kind === 'supplier' ? 'selected' : ''}>Ta'minotchilar</option></select>`)
       + `<select data-filter="parties.ctype"><option value="">Barcha mijoz turlari</option>${db.customerTypes.map((x) => `<option ${x === ctype ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select>`,
     buttons: `<button class="primary" data-act="newParty">${icon('plus')}Kontragent</button>`,
   }) + `<div class="card"><div class="table-wrap"><table><thead><tr><th>Nomi</th><th>Turi</th><th>Telefon</th><th>Manzil</th><th class="num">Balans</th><th></th></tr></thead>
@@ -2977,7 +3014,7 @@ function viewDebts() {
 
 function viewPayments() {
   const q = filterVal('payments.q').toLowerCase();
-  const admin = isAdmin();
+  const admin = can('money');
   const dir = admin ? filterVal('payments.dir') : 'in';
   const list = db.payments
     .filter((p) => inPeriod('payments', p.date) && (!dir || p.dir === dir))
@@ -3191,10 +3228,11 @@ function viewCurrency() {
 
 function viewUsers() {
   return `<div class="card narrow"><h3>Foydalanuvchilar</h3>
-    <p class="muted"><b>Administrator</b> — hamma bo'limlar. <b>Sotuvchi</b> — faqat savdo (buyurtma, sotuv, qaytarish), mijozlar, kirim to'lovlari va qoldiqlarni ko'rish; tannarx, foyda, xaridlar va sozlamalar unga ko'rinmaydi, o'zgalar hujjatlarini o'zgartira olmaydi va hech narsani o'chira olmaydi.</p>
-    <table><thead><tr><th>Ism</th><th>Login</th><th>Roli</th><th>Holati</th><th></th></tr></thead><tbody>
+    <p class="muted"><b>Administrator</b> — hamma bo'limlar va sozlamalar. Boshqa xodimlarga (sotuvchi, ta'minot xodimi) qaysi funksiyalar ochiqligini siz belgilaysiz: «Tahrirlash» → ruxsatlar. Administratordan boshqa hech kim hujjat va to'lovlarni o'chira olmaydi, sozlamalar va foydalanuvchilarni ko'rmaydi, o'zgalar hujjatlarini o'zgartira olmaydi.</p>
+    <table><thead><tr><th>Ism</th><th>Login</th><th>Roli</th><th>Ruxsatlar</th><th>Holati</th><th></th></tr></thead><tbody>
     ${db.users.map((u) => `<tr><td>${esc(u.name)}${u.id === me.id ? ' <span class="muted small">(siz)</span>' : ''}</td><td>${esc(u.login)}</td>
-      <td>${badge(ROLES[u.role], u.role === 'admin' ? 'admin' : '')}</td><td>${u.active === false ? badge('Bloklangan', 'cancel') : badge('Faol', 'done')}</td>
+      <td>${badge(ROLES[u.role] || u.role, u.role === 'admin' ? 'admin' : '')}</td>
+      <td class="small">${u.role === 'admin' ? 'Hammasi' : esc(permsOf(u).map((k) => PERMS[k]?.[0]).filter(Boolean).join(', ') || "— yo'q")}</td><td>${u.active === false ? badge('Bloklangan', 'cancel') : badge('Faol', 'done')}</td>
       <td class="actions"><button class="small" data-act="editUser" data-id="${u.id}">${icon('edit')}Tahrirlash</button></td></tr>`).join('')}
     </tbody></table>
     <div class="toolbar" style="margin-top:12px"><button class="primary" data-act="editUser">${icon('plus')}Foydalanuvchi</button></div></div>`;
@@ -3211,12 +3249,33 @@ function editUser(id) {
     body: `<div class="form-grid">
       ${field('Ism *', 'name', u.name, 'required')}
       ${field(server ? 'Email (login) *' : 'Login *', 'login', u.login, `required autocapitalize="none" autocomplete="off" ${server ? 'type="email"' : ''} ${server && id ? 'disabled' : ''}`)}
-      ${selectField('Roli', 'role', Object.entries(ROLES), u.role, '', self ? 'disabled' : '')}
+      ${selectField('Roli', 'role', Object.entries(ROLES), u.role, '', `id="userRole" ${self ? 'disabled' : ''}`)}
       ${selectField('Holati', 'active', [['1', 'Faol'], ['0', 'Bloklangan']], u.active === false ? '0' : '1', '', self ? 'disabled' : '')}
       ${canSetPassword
         ? field(id ? "Yangi parol (o'zgartirmaslik uchun bo'sh qoldiring)" : 'Parol * (kamida 6 belgi)', 'password', '', `type="password" autocomplete="new-password" ${id ? '' : 'required'}`, 'full')
         : '<p class="muted small full">Parolni foydalanuvchining o\'zi o\'zgartiradi (yuqoridagi ismi ustiga bosib). Unutgan bo\'lsa — uni bloklab, yangi email bilan qayta qo\'shing.</p>'}
+      <div class="field full perm-box" id="permBox">
+        <span class="field-label">Ruxsatlar — qaysi funksiyalar ochiq</span>
+        ${Object.entries(PERMS).map(([k, [title, hint]]) => `<label class="perm-row"><input type="checkbox" name="perm_${k}" value="1" ${permsOf(u).includes(k) ? 'checked' : ''} ${self ? 'disabled' : ''}>
+          <span><b>${esc(title)}</b><small>${esc(hint)}</small></span></label>`).join('')}
+        <p class="muted small">Etiketka chop etish, mahsulotlar va qoldiqlarni ko'rish — hammaga ochiq. Rol tanlanganda uning odatiy ruxsatlari qo'yiladi, keyin xohlaganingizcha o'zgartirasiz.</p>
+      </div>
+      <p class="muted small full" id="permAdminNote">Administrator hamma funksiyalardan foydalanadi.</p>
     </div>`,
+    onOpen: () => {
+      const role = $('#userRole');
+      const sync = () => {
+        const admin = role.value === 'admin';
+        $('#permBox').hidden = admin;
+        $('#permAdminNote').hidden = !admin;
+      };
+      // Rol almashtirilsa — o'sha rolning odatiy ruxsatlari belgilanadi
+      role.addEventListener('change', () => {
+        $$('#permBox input[type=checkbox]').forEach((c) => { c.checked = (ROLE_PERMS[role.value] || []).includes(c.name.slice(5)); });
+        sync();
+      });
+      sync();
+    },
     onSubmit: async (d) => {
       const password = d.password || '';
       if (password && password.length < 6) {
@@ -3229,6 +3288,7 @@ function editUser(id) {
         login: server && id ? u.login : d.login.trim().toLowerCase(),
         role: self ? u.role : d.role,
         active: self ? true : d.active === '1',
+        perms: self ? u.perms : d.role === 'admin' ? undefined : Object.keys(PERMS).filter((k) => d['perm_' + k]),
       };
       try {
         if (self && password && server) await backend.changeOwnPassword(me, password);
@@ -3860,7 +3920,7 @@ const ACTIONS = {
       wide: true,
       body: `<div class="gallery">${p.photos.map((ph) => `<img data-photo="${esc(ph.path)}" alt="${esc(p.name)}">`).join('')}</div>
         <p class="muted">${esc([p.size && p.size + ' sm', p.color, priceLabel(p)].filter(Boolean).join(' · '))}</p>`,
-      extra: isAdmin() ? [{ label: 'Kartochkani ochish', onClick: () => editProduct(p.id) }] : [],
+      extra: can('products') ? [{ label: 'Kartochkani ochish', onClick: () => editProduct(p.id) }] : [],
     });
   },
   catIconOpen: (ds, el) => {
@@ -4458,7 +4518,9 @@ Object.assign(ACTIONS, {
 });
 
 // Sotuvchi tugmani ko'rmasa ham, bu amallarni bajara olmasligi kerak
-const ADMIN_ACTIONS = ['newProduct', 'deleteProduct', 'unarchive', 'exportProducts', 'tgProduct', 'deleteParty', 'deletePayment',
+// Ruxsatga bog'liq amallar (tugma ko'rinmasa ham bajarilmasin)
+const ACTION_PERMS = { newProduct: 'products', exportProducts: 'products' };
+const ADMIN_ACTIONS = ['deleteProduct', 'unarchive', 'exportProducts', 'tgProduct', 'deleteParty', 'deletePayment',
   'tgSave', 'tgDetect', 'tgTest', 'tgAll', 'coSave', 'editWh', 'deleteWh', 'catSave', 'catAdd', 'catDel', 'catIconOpen', 'catIconSet', 'fsAdd', 'fsDel', 'fsFieldAdd', 'fsFieldDel', 'regAdd', 'regDel', 'chipRemove', 'backup', 'demo', 'reset', 'editUser', 'exportDocs',
   'serverSettings', 'refreshUsage', 'migrateLocal', 'rateRefresh', 'rateManual', 'rateAuto',
   'ldSel', 'ldFs', 'ldBold', 'ldCur', 'ldAlign', 'ldCenter', 'ldFull', 'ldTest', 'ldUndo', 'ldReset', 'ldSave'];
@@ -4468,6 +4530,7 @@ document.addEventListener('click', (e) => {
   if (!el || el.closest('#modal') && !el.closest('#modalBody')) return;
   e.preventDefault();
   if (ADMIN_ACTIONS.includes(el.dataset.act) && !isAdmin()) return;
+  if (ACTION_PERMS[el.dataset.act] && !can(ACTION_PERMS[el.dataset.act])) return;
   ACTIONS[el.dataset.act]?.(el.dataset, el);
 });
 

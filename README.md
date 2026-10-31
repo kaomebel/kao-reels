@@ -18,8 +18,13 @@ Mebel do'koni uchun ombor, savdo va pul hisobi dasturi (MoySklad uslubida), o'zb
 
 ## Foydalanuvchilar
 
-- **Administrator** — barcha bo'limlar, foydalanuvchilarni qo'shadi va bloklaydi.
-- **Sotuvchi** — savdo hujjatlari, mijozlar, kirim to'lovlari, mahsulot va qoldiqlar. Tannarx, foyda, xaridlar, kassa va sozlamalar unga ko'rinmaydi; faqat o'zi yaratgan hujjatlarni o'zgartiradi, hech narsani o'chira olmaydi. Supabase rejimida bu cheklovlar **serverning o'zida** (RLS qoidalari) tekshiriladi — sotuvchiga tannarx va xarid narxlari umuman yuborilmaydi.
+- **Administrator** — barcha bo'limlar va sozlamalar; foydalanuvchilarni qo'shadi, bloklaydi va har biriga qaysi funksiyalar ochiqligini belgilaydi (**Sozlamalar → Foydalanuvchilar → Tahrirlash → Ruxsatlar**).
+- **Sotuvchi** — odatda: sotish va kirim qilish.
+- **Ta'minot xodimi** — odatda: xaridlar (ta'minotchiga buyurtma, qabul qilish), kirim qilish, mahsulot qo'shish va tannarxni ko'rish.
+
+Ruxsatlar: *Sotish*, *Kirim qilish*, *Xaridlar*, *Ombor amallari* (hisobdan chiqarish, ko'chirish, inventarizatsiya), *Mahsulotlar*, *Tannarx*, *Pul*, *Hisobotlar*. Rol tanlanganda uning odatiy ruxsatlari qo'yiladi, administrator ularni xohlaganicha o'zgartiradi. Mahsulot, qoldiq va etiketkalar hammaga ochiq. Administratordan boshqa hech kim hujjat va to'lovlarni o'chira olmaydi, sozlamalarni ko'rmaydi va faqat o'zi yaratgan hujjatlarni o'zgartiradi. Tannarx ruxsati yo'q xodimga kelish narxlari ko'rsatilmaydi (kirim qilishda ham).
+
+Supabase rejimida bu cheklovlar **serverning o'zida** (RLS qoidalari) tekshiriladi — ruxsat berilmagan ma'lumot xodimning qurilmasiga umuman yuborilmaydi. Dastur yangilanganda [`supabase/schema.sql`](supabase/schema.sql) ni SQL Editor'da qayta ishga tushiring (xavfsiz, ma'lumotlar o'chmaydi).
 
 ## Ishlash rejimlari
 
