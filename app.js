@@ -508,11 +508,56 @@ function computeStock(excludeId) {
     const st = JSON.parse(JSON.stringify(serverStock));
     const ex = excludeId && doc(excludeId);
     if (ex) applyDocStock(st, ex, -1);
-    return st;
+    return addKitStock(st);
   }
   const st = {};
   db.docs.forEach((d) => { if (d.id !== excludeId) applyDocStock(st, d, 1); });
+  return addKitStock(st);
+}
+
+// ---------- Komplektlar ----------
+// Komplekt — bir nechta mahsulotdan iborat to'plam (krovat + matras, stol + 4 stul, yotoqxona to'plami).
+// Uning o'z qoldig'i yo'q: har bir omborda nechta to'liq komplekt yig'ish mumkinligi tarkibidan hisoblanadi.
+// Sotilganda hujjatga tarkibidagi mahsulotlar yoziladi — ombor, tannarx va hisobotlar o'zgarishsiz ishlaydi.
+const isKit = (p) => Array.isArray(p?.kit) && p.kit.length > 0;
+const kitParts = (p) => (p.kit || []).filter((c) => product(c.productId));
+
+function addKitStock(st) {
+  db.products.filter(isKit).forEach((k) => {
+    const parts = kitParts(k);
+    const m = {};
+    db.warehouses.forEach((w) => {
+      const n = parts.length ? Math.min(...parts.map((c) => Math.floor(qtyIn(st, c.productId, w.id) / Math.max(1, c.qty)))) : 0;
+      if (n > 0) m[w.id] = n;
+    });
+    st[k.id] = m;
+  });
   return st;
+}
+
+// Hujjat qatorlaridagi komplektni tarkibiga yoyamiz. Komplekt narxi mahsulotlar orasida
+// ularning narxiga mutanosib taqsimlanadi (jami summa o'zgarmaydi).
+function expandKits(items, t) {
+  const out = [];
+  items.forEach((it) => {
+    const k = product(it.productId);
+    if (!isKit(k)) return out.push(it);
+    const parts = kitParts(k);
+    const weight = (c) => Math.max(0, t.price === 'sale' ? salePriceUZS(product(c.productId)) : ctx.cost[c.productId] || 0) * c.qty;
+    let total = parts.reduce((s, c) => s + weight(c), 0);
+    const w = total ? weight : (c) => c.qty;
+    if (!total) total = parts.reduce((s, c) => s + c.qty, 0);
+    // Oxirgi qatorga yaxlitlash qoldig'i tushadi — iloji bo'lsa 1 donalik mahsulot oxirida turadi
+    const ordered = [...parts.filter((c) => c.qty !== 1), ...parts.filter((c) => c.qty === 1)];
+    let left = it.price;
+    ordered.forEach((c, i) => {
+      const last = i === ordered.length - 1;
+      const unit = last ? Math.round((left / c.qty) * 100) / 100 : Math.round((it.price * w(c)) / total / c.qty);
+      left -= unit * c.qty;
+      out.push({ productId: c.productId, qty: it.qty * c.qty, price: unit, kitId: k.id, kitName: k.name, kitQty: it.qty });
+    });
+  });
+  return out;
 }
 
 function computeReserve() {
@@ -548,6 +593,7 @@ function computeCost() {
     const a = acc[p.id];
     cost[p.id] = a && a.q ? a.s / a.q : toUZS(p.buyPrice || 0, p.priceCurrency);
   });
+  db.products.filter(isKit).forEach((k) => { cost[k.id] = kitParts(k).reduce((s, c) => s + (cost[c.productId] || 0) * c.qty, 0); });
   return cost;
 }
 
@@ -616,7 +662,7 @@ const isTouch = () => window.matchMedia('(pointer: coarse), (max-width: 700px)')
 // Telefonda jadval qatorlari kartochkaga aylanadi: har bir katakka ustun nomi yoziladi (CSS ko'rsatadi)
 function cardTables(root) {
   $$('table', root).forEach((table) => {
-    if (table.classList.contains('items-table')) return;
+    if (table.classList.contains('items-table') || table.classList.contains('kit-table')) return;
     const heads = $$('thead th', table).map((th) => th.textContent.trim());
     table.classList.add('m-cards');
     $$('tbody tr, tfoot tr', table).forEach((tr) => {
@@ -922,6 +968,7 @@ function bindSizeField() {
 const FURNITURE_ICONS = ['bed', 'sofa', 'armchair', 'pouf', 'kitchen', 'dining', 'table', 'chair', 'officeChair', 'desk', 'wardrobe', 'dresser', 'bookshelf', 'tvStand', 'mirror', 'crib', 'mattress', 'lamp', 'safe', 'box'];
 // Nomidagi so'z bo'yicha o'zi tanlanadi (birinchi mos kelgani); o'zgartirilgani db.categoryIcons da
 const ICON_RULES = [
+  [/komplekt/i, 'dining'],
   [/ofis kreslo|rahbar kreslo|kompyuter kreslo|ofis stul/i, 'officeChair'],
   [/yotoq|karavot/i, 'bed'], [/beshik|bolalar/i, 'crib'], [/matras|topper/i, 'mattress'],
   [/oshxona garnitur|oshxona$/i, 'kitchen'], [/divan/i, 'sofa'], [/kreslo/i, 'armchair'], [/puf/i, 'pouf'],
@@ -1217,6 +1264,7 @@ function newProduct() {
 
 function editProduct(id) {
   const p = product(id);
+  if (isKit(p)) return editKit(id);
   if (!can('products')) {
     // Mahsulot ruxsati yo'q — kartochkani faqat ko'radi
     openModal({ title: p.name, body: `<fieldset disabled>${productForm(p, true)}</fieldset>`, wide: true, onOpen: () => bindProductForm(p, true), extra: [{ label: 'Etiketka', onClick: () => quickLabel(id) }] });
@@ -1252,6 +1300,145 @@ function deleteProduct(id) {
   if (!confirm(`"${p.name}" o'chirilsinmi?`)) return;
   db.products = db.products.filter((x) => x.id !== id);
   save().then(() => backend.deletePhotos((p.photos || []).flatMap((ph) => [ph.path, ph.thumb])));
+}
+
+// --- Komplekt kartochkasi ---
+const KIT_CATEGORY = 'Komplektlar';
+
+function kitPartRow(c = {}) {
+  const p = product(c.productId);
+  return `<tr>
+    <td><input class="kit-prod" list="kitProducts" autocomplete="off" placeholder="Artikul yoki nomi" value="${esc(productLabel(p))}"></td>
+    <td><input class="kit-qty" type="number" min="1" step="1" value="${c.qty || 1}"></td>
+    <td class="kit-line num muted"></td>
+    <td><button type="button" class="small danger kit-del" title="O'chirish">×</button></td>
+  </tr>`;
+}
+
+function kitForm(k = {}) {
+  const parts = k.kit?.length ? k.kit : [{}, {}];
+  const opts = activeProducts().filter((p) => !isKit(p)).map((p) => `<option value="${esc(productLabel(p))}"></option>`).join('');
+  return `<div class="form-grid">
+      ${field('Komplekt nomi *', 'name', k.name, 'required placeholder="Masalan: Yotoqxona to\'plami «Milano»"', 'full')}
+      ${field('Artikul', 'code', k.code)}
+      ${selectField('Kategoriya', 'category', [[KIT_CATEGORY, KIT_CATEGORY], ...db.categories.filter((c) => c !== KIT_CATEGORY).map((c) => [c, c])], k.category || KIT_CATEGORY)}
+    </div>
+    <h4 class="kit-h">Tarkibi</h4>
+    <datalist id="kitProducts">${opts}</datalist>
+    <div class="table-wrap"><table class="kit-table"><thead><tr><th>Mahsulot</th><th class="num">Soni</th><th class="num">Narxi</th><th></th></tr></thead>
+      <tbody id="kitRows">${parts.map(kitPartRow).join('')}</tbody></table></div>
+    <button type="button" class="small" id="kitAdd">${icon('plus')}Mahsulot qo'shish</button>
+    <p class="muted small" id="kitInfo"></p>
+    <div class="form-grid">
+      ${moneyField('Komplekt narxi *', 'salePrice', k.salePrice ?? '', 'UZS', 'required')}
+      ${moneyField('Eng kam narx', 'minPrice', k.minPrice ?? '', 'UZS')}
+      ${textArea('Izoh', 'note', k.note)}
+    </div>`;
+}
+
+function readKitParts() {
+  const byLabel = new Map(activeProducts().filter((p) => !isKit(p)).map((p) => [productLabel(p), p]));
+  const parts = [];
+  for (const tr of $$('#kitRows tr')) {
+    const label = $('.kit-prod', tr).value.trim();
+    if (!label) continue;
+    const p = byLabel.get(label) || activeProducts().find((x) => !isKit(x) && (x.code && x.code === label || x.name === label));
+    if (!p) return { error: `«${label}» topilmadi — ro'yxatdan tanlang.` };
+    const qty = Math.max(1, Math.round(num($('.kit-qty', tr).value)));
+    const same = parts.find((c) => c.productId === p.id);
+    if (same) same.qty += qty; else parts.push({ productId: p.id, qty });
+  }
+  return { parts };
+}
+
+function bindKitForm(k) {
+  const rows = $('#kitRows');
+  const price = $('#modalBody [name=salePrice]');
+  let touched = !!k.salePrice;
+  price.addEventListener('input', () => { touched = true; });
+  const refresh = () => {
+    const { parts = [] } = readKitParts();
+    $$('#kitRows tr').forEach((tr) => {
+      const p = activeProducts().find((x) => productLabel(x) === $('.kit-prod', tr).value.trim());
+      $('.kit-line', tr).textContent = p ? money(salePriceUZS(p) * Math.max(1, num($('.kit-qty', tr).value))) : '';
+    });
+    const sum = parts.reduce((s, c) => s + salePriceUZS(product(c.productId)) * c.qty, 0);
+    const avail = parts.length ? Math.min(...parts.map((c) => Math.floor(qtyIn(ctx.stock, c.productId) / c.qty))) : 0;
+    $('#kitInfo').innerHTML = parts.length
+      ? `Alohida sotilsa: <b>${money(sum)}</b> · Omborda yig'ish mumkin: <b>${Math.max(0, avail)} ta komplekt</b>`
+      : 'Komplektga kiradigan mahsulotlarni qo\'shing (masalan: krovat va matras).';
+    if (!touched && sum) { price.value = sum; formatMoneyInput(price); }
+  };
+  rows.addEventListener('input', refresh);
+  rows.addEventListener('change', refresh);
+  rows.addEventListener('click', (e) => {
+    if (!e.target.closest('.kit-del')) return;
+    e.target.closest('tr').remove();
+    if (!rows.children.length) rows.insertAdjacentHTML('beforeend', kitPartRow());
+    refresh();
+  });
+  $('#kitAdd').addEventListener('click', () => {
+    rows.insertAdjacentHTML('beforeend', kitPartRow());
+    $('#kitRows tr:last-child .kit-prod').focus();
+  });
+  refresh();
+}
+
+function editKit(id) {
+  const k = id ? product(id) : null;
+  if (!can('products')) {
+    openModal({ title: k.name, body: `<fieldset disabled>${kitForm(k)}</fieldset>`, wide: true, onOpen: () => bindKitForm(k) });
+    return;
+  }
+  const extra = k ? [{ label: 'Etiketka', onClick: () => quickLabel(id) }] : [];
+  if (k && isAdmin()) extra.push({ label: "O'chirish", cls: 'danger', onClick: () => { closeModal(); deleteProduct(id); } });
+  openModal({
+    title: k ? `Komplekt: ${k.name}` : 'Yangi komplekt',
+    body: kitForm(k || {}),
+    wide: true,
+    extra,
+    onOpen: () => bindKitForm(k || {}),
+    onSubmit: async (d) => {
+      const { parts, error } = readKitParts();
+      if (error) { alert(error); return false; }
+      if (parts.length < 2 && !(parts.length === 1 && parts[0].qty > 1)) {
+        alert("Komplektga kamida 2 ta mahsulot qo'shing.");
+        return false;
+      }
+      if (!(num(d.salePrice) > 0)) { alert('Komplekt narxini kiriting.'); return false; }
+      const code = d.code.trim();
+      if (code && db.products.some((p) => p.code === code && p.id !== k?.id)) { alert(`«${code}» artikuli band.`); return false; }
+      const target = k || { id: uid(), created: today(), photos: [], unit: 'komplekt' };
+      Object.assign(target, {
+        name: d.name.trim(), code, category: d.category || KIT_CATEGORY, type: '',
+        priceCurrency: 'UZS', salePrice: num(d.salePrice), minPrice: num(d.minPrice), minQty: 0,
+        note: d.note.trim(), kit: parts,
+      });
+      if (!k) db.products.push(target);
+      if (target.category === KIT_CATEGORY && !db.categories.includes(KIT_CATEGORY)) db.categories.push(KIT_CATEGORY);
+      await save();
+    },
+  });
+}
+
+function viewKits() {
+  const q = filterVal('kits.q').toLowerCase();
+  const list = db.products.filter((p) => isKit(p) && !p.archived && (!q || [p.name, p.code].join(' ').toLowerCase().includes(q)));
+  const rows = list.map((k) => {
+    const parts = kitParts(k);
+    const sum = parts.reduce((s, c) => s + salePriceUZS(product(c.productId)) * c.qty, 0);
+    const st = qtyIn(ctx.stock, k.id);
+    return `<tr class="click" data-act="editProduct" data-id="${k.id}">
+      <td><b>${esc(k.name)}</b>${k.code ? ` <span class="muted small">${esc(k.code)}</span>` : ''}
+        <div class="kit-parts">${parts.map((c) => `<span>${esc(product(c.productId).name)}${c.qty > 1 ? ` × ${c.qty}` : ''}</span>`).join('')}</div></td>
+      <td class="num">${money(k.salePrice)}${sum > k.salePrice ? `<div class="muted small">alohida: ${money(sum)}</div>` : ''}</td>
+      <td class="num ${st ? '' : 'debt'}">${st}</td>
+    </tr>`;
+  }).join('');
+  return toolbar('kits', { buttons: can('products') ? `<button class="primary" data-act="newKit">${icon('plus')}Komplekt</button>` : '' })
+    + `<p class="muted small kit-hint">Komplekt sotilganda omborlardan uning tarkibidagi har bir mahsulot ayiriladi. «Mavjud» — omborda to'liq yig'ish mumkin bo'lgan komplektlar soni.</p>`
+    + `<div class="card"><div class="table-wrap"><table><thead><tr><th>Komplekt va tarkibi</th><th class="num">Narxi</th><th class="num">Mavjud</th></tr></thead>
+      <tbody>${rows || emptyRow(3, "Komplekt yo'q. Masalan: krovat + matras, stol + 4 ta stul, yotoqxona to'plami.")}</tbody></table></div></div>`;
 }
 
 function productHistory(id) {
@@ -1395,10 +1582,11 @@ const productPath = (p) => [p.category || 'Kategoriyasiz', p.type].filter(Boolea
 
 function itemRowHtml(t, it = {}, cur = 'UZS') {
   const p = product(it.productId);
-  return `<tr>
+  const kit = it.kitId ? ` data-kit-id="${esc(it.kitId)}" data-kit-name="${esc(it.kitName || '')}" data-kit-qty="${it.kitQty || ''}"` : '';
+  return `<tr${kit}>
     <td class="it-pick"><input type="hidden" class="it-product" value="${esc(p ? p.id : '')}">
       <input class="it-search" autocomplete="off" placeholder="Artikul yoki nomi — yoki tanlang" value="${esc(productLabel(p))}">
-      <div class="it-path muted small">${p ? esc(productPath(p)) : ''}</div></td>
+      <div class="it-path muted small">${p ? esc(productPath(p)) : ''}${it.kitName ? ` · <b>Komplekt: ${esc(it.kitName)}</b>` : ''}</div></td>
     <td class="it-avail muted num"></td>
     <td><input class="it-qty" type="number" min="1" step="1" value="${it.qty || 1}"></td>
     <td><span class="money-wrap"><input class="it-price money" data-cur="${cur}" inputmode="decimal" value="${esc(fmtIn(it.price ?? '', cur))}"><span class="cur">${CUR_SIGN[cur]}</span></span>
@@ -1799,12 +1987,15 @@ function pickerPanel() {
 }
 
 const activeProducts = () => db.products.filter((p) => !p.archived);
+// Hujjatda tanlash mumkin bo'lgan mahsulotlar: komplekt faqat savdoda (xarid va kirimda — alohida mahsulotlar)
+let pickKits = true;
+const pickProducts = () => activeProducts().filter((p) => pickKits || !isKit(p));
 
 function searchProducts(q) {
   const s = q.trim().toLowerCase();
   if (!s) return [];
   const words = s.split(/\s+/);
-  return activeProducts()
+  return pickProducts()
     .map((p) => {
       const code = (p.code || '').toLowerCase();
       const hay = [p.name, p.code, p.category, p.type, p.color, p.size, ...Object.values(p.attrs || {})].join(' ').toLowerCase();
@@ -1831,7 +2022,7 @@ function renderPicker() {
     const found = searchProducts(q);
     html = found.length ? found.slice(0, 30).map(productRow).join('') : '<div class="pick-empty">Topilmadi — artikul yoki nomni tekshiring</div>';
   } else {
-    const list = activeProducts();
+    const list = pickProducts();
     const crumbs = [picker.cat, picker.type].filter((x) => x !== null && x !== undefined);
     const head = crumbs.length ? `<button type="button" class="pick-back" data-pick="back">‹ ${esc(['Barcha kategoriyalar', ...crumbs].join(' › '))}</button>` : '';
     const count = (arr, key) => arr.reduce((m, p) => { const k = key(p); m.set(k, (m.get(k) || 0) + 1); return m; }, new Map());
@@ -1921,6 +2112,7 @@ $('#modal').addEventListener('cancel', (e) => {
 
 function bindDocForm(type, editingId) {
   const t = DOC_TYPES[type];
+  pickKits = t.price === 'sale';
   bindAddressBlock();
   if (t.party === 'customer') bindCustomerLookup();
   else if (t.party) bindPartyLookup(t.party);
@@ -2083,7 +2275,11 @@ function readItems() {
   $$('#itemRows tr').forEach((tr) => {
     const productId = $('.it-product', tr).value;
     if (!productId) return;
-    items.push({ productId, qty: Math.max(1, num($('.it-qty', tr).value)), price: num($('.it-price', tr).value) });
+    const it = { productId, qty: Math.max(1, num($('.it-qty', tr).value)), price: num($('.it-price', tr).value) };
+    // Komplekt tarkibidagi qator: komplekt belgisi saqlanadi (mahsulot almashtirilmagan bo'lsa)
+    const k = tr.dataset.kitId && product(tr.dataset.kitId);
+    if (k && kitParts(k).some((c) => c.productId === productId)) Object.assign(it, { kitId: k.id, kitName: tr.dataset.kitName, kitQty: num(tr.dataset.kitQty) || undefined });
+    items.push(it);
   });
   return items;
 }
@@ -2128,7 +2324,7 @@ const canEditDoc = (d) => isAdmin() || (canUseDoc(d.type) && d.userId === me?.id
 
 async function saveDoc(type, existing, preset, data, stock) {
   const t = DOC_TYPES[type];
-  const items = readItems();
+  let items = readItems();
   if (!items.length) {
     alert(data.orderKind === 'custom' ? 'Individual buyurtma nomini kiriting.' : 'Kamida bitta mahsulot tanlang.');
     return false;
@@ -2180,6 +2376,8 @@ async function saveDoc(type, existing, preset, data, stock) {
     alert('Omborlar har xil bo\'lishi kerak.');
     return false;
   }
+  // Komplekt qatorlari tarkibidagi mahsulotlarga yoyiladi (narx va eng kam narx yuqorida tekshirildi)
+  if (items.some((it) => isKit(product(it.productId)))) items = expandKits(items, t);
 
   const delivery = t.delivery ? readAddress(data) : null;
   let counterpartyId = data.counterpartyId && data.counterpartyId !== '__new' ? data.counterpartyId : null;
@@ -2314,7 +2512,7 @@ function printDoc(id) {
   const c = party(d.counterpartyId) || {};
   const rows = d.items.map((it, i) => {
     const p = product(it.productId) || { name: it.name, size: it.size, color: it.color };
-    return `<tr><td>${i + 1}</td><td>${esc(p.name)}${p.code ? ' (' + esc(p.code) + ')' : ''}<br><small>${esc([p.size, p.color].filter(Boolean).join(', '))}</small></td><td>${it.qty} ${esc(p.unit || '')}</td><td>${fmtIn(it.price, d.currency)}</td><td>${fmtIn(Math.round(it.qty * it.price * 100) / 100, d.currency)}</td></tr>`;
+    return `<tr><td>${i + 1}</td><td>${esc(p.name)}${p.code ? ' (' + esc(p.code) + ')' : ''}<br><small>${esc([it.kitName ? 'Komplekt: ' + it.kitName : '', p.size, p.color].filter(Boolean).join(', '))}</small></td><td>${it.qty} ${esc(p.unit || '')}</td><td>${fmtIn(it.price, d.currency)}</td><td>${fmtIn(Math.round(it.qty * it.price * 100) / 100, d.currency)}</td></tr>`;
   }).join('');
   const paid = t.pay ? docPaid(d) : 0;
   printHtml(`<!doctype html><html><head><meta charset="utf-8"><title>${esc(t.one)} ${esc(d.no)}</title>
@@ -2649,7 +2847,7 @@ const SECTIONS = [
   { id: 'dashboard', icon: 'dashboard', title: "Ko'rsatkichlar" },
   { id: 'purchases', icon: 'truck', title: 'Xaridlar', views: [['purchaseOrder', '', 'purchase'], ['receipt', '', 'purchase'], ['purchaseReturn', '', 'purchase']] },
   { id: 'sales', icon: 'bag', title: 'Savdo', views: [['order', '', 'sale'], ['sale', '', 'sale'], ['salesReturn', '', 'sale']] },
-  { id: 'goods', icon: 'sofa', title: 'Tovarlar', views: [['products', 'Mahsulotlar'], ['stock', 'Qoldiqlar'], ['enter', '', 'enter'], ['writeoff', '', 'stockOps'], ['move', '', 'stockOps'], ['inventory', '', 'stockOps'], ['warehouses', 'Omborlar', 'A'], ['labels', 'Etiketkalar'], ['labelDesign', 'Etiketka dizayni', 'A']] },
+  { id: 'goods', icon: 'sofa', title: 'Tovarlar', views: [['products', 'Mahsulotlar'], ['kits', 'Komplektlar'], ['stock', 'Qoldiqlar'], ['enter', '', 'enter'], ['writeoff', '', 'stockOps'], ['move', '', 'stockOps'], ['inventory', '', 'stockOps'], ['warehouses', 'Omborlar', 'A'], ['labels', 'Etiketkalar'], ['labelDesign', 'Etiketka dizayni', 'A']] },
   { id: 'parties', icon: 'users', title: 'Kontragentlar', views: [['parties', 'Kontragentlar', 'sale|purchase|money'], ['debts', 'Qarzlar', 'money']] },
   { id: 'money', icon: 'wallet', title: 'Pul', views: [['payments', "To'lovlar", 'sale|money'], ['cash', 'Kassa va hisoblar', 'money']] },
   { id: 'reports', icon: 'chart', title: 'Hisobotlar', views: [['profit', 'Foyda va zarar', 'reports'], ['top', 'Savdo tahlili', 'reports']] },
@@ -2720,7 +2918,7 @@ function viewDashboard() {
     const b = partyBalance(c.id);
     if (b > 0) receivable += b; else payable -= b;
   });
-  const stockValue = db.products.reduce((s, p) => s + Math.max(0, qtyIn(ctx.stock, p.id)) * ctx.cost[p.id], 0);
+  const stockValue = db.products.filter((p) => !isKit(p)).reduce((s, p) => s + Math.max(0, qtyIn(ctx.stock, p.id)) * ctx.cost[p.id], 0);
   const activeOrders = db.docs.filter((d) => d.type === 'order' && RESERVING.includes(d.status));
 
   const mySales = sales.filter((d) => d.date.startsWith(month) && d.userId === me.id);
@@ -2752,7 +2950,7 @@ function viewDashboard() {
     (can('sale') || can('money') ? `<button data-act="newPayment" data-dir="in">${icon('arrowIn')}Kirim to'lovi</button>` : '') +
     (can('money') ? `<button data-act="newPayment" data-dir="out">${icon('arrowOut')}Xarajat</button>` : '');
 
-  const low = db.products.filter((p) => !p.archived && qtyIn(ctx.stock, p.id) - qtyIn(ctx.reserve, p.id) <= (p.minQty || 0));
+  const low = db.products.filter((p) => !p.archived && !isKit(p) && qtyIn(ctx.stock, p.id) - qtyIn(ctx.reserve, p.id) <= (p.minQty || 0));
   const deliveries = db.docs
     .filter((d) => (d.type === 'order' && RESERVING.includes(d.status)) || (d.type === 'sale' && d.status !== 'delivered'))
     .filter((d) => d.deliveryDate)
@@ -3420,7 +3618,7 @@ function viewCompany() {
 function viewWarehouses() {
   return `<div class="card narrow"><h3>${icon('warehouse')}Omborlar va do'konlar — ${db.warehouses.length} ta</h3>
     <p class="muted">Omborlarni faqat administrator qo'sha, o'zgartira va o'chira oladi. Kirim, sotuv va ko'chirishda kerakli ombor tanlanadi; qoldiqlar har bir ombor bo'yicha alohida hisoblanadi.</p><table><thead><tr><th>Nomi</th><th>Manzil</th><th class="num">Tovar soni</th><th></th></tr></thead><tbody>
-    ${db.warehouses.map((w) => `<tr><td>${esc(w.name)}</td><td>${esc(w.address)}</td><td class="num">${db.products.reduce((s, p) => s + qtyIn(ctx.stock, p.id, w.id), 0)}</td>
+    ${db.warehouses.map((w) => `<tr><td>${esc(w.name)}</td><td>${esc(w.address)}</td><td class="num">${db.products.filter((p) => !isKit(p)).reduce((s, p) => s + qtyIn(ctx.stock, p.id, w.id), 0)}</td>
       <td class="actions"><button class="small" data-act="editWh" data-id="${w.id}">${icon('edit')}Tahrirlash</button><button class="small danger icon-only" data-act="deleteWh" data-id="${w.id}" title="O'chirish">${icon('trash')}</button></td></tr>`).join('')}
     </tbody></table><div class="toolbar" style="margin-top:12px"><button class="primary" data-act="editWh">${icon('plus')}Ombor</button></div></div>`;
 }
@@ -3885,7 +4083,7 @@ const VIEWS = {
   dashboard: viewDashboard, products: viewProducts, stock: viewStock, parties: viewParties, debts: viewDebts,
   payments: viewPayments, cash: viewCash, profit: viewProfit, top: viewTop, users: viewUsers,
   telegram: viewTelegram, company: viewCompany, warehouses: viewWarehouses, categories: viewCategories, backup: viewBackup,
-  server: viewServer, profile: viewProfile, currency: viewCurrency, install: viewInstall, labels: viewLabels, labelDesign: viewLabelDesign,
+  server: viewServer, profile: viewProfile, kits: viewKits, currency: viewCurrency, install: viewInstall, labels: viewLabels, labelDesign: viewLabelDesign,
 };
 
 function render() {
@@ -3971,6 +4169,7 @@ const ACTIONS = {
   openDoc: (ds) => { const d = doc(ds.id); if (d) openDoc(d.type, d); },
   exportDocs: (ds) => exportDocs(ds.type),
   newProduct: () => newProduct(),
+  newKit: () => editKit(null),
   editProduct: (ds) => editProduct(ds.id),
   deleteProduct: (ds) => deleteProduct(ds.id),
   unarchive: (ds) => { product(ds.id).archived = false; save(); },
@@ -4688,7 +4887,7 @@ Object.assign(ACTIONS, {
 
 // Sotuvchi tugmani ko'rmasa ham, bu amallarni bajara olmasligi kerak
 // Ruxsatga bog'liq amallar (tugma ko'rinmasa ham bajarilmasin)
-const ACTION_PERMS = { newProduct: 'products', exportProducts: 'products' };
+const ACTION_PERMS = { newProduct: 'products', newKit: 'products', exportProducts: 'products' };
 const ADMIN_ACTIONS = ['deleteProduct', 'unarchive', 'exportProducts', 'tgProduct', 'deleteParty', 'deletePayment',
   'tgSave', 'tgDetect', 'tgTest', 'tgAll', 'coSave', 'editWh', 'deleteWh', 'catSave', 'catAdd', 'catDel', 'catIconOpen', 'catIconSet', 'fsAdd', 'fsDel', 'fsFieldAdd', 'fsFieldDel', 'regAdd', 'regDel', 'chipRemove', 'backup', 'backupDetect', 'backupSend', 'demo', 'reset', 'editUser', 'exportDocs',
   'serverSettings', 'refreshUsage', 'migrateLocal', 'rateRefresh', 'rateManual', 'rateAuto',
