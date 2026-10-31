@@ -74,6 +74,15 @@ const DEFAULT_REGIONS = [
 // Mijoz turlari (Sozlamalarda o'zgartiriladi)
 const DEFAULT_CUSTOMER_TYPES = ['Chakana xaridor', 'Mebelchi', 'Domchi', "Do'konchi", 'Optomchi', "Uy to'ldiruvchi"];
 
+const CHAIR_COLORS_BY = {
+  Mato: ['Kulrang', "To'q kulrang", 'Qora', "To'q ko'k", "Ko'k", 'Bej', 'Yashil', 'Qizil', "To'q sariq"],
+  'Eko-charm': ['Qora', 'Oq', 'Jigarrang', 'Kapuchino', 'Bej', 'Kulrang', 'Qizil'],
+  'Tabiiy charm': ['Qora', 'Jigarrang', 'Konyak', 'Bej', 'Oq'],
+  "Setka (to'r)": ['Qora', 'Kulrang', 'Oq', "Ko'k"],
+  Velyur: ['Kulrang', 'Bej', 'Yashil', "To'q ko'k", 'Pushti'],
+  'Aralash (charm + setka)': ['Qora', 'Kulrang', 'Oq + qora'],
+};
+
 // Kategoriya/turga xos xususiyatlar: shu turdagi mahsulot kartochkasida o'z ranglari va qo'shimcha
 // maydonlari chiqadi (Sozlamalar → Ro'yxatlar da o'zgartiriladi). "applies" — "Kategoriya" yoki "Kategoriya › Tur"
 const DEFAULT_FEATURE_SETS = [{
@@ -81,8 +90,11 @@ const DEFAULT_FEATURE_SETS = [{
   name: 'Ofis kreslo va stullar',
   applies: ['Ofis mebeli › Ofis kreslo', 'Ofis mebeli › Rahbar kreslosi', 'Ofis mebeli › Stul'],
   colors: ['Qora', 'Kulrang', 'Oq', 'Bej', 'Jigarrang', "To'q ko'k", "Ko'k", 'Qizil', 'Yashil', "To'q sariq"],
+  // Avval material tanlanadi, keyin shu materialning ranglari chiqadi
+  colorField: 'Qoplama materiali',
+  colorsBy: CHAIR_COLORS_BY,
   fields: [
-    { name: 'Qoplama materiali', options: ['Eko-charm', 'Tabiiy charm', 'Mato', "Setka (to'r)", 'Velyur', 'Aralash (charm + setka)'] },
+    { name: 'Qoplama materiali', options: ['Mato', 'Eko-charm', 'Tabiiy charm', "Setka (to'r)", 'Velyur', 'Aralash (charm + setka)'] },
     { name: 'Krestovina turi', options: ['Plastik', 'Neylon', 'Xrom', 'Alyuminiy', "Yog'och", "Metall (bo'yalgan)"] },
     { name: 'Mexanizm', options: ["Piastra (oddiy ko'tarish)", 'Tilt (tebranish)', 'Top-Gun', 'Multiblok', 'Sinxron', 'Anyfix'] },
   ],
@@ -120,6 +132,10 @@ function normalizeDb(data) {
   const out = Object.assign(base, data);
   out.telegram = Object.assign(emptyDb().telegram, data.telegram);
   out.company = Object.assign(emptyDb().company, data.company);
+  // Avval saqlangan kreslo to'plamiga "material → ranglar" bog'lanishini qo'shamiz
+  (out.featureSets || []).forEach((f) => {
+    if (f.id === 'chairs' && f.colorField === undefined) Object.assign(f, { colorField: 'Qoplama materiali', colorsBy: JSON.parse(JSON.stringify(CHAIR_COLORS_BY)) });
+  });
   return out;
 }
 
@@ -881,10 +897,10 @@ const productAttrs = (p) => Object.entries(p.attrs || {}).filter(([, v]) => v);
 const attrsText = (p, sep = ' · ') => productAttrs(p).map(([k, v]) => `${k}: ${v}`).join(sep);
 
 // Bitta tanlanadigan tugmachalar (krestovina, mexanizm...)
-function chipOne(name, options, value) {
+function chipOne(name, options, value, ctl = false) {
   const all = [...options, ...(value && !options.includes(value) ? [value] : [])];
   return `<div class="field full"><span class="field-label">${esc(name)}</span>
-    <div class="chips chips-pick chips-one">
+    <div class="chips chips-pick chips-one" ${ctl ? 'data-ctl="1"' : ''}>
       ${all.map((m) => `<button type="button" class="chip ${m === value ? 'on' : ''}" data-act="chipOne" data-v="${esc(m)}">${esc(m)}</button>`).join('')}
       ${isAdmin() ? `<input class="chip-add" placeholder="+ Boshqa" enterkeyhint="done">` : ''}
     </div>
@@ -892,14 +908,44 @@ function chipOne(name, options, value) {
 }
 
 // Rang va qo'shimcha maydonlar: kategoriya/tur o'zgarganda o'zi almashadi
+// Ranglar ro'yxati: material (yoki boshqa bog'langan maydon) tanlangan bo'lsa — o'sha materialniki
+function colorsFor(set, attrs = {}) {
+  if (!set) return db.colors;
+  const v = set.colorField ? attrs[set.colorField] : '';
+  return (v && set.colorsBy?.[v]) || set.colors || [];
+}
+
 function featureBlock(cat, type, p = {}) {
   const set = featureSetFor(cat, type);
-  const colors = set ? set.colors || [] : db.colors;
+  const colorBox = (colors, label, note = '') => `<div class="field full"><span class="field-label">${label}</span>
+    ${note ? `<div class="muted small feat-note">${note}</div>` : chipPicker('colorChips', colors, p.color, '+ Yangi rang')}
+    <input type="hidden" name="color" value="${esc(p.color || '')}"></div>`;
+  if (!set) return `<div class="form-grid">${colorBox(db.colors, 'Rangi')}</div>`;
+  const fields = set.fields || [];
+  const ctl = fields.find((f) => f.name === set.colorField);
+  const ctlVal = ctl ? p.attrs?.[ctl.name] || '' : '';
+  const tag = ` <span class="feat-tag">${esc(set.name)}</span>`;
+  // Avval material, keyin uning ranglari, so'ng qolgan maydonlar
+  const color = ctl && !ctlVal && !p.color
+    ? colorBox([], 'Rangi' + tag, `Avval «${esc(ctl.name)}» ni tanlang — ranglar shunga qarab chiqadi.`)
+    : colorBox(colorsFor(set, p.attrs), (ctlVal ? `Rangi — ${esc(ctlVal)}` : 'Rangi') + tag);
   return `<div class="form-grid">
-    <div class="field full"><span class="field-label">Rangi${set ? ` <span class="feat-tag">${esc(set.name)}</span>` : ''}</span>${chipPicker('colorChips', colors, p.color, '+ Yangi rang')}
-      <input type="hidden" name="color" value="${esc(p.color || '')}"></div>
-    ${set ? (set.fields || []).map((f) => chipOne(f.name, f.options || [], p.attrs?.[f.name] || '')).join('') : ''}
+    ${ctl ? chipOne(ctl.name, ctl.options || [], ctlVal, true) : ''}
+    ${color}
+    ${fields.filter((f) => f !== ctl).map((f) => chipOne(f.name, f.options || [], p.attrs?.[f.name] || '')).join('')}
   </div>`;
+}
+
+// Material almashtirilsa — ranglar o'sha materialniki bo'ladi (yangi ro'yxatda yo'q rang olib tashlanadi)
+function refreshFeatures() {
+  const box = $('#featBlock');
+  if (!box) return;
+  const cat = $('#catSel').value;
+  const type = $('#typeSel').value;
+  const draft = readFeatureDraft();
+  const list = colorsFor(featureSetFor(cat, type), draft.attrs);
+  draft.color = splitList(draft.color).filter((c) => list.includes(c)).join(', ');
+  box.innerHTML = featureBlock(cat, type, draft);
 }
 
 // Kartochkada tanlanganlar (kategoriya almashtirilganda yo'qolmasligi uchun)
@@ -1017,7 +1063,10 @@ function readProduct(d, p) {
   }
   // Yangi ranglar va xususiyat qiymatlari keyingi safar ro'yxatda tursin
   const set = featureSetFor(d.category, type);
-  const colorList = set ? (set.colors = set.colors || []) : db.colors;
+  const ctlVal = set?.colorField ? (d['attr:' + set.colorField] || '').trim() : '';
+  const colorList = !set ? db.colors
+    : ctlVal ? ((set.colorsBy = set.colorsBy || {})[ctlVal] = set.colorsBy[ctlVal] || [])
+    : (set.colors = set.colors || []);
   splitList(d.color).forEach((c) => { if (!colorList.includes(c)) colorList.push(c); });
   const attrs = {};
   if (set) {
@@ -3311,13 +3360,30 @@ function fsRow(set = { name: '', applies: [], colors: [], fields: [] }) {
     <span class="field-label">Qaysi kategoriya va turlarda</span>
     <div class="fs-applies"><div class="chips chips-edit">${(set.applies || []).map(editChip).join('')}</div>
       <select class="fs-apply-add"><option value="">+ Kategoriya yoki tur qo'shish...</option>${fsApplyOptions().map((o) => `<option>${esc(o)}</option>`).join('')}</select></div>
-    <span class="field-label">Ranglar</span>
-    <div class="fs-colors">${chipEditor(set.colors || [], "+ Rang qo'shish (Enter)")}</div>
     <span class="field-label">Qo'shimcha maydonlar</span>
     <div class="fs-fields">${(set.fields || []).map(fsFieldRow).join('')}</div>
     <button type="button" class="small" data-act="fsFieldAdd">${icon('plus')}Maydon qo'shish</button>
+    <label class="fs-ctl">Ranglar qaysi maydonga qarab o'zgaradi
+      <select class="fs-ctl-sel"><option value="">— hamma uchun bir xil ranglar</option>${(set.fields || []).map((f, i) => `<option value="${i}" ${f.name === set.colorField ? 'selected' : ''}>${esc(f.name)}</option>`).join('')}</select></label>
+    <div class="fs-colorsby">${(() => {
+      const ctl = (set.fields || []).find((f) => f.name === set.colorField);
+      return ctl ? (ctl.options || []).map((o) => `<div class="fs-cb" data-opt="${esc(o)}"><span class="field-label">${esc(o)} — ranglari</span>${chipEditor(set.colorsBy?.[o] || [], "+ Rang qo'shish (Enter)")}</div>`).join('') : '';
+    })()}</div>
+    <span class="field-label">${set.colorField ? 'Umumiy ranglar (material tanlanmagan bo\'lsa)' : 'Ranglar'}</span>
+    <div class="fs-colors">${chipEditor(set.colors || [], "+ Rang qo'shish (Enter)")}</div>
   </div>`;
 }
+
+// Ranglar bog'lanadigan maydon tanlansa — uning har bir varianti uchun rang ro'yxati chiqadi
+document.addEventListener('change', (e) => {
+  if (!e.target.classList?.contains('fs-ctl-sel')) return;
+  const row = e.target.closest('.fs-row');
+  const field = $$('.fs-field', row)[Number(e.target.value)];
+  const keep = Object.fromEntries($$('.fs-cb', row).map((cb) => [cb.dataset.opt, $$('.chip', cb).map((c) => c.dataset.v)]));
+  const general = $$('.fs-colors .chip', row).map((c) => c.dataset.v);
+  $('.fs-colorsby', row).innerHTML = e.target.value === '' || !field ? '' : $$('.chip', field).map((c) => c.dataset.v)
+    .map((o) => `<div class="fs-cb" data-opt="${esc(o)}"><span class="field-label">${esc(o)} — ranglari</span>${chipEditor(keep[o] || general, "+ Rang qo'shish (Enter)")}</div>`).join('');
+});
 
 document.addEventListener('change', (e) => {
   if (!e.target.classList?.contains('fs-apply-add') || !e.target.value) return;
@@ -3709,8 +3775,20 @@ const ACTIONS = {
       name: $('.fs-name', row).value.trim() || 'Xususiyatlar',
       applies: $$('.fs-applies .chip', row).map((c) => renamePath(c.dataset.v)),
       colors: $$('.fs-colors .chip', row).map((c) => c.dataset.v),
-      fields: $$('.fs-field', row).map((f) => ({ name: $('.fs-fname', f).value.trim(), options: $$('.chip', f).map((c) => c.dataset.v) })).filter((f) => f.name),
-    }));
+      fields: $$('.fs-field', row).map((f) => ({ name: $('.fs-fname', f).value.trim(), options: $$('.chip', f).map((c) => c.dataset.v) })),
+    })).map((set, i) => {
+      // Ranglar bog'langan maydon (tartib raqami bo'yicha — nomi o'zgargan bo'lsa ham)
+      const row = $$('#fsRows .fs-row')[i];
+      const ctl = set.fields[Number($('.fs-ctl-sel', row).value)];
+      const old = (db.featureSets || []).find((x) => x.id === set.id) || {};
+      const colorsBy = Object.assign({}, old.colorsBy);
+      $$('.fs-cb', row).forEach((cb) => { colorsBy[cb.dataset.opt] = $$('.chip', cb).map((c) => c.dataset.v); });
+      return Object.assign(set, {
+        fields: set.fields.filter((f) => f.name),
+        colorField: $('.fs-ctl-sel', row).value !== '' && ctl?.name ? ctl.name : '',
+        colorsBy,
+      });
+    });
     db.colors = $$('#colorEditor .chip').map((c) => c.dataset.v);
     db.customerTypes = $$('#ctypeEditor .chip').map((c) => c.dataset.v);
     // Viloyatlar: mavjud shahar/tumanlarning mahallalari saqlanib qoladi
@@ -3749,6 +3827,7 @@ const ACTIONS = {
     $$('.chip', box).forEach((c) => c.classList.remove('on'));
     el.classList.toggle('on', on);
     syncChips(box);
+    if (box.dataset.ctl) refreshFeatures();
   },
   chipRemove: (ds, el) => el.closest('.chip').remove(),
   regAdd: () => {
@@ -4348,6 +4427,7 @@ document.addEventListener('keydown', (e) => {
     exists.classList.add('on');
   } else if (box.classList.contains('chips-one')) {
     input.insertAdjacentHTML('beforebegin', `<button type="button" class="chip on" data-act="chipOne" data-v="${esc(v)}">${esc(v)}</button>`);
+    if (box.dataset.ctl) { syncChips(box); refreshFeatures(); return; }
   } else if (box.classList.contains('chips-pick')) {
     input.insertAdjacentHTML('beforebegin', `<button type="button" class="chip on" data-act="chipToggle" data-v="${esc(v)}">${esc(v)}</button>`);
   } else {

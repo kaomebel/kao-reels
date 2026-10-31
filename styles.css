@@ -1028,3 +1028,8 @@ button.primary:active:not(:disabled) { background: var(--accent-dark); }
 .fs-fields { display: grid; gap: 10px; }
 .fs-field { padding: 10px; border: 1px dashed var(--border-strong); border-radius: 10px; display: grid; gap: 8px; }
 .fs-row > button.small { justify-self: start; }
+
+.feat-note { padding: 10px 12px; border: 1px dashed var(--border-strong); border-radius: 10px; background: var(--card-2); }
+.fs-ctl { display: grid; gap: 5px; font-size: 13px; color: var(--muted); margin-top: 6px; }
+.fs-colorsby { display: grid; gap: 10px; }
+.fs-cb { display: grid; gap: 6px; padding-left: 10px; border-left: 3px solid var(--accent-soft); }
