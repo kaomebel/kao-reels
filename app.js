@@ -2788,8 +2788,35 @@ async function telegramCall(method, body) {
   }
 }
 
+// Temali (forum) guruh: har bir kategoriya o'z temasiga joylanadi. Tema bo'lmasa, bot uni o'zi yaratadi
+// (botga «Mavzularni boshqarish» huquqi kerak). Tema raqamlari sozlamalarda saqlanadi.
+const topicName = (p) => (p.category || 'Boshqa mahsulotlar').slice(0, 128);
+async function telegramTopic(p, fresh = false) {
+  const tg = db.telegram;
+  if (!tg.useTopics) return null;
+  tg.topics = tg.topics || {};
+  const name = topicName(p);
+  if (tg.topics[name] && !fresh) return tg.topics[name];
+  const res = await telegramCall('createForumTopic', { chat_id: tg.chatId, name });
+  tg.topics[name] = res.result.message_thread_id;
+  telegramLog(`Tema yaratildi: ${name}`, true);
+  commit();
+  return tg.topics[name];
+}
+
 async function telegramSend(p) {
+  try {
+    await telegramSendTo(p, await telegramTopic(p));
+  } catch (e) {
+    // Tema guruhda o'chirilgan bo'lsa — yangisini yaratib, qayta yuboramiz
+    if (!db.telegram.useTopics || !/thread|topic/i.test(e.message)) throw e;
+    await telegramSendTo(p, await telegramTopic(p, true));
+  }
+}
+
+async function telegramSendTo(p, thread) {
   const chatId = db.telegram.chatId;
+  const th = thread ? { message_thread_id: thread } : {};
   const caption = telegramCaption(p);
   const fits = caption.length <= 1024; // rasm izohi chegarasi
   const blobs = [];
@@ -2798,11 +2825,12 @@ async function telegramSend(p) {
     if (b) blobs.push(await toJpeg(b));
   }
   if (!blobs.length) {
-    await telegramCall('sendMessage', { chat_id: chatId, text: caption, parse_mode: 'HTML' });
+    await telegramCall('sendMessage', { chat_id: chatId, ...th, text: caption, parse_mode: 'HTML' });
     return;
   }
   const fd = new FormData();
   fd.append('chat_id', chatId);
+  if (thread) fd.append('message_thread_id', thread);
   if (blobs.length === 1) {
     fd.append('photo', blobs[0], 'photo.jpg');
     if (fits) { fd.append('caption', caption); fd.append('parse_mode', 'HTML'); }
@@ -2815,7 +2843,7 @@ async function telegramSend(p) {
     blobs.forEach((b, i) => fd.append(`p${i}`, b, `p${i}.jpg`));
     await telegramCall('sendMediaGroup', fd);
   }
-  if (!fits) await telegramCall('sendMessage', { chat_id: chatId, text: caption, parse_mode: 'HTML' });
+  if (!fits) await telegramCall('sendMessage', { chat_id: chatId, ...th, text: caption, parse_mode: 'HTML' });
 }
 
 function telegramLog(text, ok) {
@@ -3545,21 +3573,25 @@ function viewTelegram() {
     <p class="muted">Yangi mahsulot qo'shishda va omborga kirim (Qabul qilish, Kirim qilish) qilishda dastur har safar "Telegram guruhga yuborilsinmi?" deb so'raydi — "Ha" yoki "Yo'q" tanlamaguncha saqlamaydi. "Ha" tanlansa, mahsulot rasmi va ma'lumotlari guruhga yuboriladi.</p>
     <ol class="muted small">
       <li>Telegramda <b>@BotFather</b> ga yozing → <code>/newbot</code> → bot nomini kiriting → u bergan <b>token</b> ni pastga joylang.</li>
-      <li>Botni guruhingizga qo'shing va uni <b>administrator</b> qiling (xabar yuborish huquqi bilan).</li>
+      <li>Botni guruhingizga qo'shing va uni <b>administrator</b> qiling (xabar yuborish huquqi bilan; temali guruhda — <b>«Mavzularni boshqarish»</b> huquqi ham).</li>
       <li>Guruhga istalgan xabar yozing, so'ng "Guruh ID sini aniqlash" tugmasini bosing. Ochiq kanal/guruh uchun <code>@guruh_nomi</code> ham yozish mumkin.</li>
     </ol>
     <div class="form-grid">
       <label class="full">Bot tokeni<input id="tgToken" value="${esc(tg.token)}" placeholder="123456789:AA..." autocomplete="off"></label>
       <label class="full">Guruh / kanal ID<input id="tgChat" value="${esc(tg.chatId)}" placeholder="-1001234567890 yoki @guruh_nomi"></label>
       <label class="check full"><input type="checkbox" id="tgShowQty" ${tg.showQty ? 'checked' : ''}> Ombordagi sonini ko'rsatish (aks holda faqat "bor / yo'q")</label>
+      <label class="check full"><input type="checkbox" id="tgTopics" ${tg.useTopics ? 'checked' : ''}> Temali guruh: har bir kategoriya alohida temaga joylansin</label>
     </div>
+    ${tg.useTopics ? `<div class="tg-topics"><p class="muted small">Botga guruhda <b>«Mavzularni boshqarish»</b> (Manage topics) huquqini bering — kategoriya temasi bo'lmasa, bot uni o'zi yaratadi.</p>
+      <table><tbody>${db.categories.map((c) => `<tr><td>${icon(categoryIcon(c))} ${esc(c)}</td><td class="num muted small">${tg.topics?.[c] ? `tema #${tg.topics[c]}` : 'birinchi e\'londa yaratiladi'}</td></tr>`).join('')}</tbody></table>
+      <div class="toolbar" style="margin-top:8px"><button data-act="tgTopicsCreate">Temalarni hozir yaratish</button>${Object.keys(tg.topics || {}).length ? '<button data-act="tgTopicsReset">Temalarni qayta bog\'lash</button>' : ''}</div></div>` : ''}
     <div class="toolbar" style="margin-top:12px">
       <button class="primary" data-act="tgSave">Saqlash</button>
       <button data-act="tgDetect">Guruh ID sini aniqlash</button>
       <button data-act="tgTest">Sinov xabari</button>
       <button data-act="tgAll">Barcha mavjud mahsulotlarni yuborish</button>
     </div>
-    <p class="muted small">Diqqat: token shu brauzerda saqlanadi. Kompyuterga begona odamlar kirmasligiga ishonch hosil qiling.</p>
+    <p class="muted small">Token faqat administratorga ko'rinadi — sotuvchilar uni ko'rmaydi.</p>
   </div>
   ${sample ? `<div class="card narrow"><h3>Namuna xabar</h3><div class="tg-preview">${sample.photos?.length ? `<img data-photo="${esc(sample.photos[0].path)}" alt="">` : ''}<div>${telegramCaption(sample).replace(/\n/g, '<br>')}</div></div></div>` : ''}
   <div class="card narrow"><h3>Yuborish jurnali</h3><table><tbody>
@@ -3572,7 +3604,29 @@ function tgReadForm() {
     token: $('#tgToken').value.trim(),
     chatId: $('#tgChat').value.trim(),
     showQty: $('#tgShowQty').checked,
+    useTopics: $('#tgTopics').checked,
   });
+}
+
+// Hamma kategoriyalar uchun temalarni oldindan yaratish
+async function tgTopicsCreate() {
+  tgReadForm();
+  if (!db.telegram.token || !db.telegram.chatId) return alert('Avval token va guruh ID sini kiriting.');
+  const made = [];
+  try {
+    for (const c of db.categories) {
+      if (db.telegram.topics?.[c]) continue;
+      await telegramTopic({ category: c });
+      made.push(c);
+      await new Promise((r) => setTimeout(r, 1200));
+    }
+    await save();
+    alert(made.length ? `Yaratildi: ${made.join(', ')}` : 'Barcha kategoriyalar uchun tema bor.');
+  } catch (e) {
+    await save();
+    alert('Xato: ' + e.message + (/rights|not enough|forum|administrator/i.test(e.message)
+      ? "\n\nGuruhda «Temalar» yoqilganini va botda «Mavzularni boshqarish» huquqi borligini tekshiring." : ''));
+  }
 }
 
 async function tgDetect() {
@@ -3585,14 +3639,15 @@ async function tgDetect() {
     const chats = new Map();
     json.result.forEach((u) => {
       const c = (u.message || u.my_chat_member || u.channel_post || {}).chat;
-      if (c && c.type !== 'private') chats.set(c.id, c.title);
+      if (c && c.type !== 'private') chats.set(c.id, { title: c.title, forum: !!c.is_forum });
     });
     if (!chats.size) return alert("Guruh topilmadi. Bot guruhga qo'shilganini tekshiring va guruhga yangi xabar yozib, qayta urinib ko'ring.");
-    const [id, title] = [...chats.entries()].pop();
+    const [id, { title, forum }] = [...chats.entries()].pop();
     $('#tgChat').value = id;
+    if (forum) $('#tgTopics').checked = true;
     tgReadForm();
-    save();
-    alert(`Topildi: ${title} (${id}). Saqlandi.`);
+    await save();
+    alert(`Topildi: ${title} (${id})${forum ? '. Bu temali guruh — har bir kategoriya o\'z temasiga joylanadi' : ''}. Saqlandi.`);
   } catch (e) {
     alert('Xato: ' + e.message);
   }
@@ -4199,6 +4254,8 @@ const ACTIONS = {
   print: () => window.print(),
   tgSave: () => { tgReadForm(); save(); alert('Saqlandi.'); },
   tgDetect: () => tgDetect(),
+  tgTopicsCreate: () => tgTopicsCreate(),
+  tgTopicsReset: () => { if (confirm("Kategoriyalar va temalar bog'lanishi o'chirilsinmi? Keyingi e'londa temalar qayta yaratiladi.")) { db.telegram.topics = {}; save(); } },
   tgTest: () => tgTest(),
   tgAll: () => {
     const ids = db.products.filter((p) => !p.archived && qtyIn(ctx.stock, p.id) > 0).map((p) => p.id);
@@ -4903,7 +4960,7 @@ Object.assign(ACTIONS, {
 // Ruxsatga bog'liq amallar (tugma ko'rinmasa ham bajarilmasin)
 const ACTION_PERMS = { newProduct: 'products', newKit: 'products', exportProducts: 'products' };
 const ADMIN_ACTIONS = ['deleteProduct', 'unarchive', 'exportProducts', 'tgProduct', 'deleteParty', 'deletePayment',
-  'tgSave', 'tgDetect', 'tgTest', 'tgAll', 'coSave', 'editWh', 'deleteWh', 'catSave', 'catAdd', 'catDel', 'catIconOpen', 'catIconSet', 'fsAdd', 'fsDel', 'fsFieldAdd', 'fsFieldDel', 'regAdd', 'regDel', 'chipRemove', 'backup', 'backupDetect', 'backupSend', 'demo', 'reset', 'editUser', 'exportDocs',
+  'tgSave', 'tgDetect', 'tgTest', 'tgAll', 'tgTopicsCreate', 'tgTopicsReset', 'coSave', 'editWh', 'deleteWh', 'catSave', 'catAdd', 'catDel', 'catIconOpen', 'catIconSet', 'fsAdd', 'fsDel', 'fsFieldAdd', 'fsFieldDel', 'regAdd', 'regDel', 'chipRemove', 'backup', 'backupDetect', 'backupSend', 'demo', 'reset', 'editUser', 'exportDocs',
   'serverSettings', 'refreshUsage', 'migrateLocal', 'rateRefresh', 'rateManual', 'rateAuto',
   'ldSel', 'ldFs', 'ldBold', 'ldCur', 'ldAlign', 'ldCenter', 'ldFull', 'ldTest', 'ldUndo', 'ldReset', 'ldSave'];
 
