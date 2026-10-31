@@ -2791,13 +2791,59 @@ async function telegramCall(method, body) {
 // Temali (forum) guruh: har bir kategoriya o'z temasiga joylanadi. Tema bo'lmasa, bot uni o'zi yaratadi
 // (botga «Mavzularni boshqarish» huquqi kerak). Tema raqamlari sozlamalarda saqlanadi.
 const topicName = (p) => (p.category || 'Boshqa mahsulotlar').slice(0, 128);
+// Tema ikonkasi: Telegram botlarga ruxsat bergan ikonkalardan kategoriyaga eng mosi (Premium shart emas).
+// Ro'yxat getForumTopicIconStickers dan olinadi; birinchi mos kelgani tanlanadi.
+const TOPIC_EMOJI = {
+  bed: ['🛏', '🛌', '😴', '🏠'], mattress: ['🛏', '😴', '💤', '🏠'], crib: ['👶', '🧸', '🍼', '🏠'],
+  sofa: ['🛋', '📺', '🏠'], armchair: ['🛋', '🏠'], pouf: ['🛋', '🏠'], tvStand: ['📺', '🛋', '🏠'],
+  kitchen: ['🍽', '☕', '🍳', '🏠'], dining: ['🍽', '☕', '🏠'], table: ['🍽', '☕', '🏠'], chair: ['🪑', '🍽', '🏠'],
+  officeChair: ['💼', '💻', '🏢'], desk: ['💼', '💻', '🏢'], bookshelf: ['📚', '📖', '🏠'],
+  wardrobe: ['👔', '👗', '🧳', '👜', '🏠'], dresser: ['👜', '👔', '🏠'], mirror: ['💄', '💅', '🏠'],
+  lamp: ['💡', '⚡', '🏠'], safe: ['🔒', '💰', '💎'], box: ['📦', '🛒', '🛍', '📁'],
+};
+let topicIconCache = null;
+async function topicIconFor(category) {
+  try {
+    if (!topicIconCache) {
+      const res = await telegramCall('getForumTopicIconStickers', {});
+      topicIconCache = new Map(res.result.map((st) => [String(st.emoji || '').replace(/\uFE0F/g, ''), st.custom_emoji_id]));
+    }
+    const key = category === KIT_CATEGORY ? 'box' : categoryIcon(category);
+    for (const e of [...(TOPIC_EMOJI[key] || []), '🏠', '📁']) {
+      const id = topicIconCache.get(e.replace(/\uFE0F/g, ''));
+      if (id) return id;
+    }
+  } catch (e) { /* ikonkasiz ham ishlaydi */ }
+  return null;
+}
+
+// Mavjud temalarga ham ikonka qo'yish (Sozlamalar → Telegram)
+async function tgTopicIcons() {
+  tgReadForm();
+  const topics = Object.entries(db.telegram.topics || {});
+  if (!topics.length) return alert("Hali tema yo'q — avval «Temalarni hozir yaratish» ni bosing.");
+  const errors = [];
+  for (const [name, thread] of topics) {
+    const icon_custom_emoji_id = await topicIconFor(name);
+    if (!icon_custom_emoji_id) continue;
+    try {
+      await telegramCall('editForumTopic', { chat_id: db.telegram.chatId, message_thread_id: thread, icon_custom_emoji_id });
+    } catch (e) {
+      if (!/TOPIC_NOT_MODIFIED/i.test(e.message)) errors.push(`${name}: ${e.message}`);
+    }
+    await new Promise((r) => setTimeout(r, 800));
+  }
+  alert(errors.length ? 'Ba\'zilari o\'zgarmadi:\n' + errors.join('\n') : 'Temalarga ikonkalar qo\'yildi.');
+}
+
 async function telegramTopic(p, fresh = false) {
   const tg = db.telegram;
   if (!tg.useTopics) return null;
   tg.topics = tg.topics || {};
   const name = topicName(p);
   if (tg.topics[name] && !fresh) return tg.topics[name];
-  const res = await telegramCall('createForumTopic', { chat_id: tg.chatId, name });
+  const icon = await topicIconFor(p.category || '');
+  const res = await telegramCall('createForumTopic', Object.assign({ chat_id: tg.chatId, name }, icon ? { icon_custom_emoji_id: icon } : {}));
   tg.topics[name] = res.result.message_thread_id;
   telegramLog(`Tema yaratildi: ${name}`, true);
   commit();
@@ -3584,7 +3630,7 @@ function viewTelegram() {
     </div>
     ${tg.useTopics ? `<div class="tg-topics"><p class="muted small">Botga guruhda <b>«Mavzularni boshqarish»</b> (Manage topics) huquqini bering — kategoriya temasi bo'lmasa, bot uni o'zi yaratadi.</p>
       <table><tbody>${db.categories.map((c) => `<tr><td>${icon(categoryIcon(c))} ${esc(c)}</td><td class="num muted small">${tg.topics?.[c] ? `tema #${tg.topics[c]}` : 'birinchi e\'londa yaratiladi'}</td></tr>`).join('')}</tbody></table>
-      <div class="toolbar" style="margin-top:8px"><button data-act="tgTopicsCreate">Temalarni hozir yaratish</button>${Object.keys(tg.topics || {}).length ? '<button data-act="tgTopicsReset">Temalarni qayta bog\'lash</button>' : ''}</div></div>` : ''}
+      <div class="toolbar" style="margin-top:8px"><button data-act="tgTopicsCreate">Temalarni hozir yaratish</button><button data-act="tgTopicIcons">Temalarga ikonka qo'yish</button>${Object.keys(tg.topics || {}).length ? '<button data-act="tgTopicsReset">Temalarni qayta bog\'lash</button>' : ''}</div></div>` : ''}
     <div class="toolbar" style="margin-top:12px">
       <button class="primary" data-act="tgSave">Saqlash</button>
       <button data-act="tgDetect">Guruh ID sini aniqlash</button>
@@ -4276,6 +4322,7 @@ const ACTIONS = {
   tgSave: () => { tgReadForm(); save(); alert('Saqlandi.'); },
   tgDetect: () => tgDetect(),
   tgTopicsCreate: () => tgTopicsCreate(),
+  tgTopicIcons: () => tgTopicIcons(),
   tgTopicsReset: () => { if (confirm("Kategoriyalar va temalar bog'lanishi o'chirilsinmi? Keyingi e'londa temalar qayta yaratiladi.")) { db.telegram.topics = {}; save(); } },
   tgTest: () => tgTest(),
   tgAll: () => {
@@ -4981,7 +5028,7 @@ Object.assign(ACTIONS, {
 // Ruxsatga bog'liq amallar (tugma ko'rinmasa ham bajarilmasin)
 const ACTION_PERMS = { newProduct: 'products', newKit: 'products', exportProducts: 'products' };
 const ADMIN_ACTIONS = ['deleteProduct', 'unarchive', 'exportProducts', 'tgProduct', 'deleteParty', 'deletePayment',
-  'tgSave', 'tgDetect', 'tgTest', 'tgAll', 'tgTopicsCreate', 'tgTopicsReset', 'coSave', 'editWh', 'deleteWh', 'catSave', 'catAdd', 'catDel', 'catIconOpen', 'catIconSet', 'fsAdd', 'fsDel', 'fsFieldAdd', 'fsFieldDel', 'regAdd', 'regDel', 'chipRemove', 'backup', 'backupDetect', 'backupSend', 'demo', 'reset', 'editUser', 'exportDocs',
+  'tgSave', 'tgDetect', 'tgTest', 'tgAll', 'tgTopicsCreate', 'tgTopicsReset', 'tgTopicIcons', 'coSave', 'editWh', 'deleteWh', 'catSave', 'catAdd', 'catDel', 'catIconOpen', 'catIconSet', 'fsAdd', 'fsDel', 'fsFieldAdd', 'fsFieldDel', 'regAdd', 'regDel', 'chipRemove', 'backup', 'backupDetect', 'backupSend', 'demo', 'reset', 'editUser', 'exportDocs',
   'serverSettings', 'refreshUsage', 'migrateLocal', 'rateRefresh', 'rateManual', 'rateAuto',
   'ldSel', 'ldFs', 'ldBold', 'ldCur', 'ldAlign', 'ldCenter', 'ldFull', 'ldTest', 'ldUndo', 'ldReset', 'ldSave'];
 
