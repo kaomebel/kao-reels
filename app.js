@@ -3582,7 +3582,7 @@ function viewServer() {
     <p><b>${esc(backend.label)}</b></p>
     <p class="muted">${server
       ? "Barcha qurilmalar shu bitta bazada ishlaydi. Bir qurilmadagi o'zgarish boshqalarida bir necha soniyada ko'rinadi."
-      : "Ma'lumotlar faqat shu qurilmada. Sotuvchilar telefondan ishlashi uchun Supabase serveriga ulaning (README → \"Supabase'ni sozlash\")."}</p>
+      : "Ma'lumotlar faqat shu qurilmada. Sotuvchilar telefondan ishlashi uchun Supabase serveriga ulaning (README → \"Supabase'ni sozlash\"). Ulangandan keyin shu sahifada «Serverga ko'chirish» tugmasi chiqadi — shu qurilmadagi barcha ma'lumotlar (rasmlari bilan) serverga o'tadi."}</p>
     ${serverLocked() ? '<p class="muted small">Sayt shu serverga doimiy ulangan (config.js).</p>' : `<button class="primary" data-act="serverSettings">${server ? 'Ulanish sozlamalari' : 'Serverga ulanish'}</button>`}</div>
     <div class="card narrow"><h3>${server ? 'Rasmlar xotirasi (bepul tarif — 1 GB)' : 'Brauzer xotirasi'}</h3>${usageBar()}
       <button class="small" data-act="refreshUsage">Yangilash</button></div>
