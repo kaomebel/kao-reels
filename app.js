@@ -37,6 +37,23 @@ const PAY_PURPOSES_OUT = ["Ta'minotchiga to'lov", 'Mijozga qaytarish', 'Ijara', 
 // Kontragentga bog'liq bo'lmagan chiqimlar foyda hisobotida xarajat sifatida olinadi
 const EXPENSE_PURPOSES = PAY_PURPOSES_OUT.slice(2);
 
+// Xarajat moddalari (Xarajatlar → Moddalar bo'limida o'zgartiriladi)
+const DEFAULT_EXPENSE_CATS = [
+  { name: 'Ish haqi (oylik)', emoji: '👷' },
+  { name: 'Ombor (sklad) ijarasi', emoji: '🏭' },
+  { name: "Do'kon ijarasi", emoji: '🏪' },
+  { name: "Kommunal to'lovlar", emoji: '💡' },
+  { name: "Avtomashina yoqilg'isi", emoji: '⛽' },
+  { name: 'Ovqat (obed)', emoji: '🍽' },
+  { name: "Yo'lkira", emoji: '🚌' },
+  { name: 'Yuk tashish / yetkazish', emoji: '🚚' },
+  { name: 'Reklama', emoji: '📣' },
+  { name: 'Soliq', emoji: '🧾' },
+  { name: "Ta'mirlash", emoji: '🔧' },
+  { name: 'Boshqa xarajat', emoji: '📦' },
+];
+const isSalaryCat = (name) => /ish haqi|oylik|maosh/i.test(name || '');
+
 const DEFAULT_CATEGORIES = ['Yotoqxona', 'Mehmonxona', 'Oshxona', 'Divan va kreslo', 'Stol va stul', 'Shkaf', 'Bolalar mebeli', 'Ofis mebeli', 'Matras'];
 
 // Har bir kategoriyaning turlari (Sozlamalarda o'zgartiriladi)
@@ -117,6 +134,7 @@ function emptyDb() {
     colors: DEFAULT_COLORS.slice(),
     featureSets: JSON.parse(JSON.stringify(DEFAULT_FEATURE_SETS)),
     categoryIcons: {},
+    expenseCats: JSON.parse(JSON.stringify(DEFAULT_EXPENSE_CATS)),
     customerTypes: DEFAULT_CUSTOMER_TYPES.slice(),
     regions: JSON.parse(JSON.stringify(DEFAULT_REGIONS)),
     currency: { rate: 0, date: '', source: '', updatedAt: '', manual: false },
@@ -271,6 +289,7 @@ const PERMS = {
   products: ['Mahsulotlar', "Mahsulot qo'shish va kartochkani o'zgartirish"],
   costs: ['Tannarx', "Kelish narxi, tannarx va ombordagi tovar qiymatini ko'rish"],
   money: ['Pul', "Kassa, xarajatlar, barcha kirim-chiqim to'lovlari va qarzlar"],
+  expenses: ['Xarajatlar', "Xarajat kiritish (oylik, ijara, yoqilg'i, obed, yo'lkira...) va xarajatlar ro'yxati"],
   reports: ['Hisobotlar', 'Foyda va zarar, savdo tahlili'],
 };
 const can = (perm) => isAdmin() || permsOf(me).includes(perm);
@@ -681,7 +700,7 @@ const isTouch = () => window.matchMedia('(pointer: coarse), (max-width: 700px)')
 // Telefonda jadval qatorlari kartochkaga aylanadi: har bir katakka ustun nomi yoziladi (CSS ko'rsatadi)
 function cardTables(root) {
   $$('table', root).forEach((table) => {
-    if (table.classList.contains('items-table') || table.classList.contains('kit-table')) return;
+    if (['items-table', 'kit-table', 'exp-cats'].some((c) => table.classList.contains(c))) return;
     const heads = $$('thead th', table).map((th) => th.textContent.trim());
     table.classList.add('m-cards');
     $$('tbody tr, tfoot tr', table).forEach((tr) => {
@@ -2859,6 +2878,108 @@ function deletePayment(id) {
   save();
 }
 
+// ---------- Xarajatlar ----------
+// Xarajat — kontragentga bog'liq bo'lmagan chiqim to'lovi (expense: true). Kassadan ayiriladi
+// va «Foyda va zarar» hisobotida xarajat sifatida olinadi.
+const isExpense = (p) => p.dir === 'out' && !p.counterpartyId && (p.expense || EXPENSE_PURPOSES.includes(p.purpose));
+const expenseCat = (name) => (db.expenseCats || []).find((c) => c.name === name);
+const expenseEmoji = (name) => expenseCat(name)?.emoji || (isSalaryCat(name) ? '👷' : '📦');
+
+function newExpense(catName) {
+  if (!can('money') && !can('expenses')) return alert("Xarajat kiritish uchun ruxsatingiz yo'q.");
+  const cats = db.expenseCats?.length ? db.expenseCats : DEFAULT_EXPENSE_CATS;
+  const cat = catName || cats[0].name;
+  const staff = db.users.filter((u) => u.active !== false).map((u) => u.name);
+  openModal({
+    title: 'Yangi xarajat',
+    body: `<div class="form-grid">
+        ${selectField('Moddasi', 'purpose', cats.map((c) => [c.name, `${c.emoji || '📦'} ${c.name}`]), cat, 'full')}
+        ${moneyField('Summa *', 'amount', '', 'UZS', 'required')}
+        ${field('Sana', 'date', today(), 'type="date" required')}
+        ${selectField("To'lov usuli", 'method', Object.entries(PAY_METHODS), 'cash')}
+        <div class="full salary-box" id="salaryBox" ${isSalaryCat(cat) ? '' : 'hidden'}>
+          <div class="form-grid">
+            <label>Xodim<input name="employee" list="staffList" autocomplete="off" placeholder="Ism familiya"><datalist id="staffList">${staff.map((n) => `<option value="${esc(n)}"></option>`).join('')}</datalist></label>
+            ${field('Qaysi oy uchun', 'forMonth', today().slice(0, 7), 'type="month"')}
+          </div>
+        </div>
+        ${textArea('Izoh', 'note', '')}
+      </div>`,
+    onOpen: () => {
+      const sel = $('#modalBody [name=purpose]');
+      sel.addEventListener('change', () => { $('#salaryBox').hidden = !isSalaryCat(sel.value); });
+      setTimeout(() => $('#modalBody [name=amount]')?.focus(), 50);
+    },
+    onSubmit: async (d) => {
+      const amount = num(d.amount);
+      if (amount <= 0) { alert('Summani kiriting.'); return false; }
+      const salary = isSalaryCat(d.purpose);
+      if (salary && !d.employee.trim()) { alert('Oylik kimga berilganini kiriting.'); $('#modalBody [name=employee]').focus(); return false; }
+      db.payments.push({
+        id: uid(), no: await nextNo('payOut'), dir: 'out', expense: true, date: d.date, amount, method: d.method,
+        purpose: d.purpose, counterpartyId: null, docId: null, note: d.note.trim(), userId: me?.id,
+        employee: salary ? d.employee.trim() : undefined, forMonth: salary ? d.forMonth : undefined,
+      });
+      await save();
+    },
+  });
+}
+
+function viewExpenses() {
+  const cat = filterVal('expenses.cat');
+  const q = filterVal('expenses.q').toLowerCase();
+  const all = db.payments.filter((p) => isExpense(p) && inPeriod('expenses', p.date));
+  const list = all
+    .filter((p) => !cat || p.purpose === cat)
+    .filter((p) => !q || [p.no, p.purpose, p.note, p.employee].join(' ').toLowerCase().includes(q))
+    .sort((a, b) => b.date.localeCompare(a.date) || String(b.no).localeCompare(String(a.no)));
+  const byCat = {};
+  all.forEach((p) => { byCat[p.purpose] = (byCat[p.purpose] || 0) + p.amount; });
+  const total = all.reduce((s, p) => s + p.amount, 0);
+  const shown = list.reduce((s, p) => s + p.amount, 0);
+  const max = Math.max(1, ...Object.values(byCat));
+  const cats = db.expenseCats?.length ? db.expenseCats : DEFAULT_EXPENSE_CATS;
+  const admin = isAdmin();
+  const quick = `<div class="exp-quick">${cats.map((c) => `<button type="button" class="exp-tile" data-act="newExpense" data-cat="${esc(c.name)}"><span class="exp-emoji">${c.emoji || '📦'}</span><span>${esc(c.name)}</span></button>`).join('')}</div>`;
+  const summary = Object.entries(byCat).sort((a, b) => b[1] - a[1]).map(([name, sum]) => `
+    <button type="button" class="exp-row ${cat === name ? 'on' : ''}" data-act="expFilter" data-cat="${esc(name)}">
+      <span class="exp-emoji">${expenseEmoji(name)}</span><span class="exp-name">${esc(name)}</span><b>${money(sum)}</b>
+      <span class="exp-bar"><i style="width:${Math.round((sum / max) * 100)}%"></i></span></button>`).join('');
+  const rows = list.map((p) => `<tr>
+      <td>${fmtDate(p.date)}<div class="muted small">${esc(p.no || '')}</div></td>
+      <td>${expenseEmoji(p.purpose)} ${esc(p.purpose)}${p.employee ? `<div class="small"><b>${esc(p.employee)}</b>${p.forMonth ? ` · ${esc(p.forMonth)} oy uchun` : ''}</div>` : ''}</td>
+      <td>${esc(p.note || '')}<div class="muted small">${esc(userName(p.userId))}</div></td>
+      <td>${esc(PAY_METHODS[p.method] || '')}</td>
+      <td class="num"><b>${money(p.amount)}</b></td>
+      <td class="actions">${admin ? `<button class="small danger icon-only" data-act="deletePayment" data-id="${p.id}" title="O'chirish">${icon('trash')}</button>` : ''}</td></tr>`).join('');
+  return `<p class="muted small exp-hint">Xarajat turini tanlang — summani kiriting:</p>${quick}`
+    + toolbar('expenses', { extra: periodInputs('expenses'), buttons: `<button class="primary" data-act="newExpense">${icon('plus')}Xarajat</button>` })
+    + `<div class="stats"><div class="stat"><div class="label">Davr bo'yicha jami xarajat</div><div class="value">${money(total)}</div></div>
+        <div class="stat"><div class="label">Xarajatlar soni</div><div class="value">${all.length}</div></div></div>`
+    + (summary ? `<div class="card"><h3>Moddalar bo'yicha${cat ? ` · <a href="javascript:void 0" data-act="expFilter" data-cat="">hammasini ko'rsatish</a>` : ''}</h3><div class="exp-sum">${summary}</div></div>` : '')
+    + `<div class="card"><div class="table-wrap"><table><thead><tr><th>Sana</th><th>Moddasi</th><th>Izoh</th><th>Usul</th><th class="num">Summa</th><th></th></tr></thead>
+      <tbody>${rows || emptyRow(6, "Bu davrda xarajat yo'q")}</tbody>
+      ${list.length ? `<tfoot><tr><td colspan="4">Jami${cat ? ` (${esc(cat)})` : ''}</td><td class="num">${money(shown)}</td><td></td></tr></tfoot>` : ''}</table></div></div>`;
+}
+
+function viewExpenseCats() {
+  const cats = db.expenseCats || [];
+  return `<div class="card narrow"><h3>Xarajat moddalari</h3>
+    <p class="muted small">Xarajatlar sahifasidagi tugmalar shu ro'yxatdan olinadi. Nomida «oylik» yoki «ish haqi» bo'lsa — xodim va oy so'raladi.</p>
+    <table class="exp-cats"><tbody>${cats.map((c, i) => `<tr>
+      <td><input class="ec-emoji" data-i="${i}" value="${esc(c.emoji || '')}" maxlength="4" aria-label="Belgi"></td>
+      <td><input class="ec-name" data-i="${i}" value="${esc(c.name)}" aria-label="Nomi"></td>
+      <td class="actions"><button class="small danger icon-only" data-act="ecDel" data-i="${i}" title="O'chirish">${icon('trash')}</button></td></tr>`).join('')}</tbody></table>
+    <div class="toolbar" style="margin-top:10px"><button data-act="ecAdd">${icon('plus')}Modda qo'shish</button><button class="primary" data-act="ecSave">Saqlash</button></div>
+    <p class="muted small">Moddani o'chirish yoki nomini o'zgartirish avval kiritilgan xarajatlarga ta'sir qilmaydi.</p></div>`;
+}
+
+function readExpenseCats() {
+  const cats = $$('.exp-cats tr').map((tr) => ({ emoji: $('.ec-emoji', tr).value.trim(), name: $('.ec-name', tr).value.trim() })).filter((c) => c.name);
+  const names = new Set();
+  return cats.filter((c) => !names.has(c.name) && names.add(c.name));
+}
+
 // ---------- Telegram ----------
 
 function stockLine(p) {
@@ -3061,6 +3182,7 @@ const SECTIONS = [
   { id: 'goods', icon: 'sofa', title: 'Tovarlar', views: [['products', 'Mahsulotlar'], ['kits', 'Komplektlar'], ['stock', 'Qoldiqlar'], ['enter', '', 'enter'], ['writeoff', '', 'stockOps'], ['move', '', 'stockOps'], ['inventory', '', 'stockOps'], ['warehouses', 'Omborlar', 'A'], ['labels', 'Etiketkalar'], ['labelDesign', 'Etiketka dizayni', 'A']] },
   { id: 'parties', icon: 'users', title: 'Kontragentlar', views: [['parties', 'Kontragentlar', 'sale|purchase|money'], ['debts', 'Qarzlar', 'money']] },
   { id: 'money', icon: 'wallet', title: 'Pul', views: [['payments', "To'lovlar", 'sale|money'], ['cash', 'Kassa va hisoblar', 'money']] },
+  { id: 'expenses', icon: 'arrowOut', title: 'Xarajatlar', views: [['expenses', 'Xarajatlar', 'money|expenses'], ['expenseCats', 'Moddalar', 'A']] },
   { id: 'reports', icon: 'chart', title: 'Hisobotlar', views: [['profit', 'Foyda va zarar', 'reports'], ['top', 'Savdo tahlili', 'reports']] },
   { id: 'install', icon: 'phone', title: "Telefonga o'rnatish", hideInNav: true },
   { id: 'settings', icon: 'settings', title: 'Sozlamalar', views: [['users', 'Foydalanuvchilar', 'A'], ['currency', 'Valyuta kursi', 'A'], ['server', 'Server', 'A'], ['telegram', 'Telegram', 'A'], ['company', 'Kompaniya', 'A'], ['categories', "Ro'yxatlar", 'A'], ['backup', 'Zaxira nusxa', 'A'], ['profile', 'Profil']] },
@@ -3493,7 +3615,7 @@ function viewProfit() {
   const rows = profitRows((d) => inPeriod('profit', d)).sort((a, b) => b.profit - a.profit);
   const tot = rows.reduce((s, r) => ({ qty: s.qty + r.qty, revenue: s.revenue + r.revenue, cost: s.cost + r.cost, profit: s.profit + r.profit }), { qty: 0, revenue: 0, cost: 0, profit: 0 });
   const exp = {};
-  db.payments.filter((p) => p.dir === 'out' && EXPENSE_PURPOSES.includes(p.purpose) && inPeriod('profit', p.date)).forEach((p) => { exp[p.purpose] = (exp[p.purpose] || 0) + p.amount; });
+  db.payments.filter((p) => isExpense(p) && inPeriod('profit', p.date)).forEach((p) => { exp[p.purpose] = (exp[p.purpose] || 0) + p.amount; });
   const expTotal = Object.values(exp).reduce((s, v) => s + v, 0);
   const writeoffs = db.docs.filter((d) => d.type === 'writeoff' && inPeriod('profit', d.date))
     .reduce((s, d) => s + d.items.reduce((x, it) => x + it.qty * (ctx.cost[it.productId] || 0), 0), 0);
@@ -4342,7 +4464,7 @@ const VIEWS = {
   dashboard: viewDashboard, products: viewProducts, stock: viewStock, parties: viewParties, debts: viewDebts,
   payments: viewPayments, cash: viewCash, profit: viewProfit, top: viewTop, users: viewUsers,
   telegram: viewTelegram, company: viewCompany, warehouses: viewWarehouses, categories: viewCategories, backup: viewBackup,
-  server: viewServer, profile: viewProfile, kits: viewKits, currency: viewCurrency, install: viewInstall, labels: viewLabels, labelDesign: viewLabelDesign,
+  server: viewServer, profile: viewProfile, kits: viewKits, expenses: viewExpenses, expenseCats: viewExpenseCats, currency: viewCurrency, install: viewInstall, labels: viewLabels, labelDesign: viewLabelDesign,
 };
 
 function render() {
@@ -4429,6 +4551,11 @@ const ACTIONS = {
   exportDocs: (ds) => exportDocs(ds.type),
   newProduct: () => newProduct(),
   newKit: () => editKit(null),
+  newExpense: (ds) => newExpense(ds.cat),
+  expFilter: (ds) => { filters['expenses.cat'] = ds.cat || ''; render(); },
+  ecAdd: () => { db.expenseCats = readExpenseCats(); db.expenseCats.push({ emoji: '📦', name: '' }); render(); $$('.ec-name').pop()?.focus(); },
+  ecDel: (ds) => { const cats = readExpenseCats(); const c = (db.expenseCats || [])[+ds.i]; if (c && !confirm(`«${c.name}» moddasi o'chirilsinmi?`)) return; db.expenseCats = cats.filter((x) => x.name !== c?.name); save(); },
+  ecSave: async () => { db.expenseCats = readExpenseCats(); await save(); alert('Saqlandi.'); },
   editProduct: (ds) => editProduct(ds.id),
   deleteProduct: (ds) => deleteProduct(ds.id),
   unarchive: (ds) => { product(ds.id).archived = false; save(); },
@@ -5142,7 +5269,7 @@ Object.assign(ACTIONS, {
 // Ruxsatga bog'liq amallar (tugma ko'rinmasa ham bajarilmasin)
 const ACTION_PERMS = { newProduct: 'products', newKit: 'products', exportProducts: 'products' };
 const ADMIN_ACTIONS = ['deleteProduct', 'unarchive', 'exportProducts', 'tgProduct', 'deleteParty', 'deletePayment',
-  'tgSave', 'tgDetect', 'tgTest', 'tgAll', 'tgTopicsCreate', 'tgTopicsReset', 'tgTopicIcons', 'coSave', 'editWh', 'deleteWh', 'catSave', 'catAdd', 'catDel', 'catIconOpen', 'catIconSet', 'fsAdd', 'fsDel', 'fsFieldAdd', 'fsFieldDel', 'regAdd', 'regDel', 'chipRemove', 'backup', 'backupDetect', 'backupSend', 'demo', 'reset', 'editUser', 'exportDocs',
+  'ecAdd', 'ecDel', 'ecSave', 'tgSave', 'tgDetect', 'tgTest', 'tgAll', 'tgTopicsCreate', 'tgTopicsReset', 'tgTopicIcons', 'coSave', 'editWh', 'deleteWh', 'catSave', 'catAdd', 'catDel', 'catIconOpen', 'catIconSet', 'fsAdd', 'fsDel', 'fsFieldAdd', 'fsFieldDel', 'regAdd', 'regDel', 'chipRemove', 'backup', 'backupDetect', 'backupSend', 'demo', 'reset', 'editUser', 'exportDocs',
   'serverSettings', 'refreshUsage', 'migrateLocal', 'rateRefresh', 'rateManual', 'rateAuto',
   'ldSel', 'ldFs', 'ldBold', 'ldCur', 'ldAlign', 'ldCenter', 'ldFull', 'ldTest', 'ldUndo', 'ldReset', 'ldSave'];
 

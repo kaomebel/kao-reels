@@ -310,11 +310,13 @@ create policy docs_delete on public.docs for delete to authenticated using (publ
 -- To'lovlar: "Pul" ruxsati — hammasi; savdo xodimi — faqat mijozlar bilan bog'liq to'lovlar
 drop policy if exists pay_select on public.payments;
 create policy pay_select on public.payments for select to authenticated
-  using (public.is_admin() or public.has_perm('money') or (public.has_perm('sale') and public.is_customer(counterparty_id)));
+  using (public.is_admin() or public.has_perm('money') or (public.has_perm('sale') and public.is_customer(counterparty_id))
+    or (public.has_perm('expenses') and dir = 'out' and counterparty_id is null));
 drop policy if exists pay_insert on public.payments;
 create policy pay_insert on public.payments for insert to authenticated
   with check (public.is_admin() or (user_id = auth.uid()::text
-    and (public.has_perm('money') or (public.has_perm('sale') and public.is_customer(counterparty_id)))));
+    and (public.has_perm('money') or (public.has_perm('sale') and public.is_customer(counterparty_id))
+      or (public.has_perm('expenses') and dir = 'out' and counterparty_id is null))));
 drop policy if exists pay_update on public.payments;
 create policy pay_update on public.payments for update to authenticated
   using (public.has_perm('money')) with check (public.has_perm('money'));
@@ -335,7 +337,7 @@ begin
   if not public.is_admin() and not (
     public.can_doc(kind)
     or (kind = 'payIn' and (public.has_perm('sale') or public.has_perm('money')))
-    or (kind = 'payOut' and (public.has_perm('sale') or public.has_perm('money')))
+    or (kind = 'payOut' and (public.has_perm('sale') or public.has_perm('money') or public.has_perm('expenses')))
   ) then
     raise exception 'Ruxsat yo''q';
   end if;
