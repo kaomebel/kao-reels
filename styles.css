@@ -568,7 +568,7 @@ button.chip.on::before { content: "✓"; font-size: 12px; }
 
 /* ---- Narx kataklari: valyuta belgisi doim ko'rinib turadi ---- */
 .money-wrap { position: relative; display: flex; align-items: center; }
-.money-wrap input { padding-right: 46px; text-align: right; font-variant-numeric: tabular-nums; }
+.money-wrap input { padding-right: 46px; text-align: left; font-variant-numeric: tabular-nums; }
 .money-wrap .cur { position: absolute; right: 10px; color: var(--muted); font-size: 13px; pointer-events: none; }
 .items-table .money-wrap { width: 160px; }
 .items-table .money-wrap input { width: 100%; }
