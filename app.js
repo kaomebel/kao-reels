@@ -3896,7 +3896,7 @@ function backupAutoCard() {
   const hasToken = !!tg.token;
   const on = hasToken && tg.backupChatId;
   return `<div class="card narrow backup-auto"><h3>${icon('send')}Har kungi avtomatik zaxira — Telegramga</h3>
-    <p class="muted">Dastur har kuni (siz uni birinchi ochganingizda) barcha ma'lumotlarning zaxira faylini <b>sizning shaxsiy Telegramingizga</b> yuboradi. Telefon yo'qolsa yoki buzilsa ham ma'lumotlar Telegramda saqlanib qoladi; tiklash uchun o'sha faylni «Zaxiradan tiklash» ga tanlaysiz.</p>
+    <p class="muted">${backend.kind === 'supabase' ? "Server har kecha soat 02:00 da (dastur ochilmagan bo'lsa ham)" : 'Dastur har kuni (siz uni birinchi ochganingizda)'} barcha ma'lumotlarning zaxira faylini <b>sizning shaxsiy Telegramingizga</b> yuboradi. Telefon yo'qolsa yoki buzilsa ham ma'lumotlar Telegramda saqlanib qoladi; tiklash uchun o'sha faylni «Zaxiradan tiklash» ga tanlaysiz.</p>
     <div class="backup-status ${on ? 'ok' : 'warn'}">${icon(on ? 'check' : 'alert')}<span>${on
       ? `Yoqilgan. Oxirgi yuborilgan: <b>${tg.lastBackupAt ? fmtDateTime(tg.lastBackupAt) : 'hali yuborilmagan'}</b>${tg.backupError ? `<br><span class="debt">Oxirgi urinish xatosi: ${esc(tg.backupError)}</span>` : ''}`
       : 'Hali yoqilmagan.'}</span></div>
