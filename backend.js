@@ -722,6 +722,30 @@ class SupabaseBackend {
     if (error) console.warn('Rasm o\'chirilmadi:', error);
   }
 
+  // To'lov cheklari Telegramda saqlanadi (server funksiyasi orqali — bot tokeni xodimga ko'rinmaydi)
+  async uploadReceipts(files, caption) {
+    const fd = new FormData();
+    files.forEach((f, i) => fd.append('photo', f, `chek${i}.jpg`));
+    fd.append('caption', caption);
+    const { data, error } = await this.sb.functions.invoke('receipt', { body: fd });
+    if (error) {
+      let msg = error.message;
+      try { msg = (await error.context.json()).error || msg; } catch (e) { /* matn yo'q */ }
+      throw new Error(friendlyError({ message: msg }));
+    }
+    if (!data?.ok) throw new Error(data?.error || 'Chek yuborilmadi');
+    return data.receipts;
+  }
+
+  async receiptUrl(fileId) {
+    const { data } = await this.sb.auth.getSession();
+    const res = await fetch(`${this.cfg.url}/functions/v1/receipt?file_id=${encodeURIComponent(fileId)}`, {
+      headers: { Authorization: 'Bearer ' + (data.session?.access_token || ''), apikey: this.cfg.key },
+    });
+    if (!res.ok) throw new Error('Chek surati olinmadi');
+    return URL.createObjectURL(await res.blob());
+  }
+
   async photoUrl(path) {
     return path ? this.sb.storage.from(PHOTO_BUCKET).getPublicUrl(path).data.publicUrl : '';
   }

@@ -1184,7 +1184,7 @@ fieldset[disabled] .qty-step .qs { opacity: .35; }
 .exp-tile span:last-child { white-space: normal; min-width: 0; overflow-wrap: anywhere; }
 
 /* Ichki oyna (sotuv ustidan tezkor kirim) */
-#subModal { width: min(520px, calc(100vw - 24px)); }
+@media (min-width: 701px) { #subModal { width: min(520px, calc(100vw - 24px)); } }
 #subBody { padding: 18px 22px; overflow-y: auto; }
 .it-enter { margin-left: 6px; min-height: 30px; padding: 2px 10px; color: var(--accent-dark); border-color: var(--accent); background: var(--accent-soft); vertical-align: middle; }
 .it-enter svg { width: 14px; height: 14px; }
@@ -1209,3 +1209,34 @@ fieldset[disabled] .qty-step .qs { opacity: .35; }
 .lo-tabs-btn { white-space: nowrap; }
 .lo-row > b, .lo-row > span:nth-child(2) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lo-tabs-btn { padding: 4px 10px; min-height: 40px; font-size: 13px; }
+
+/* To'lov cheki */
+.receipt-line { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 10px 12px; border-radius: 12px; background: var(--warn-soft); }
+.rc-btns { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 12px 0; }
+.btn-like { display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 56px; padding: 10px; border-radius: 12px; border: 1px solid var(--border-strong); background: var(--card); color: var(--text); font-weight: 600; cursor: pointer; text-align: center; }
+.btn-like.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.btn-like svg { width: 22px; height: 22px; }
+.rc-list { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.rc-list .photo-empty { grid-column: 1 / -1; }
+.rc-ph { position: relative; }
+.rc-ph img { width: 100%; aspect-ratio: 3 / 4; object-fit: cover; border-radius: 10px; border: 1px solid var(--border); display: block; cursor: zoom-in; }
+.rc-ph .ph-del { position: absolute; right: 4px; top: 4px; width: 32px; height: 32px; padding: 0; border-radius: 50%; background: var(--card); color: var(--danger); }
+.rc-show { padding: 2px 8px; min-height: 30px; }
+
+/* Mahsulot qidiruvi yonida skaner tugmasi */
+.it-sw { display: flex; gap: 6px; align-items: stretch; }
+.it-sw .it-search { flex: 1; min-width: 0; }
+.it-scan { flex: none; width: 46px; min-height: 44px; padding: 0; display: inline-flex; align-items: center; justify-content: center; color: var(--accent); }
+.it-scan svg { width: 22px; height: 22px; }
+
+/* Skaner oynasi */
+.scanner { position: fixed; inset: 0; width: 100vw; height: 100vh; height: 100dvh; max-width: none; max-height: none; margin: 0; padding: 0; border: none; border-radius: 0; background: #000; color: #fff; overflow: hidden; }
+.scanner::backdrop { background: #000; }
+.scanner video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.sc-frame { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; pointer-events: none; }
+.sc-frame i { width: min(78vw, 340px); height: min(48vw, 210px); border: 3px solid rgba(255, 255, 255, .9); border-radius: 16px; box-shadow: 0 0 0 100vmax rgba(0, 0, 0, .45); }
+.sc-title { font-size: 15px; }
+.sc-msg { position: absolute; left: 0; right: 0; top: calc(50% + min(24vw, 105px) + 16px); text-align: center; font-size: 15px; padding: 0 20px; text-shadow: 0 1px 3px #000; }
+.sc-manual { position: absolute; left: 0; right: 0; bottom: 0; display: flex; gap: 8px; padding: 12px max(12px, env(safe-area-inset-right)) max(14px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left)); background: linear-gradient(transparent, rgba(0, 0, 0, .7)); }
+.sc-manual input { flex: 1; min-width: 0; background: rgba(255, 255, 255, .92); color: #222; }
+.sc-manual button { min-width: 64px; }

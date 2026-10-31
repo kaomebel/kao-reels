@@ -31,7 +31,10 @@ const DOC_TYPES = {
 // Rezervga olinadigan (hali jo'natilmagan) buyurtma holatlari
 const RESERVING = ['new', 'confirmed', 'making'];
 
-const PAY_METHODS = { cash: 'Naqd (kassa)', card: 'Karta', bank: 'Hisob raqam' };
+const PAY_METHODS = { cash: 'Naqd (kassa)', card: "Karta (o'tkazma)", terminal: 'Terminal', bank: 'Perechisleniye (hisob raqam)' };
+// Naqd bo'lmagan to'lovda chek surati so'raladi va Telegramga saqlanadi
+const NEEDS_RECEIPT = ['card', 'terminal', 'bank'];
+const cashTotal = (b) => Object.keys(PAY_METHODS).reduce((s, k) => s + (b[k] || 0), 0);
 const PAY_PURPOSES_IN = ["Mijozdan to'lov", "Ta'minotchidan qaytim", 'Boshqa kirim'];
 const PAY_PURPOSES_OUT = ["Ta'minotchiga to'lov", 'Mijozga qaytarish', 'Ijara', 'Ish haqi', 'Kommunal', 'Transport / yetkazish', 'Soliq', 'Reklama', 'Boshqa xarajat'];
 // Kontragentga bog'liq bo'lmagan chiqimlar foyda hisobotida xarajat sifatida olinadi
@@ -650,7 +653,7 @@ function partyBalance(id) {
 }
 
 function cashBalances() {
-  const b = { cash: 0, card: 0, bank: 0 };
+  const b = Object.fromEntries(Object.keys(PAY_METHODS).map((k) => [k, 0]));
   db.payments.forEach((p) => { b[p.method] = (b[p.method] || 0) + (p.dir === 'in' ? p.amount : -p.amount); });
   return b;
 }
@@ -749,7 +752,115 @@ $('#subForm').addEventListener('submit', async (e) => {
   }
 });
 
+// ---------- To'lov cheklari (karta, terminal, perechisleniye) ----------
+// Chek surati serverda joy egallamaydi: Telegram bot orqali administratorning chatiga yuboriladi,
+// to'lovda faqat Telegram fayl ID si saqlanadi (dasturda ko'rish mumkin).
+let receiptFiles = [];
+
+async function shrinkReceipt(file) {
+  try {
+    const img = await loadImage(file);
+    return (await canvasToBlob(img, 1600, 'image/jpeg', 0.82)) || file;
+  } catch (e) {
+    return file;
+  }
+}
+
+function renderReceiptLine() {
+  const line = $('#receiptLine');
+  if (!line) return;
+  const method = $('#modalBody [name=payMethod]')?.value;
+  const pay = num($('#modalBody [name=payNow]')?.value);
+  line.hidden = !(NEEDS_RECEIPT.includes(method) && pay > 0);
+  line.innerHTML = `🧾 <b>Chek surati:</b> ${receiptFiles.length ? `${receiptFiles.length} ta` : "<span class='debt'>qo'shilmagan</span>"}
+    <button type="button" class="small" id="receiptOpen">${receiptFiles.length ? "O'zgartirish" : 'Chekni suratga olish'}</button>`;
+}
+
+function openReceiptPicker() {
+  const draw = () => {
+    $('#rcList').innerHTML = receiptFiles.length
+      ? receiptFiles.map((f, i) => `<div class="rc-ph"><img src="${f.url}" alt="" data-i="${i}"><button type="button" class="ph-del rc-del" data-i="${i}" title="O'chirish">×</button></div>`).join('')
+      : `<div class="photo-empty">${icon('camera')}<span>Hali surat yo'q</span></div>`;
+  };
+  openSubModal({
+    title: 'Chek surati',
+    submitText: 'Tayyor',
+    body: `<p class="muted small">Karta, terminal yoki perechisleniye chekini suratga oling yoki galereyadan tanlang. Surat serverda emas, <b>Telegram</b>da saqlanadi.</p>
+      <div class="rc-btns">
+        <label class="btn-like primary">${icon('camera')}<span>Suratga olish</span><input type="file" id="rcCam" accept="image/*" capture="environment" hidden></label>
+        <label class="btn-like">${icon('upload')}<span>Galereyadan</span><input type="file" id="rcGal" accept="image/*" multiple hidden></label>
+      </div>
+      <div class="rc-list" id="rcList"></div>`,
+    onOpen: () => {
+      draw();
+      const add = (e) => {
+        [...e.target.files].slice(0, 10 - receiptFiles.length).forEach((file) => receiptFiles.push({ file, url: URL.createObjectURL(file) }));
+        e.target.value = '';
+        draw();
+      };
+      $('#rcCam').addEventListener('change', add);
+      $('#rcGal').addEventListener('change', add);
+      $('#rcList').addEventListener('click', (e) => {
+        const del = e.target.closest('.rc-del');
+        if (del) {
+          if (!confirm("Chek surati o'chirilsinmi?")) return;
+          const [f] = receiptFiles.splice(+del.dataset.i, 1);
+          URL.revokeObjectURL(f.url);
+          draw();
+          return;
+        }
+        const img = e.target.closest('img[data-i]');
+        if (img) openLightbox(receiptFiles.map((f) => ({ url: f.url })), +img.dataset.i);
+      });
+    },
+    onSubmit: () => renderReceiptLine(),
+  });
+  $('#subModal').addEventListener('close', renderReceiptLine, { once: true });
+}
+
+// Saqlashda: cheklarni Telegramga yuboradi
+async function sendReceipts(caption) {
+  if (!receiptFiles.length) return [];
+  const files = await Promise.all(receiptFiles.map((f) => shrinkReceipt(f.file)));
+  if (backend.kind === 'supabase') return backend.uploadReceipts(files, caption);
+  // Lokal rejim: brauzerdan to'g'ridan-to'g'ri bot orqali
+  const tg = db.telegram;
+  if (!tg.token || !tg.backupChatId) throw new Error("Telegram sozlanmagan: Sozlamalar → Telegram va Zaxira nusxa → «Mening Telegramimni aniqlash»");
+  const out = [];
+  for (const f of files) {
+    const fd = new FormData();
+    fd.append('chat_id', tg.backupChatId);
+    fd.append('photo', f, 'chek.jpg');
+    fd.append('caption', caption);
+    const res = await telegramCall('sendPhoto', fd);
+    const ph = res.result.photo;
+    out.push({ fileId: ph[ph.length - 1].file_id, msgId: res.result.message_id, chat: String(tg.backupChatId) });
+  }
+  return out;
+}
+
+async function receiptUrl(fileId) {
+  if (backend.kind === 'supabase') return backend.receiptUrl(fileId);
+  const res = await telegramCall('getFile', { file_id: fileId });
+  return `https://api.telegram.org/file/bot${db.telegram.token}/${res.result.file_path}`;
+}
+
+async function showReceipts(list) {
+  const items = (list || []).filter((r) => r.fileId);
+  if (!items.length) return;
+  showLoading(true, 'Chek yuklanmoqda...');
+  try {
+    const urls = await Promise.all(items.map((r) => receiptUrl(r.fileId)));
+    openLightbox(urls.map((url) => ({ url })), 0);
+  } catch (e) {
+    alert("Chekni ochib bo'lmadi: " + e.message);
+  } finally {
+    showLoading(false);
+  }
+}
+
 // ---------- Sotuv paytida tezkor kirim ----------
+
 // Sotuvda kerakli mahsulot omborda yo'q (yoki bazada umuman yo'q) bo'lsa — sotuv oynasidan chiqmasdan
 // shu yerning o'zida kirim qilinadi; sotuv qatori o'sha mahsulot bilan to'ldiriladi.
 let docFormCtx = null; // { quick, warehouseId(), refresh(), row }
@@ -974,7 +1085,7 @@ function productForm(p = {}, readonly = false) {
     <div class="form-grid">
       ${field('Nomi *', 'name', p.name, 'required', 'full')}
       ${sizeField(p.size)}
-      ${field('Kod / artikul', 'code', p.code)}
+      <label>Kod / artikul<span class="it-sw"><input name="code" value="${esc(p.code || '')}" autocomplete="off"><button type="button" class="it-scan code-scan" title="Shtrix-kodni skanerlab yozish" aria-label="Skaner">${icon('scan')}</button></span></label>
       ${selectField('Kategoriya', 'category', cats, p.category || '', '', 'id="catSel"')}
       <label>Turi<select name="type" id="typeSel">${typeOptions(p.category, p.type)}</select>
         <input name="typeNew" id="typeNew" placeholder="Yangi tur nomi" hidden></label>
@@ -1529,7 +1640,7 @@ function kitPartRow(c = {}) {
   const p = product(c.productId);
   return `<tr>
     <td class="it-pick"><input type="hidden" class="it-product" value="${esc(p ? p.id : '')}">
-      <input class="it-search" autocomplete="off" placeholder="Artikul yoki nomi — yoki tanlang" value="${esc(productLabel(p))}">
+      <div class="it-sw"><input class="it-search" autocomplete="off" placeholder="Artikul yoki nomi — yoki tanlang" value="${esc(productLabel(p))}"><button type="button" class="it-scan" title="Shtrix-kod / QR skaner" aria-label="Skaner">${icon('scan')}</button></div>
       <div class="it-path muted small">${p ? esc(productPath(p)) : ''}</div></td>
     <td>${qtyStepper('kit-qty', c.qty || 1)}</td>
     <td class="kit-line num muted"></td>
@@ -1820,7 +1931,7 @@ function itemRowHtml(t, it = {}, cur = 'UZS') {
   const kit = it.kitId ? ` data-kit-id="${esc(it.kitId)}" data-kit-name="${esc(it.kitName || '')}" data-kit-qty="${it.kitQty || ''}"` : '';
   return `<tr${kit}>
     <td class="it-pick"><input type="hidden" class="it-product" value="${esc(p ? p.id : '')}">
-      <input class="it-search" autocomplete="off" placeholder="Artikul yoki nomi — yoki tanlang" value="${esc(productLabel(p))}">
+      <div class="it-sw"><input class="it-search" autocomplete="off" placeholder="Artikul yoki nomi — yoki tanlang" value="${esc(productLabel(p))}"><button type="button" class="it-scan" title="Shtrix-kod / QR skaner" aria-label="Skaner">${icon('scan')}</button></div>
       <div class="it-path muted small">${p ? esc(productPath(p)) : ''}${it.kitName ? ` · <b>Komplekt: ${esc(it.kitName)}</b>` : ''}</div></td>
     <td class="it-avail muted num"></td>
     <td>${qtyStepper('it-qty', it.qty || 1)}</td>
@@ -1924,6 +2035,7 @@ function docForm(type, d) {
   if (!d.id && t.pay) {
     foot += moneyField(isOrder ? "Oldindan to'lov (zaklad)" : t.pay === 'in' ? "Hozir to'landi" : "Hozir to'ladik", 'payNow', d.payNow ?? '', 'UZS', 'placeholder="0"');
     foot += selectField("To'lov usuli", 'payMethod', Object.entries(PAY_METHODS), 'cash');
+    if (t.pay === 'in' && !d.id) foot += `<div class="full receipt-line" id="receiptLine" hidden></div>`;
   }
   if (type === 'sale') {
     // Qarzga sotuv: to'langan summa jamidan kam bo'lsa — qolgan summa, qaytarish sanasi va mas'ul
@@ -2258,7 +2370,7 @@ function productRow(p) {
 function renderPicker() {
   const panel = pickerPanel();
   const q = picker.input.value;
-  const chosen = product(picker.input.parentElement.querySelector('.it-product').value);
+  const chosen = product(picker.input.closest('.it-pick').querySelector('.it-product').value);
   let html;
   if (q.trim() && q !== productLabel(chosen)) {
     const found = searchProducts(q);
@@ -2292,13 +2404,14 @@ function renderPicker() {
   }
   panel.innerHTML = html;
   // Ro'yxat maydonning o'zi ostida ochiladi (ekran tepasida emas)
-  if (panel.previousElementSibling !== picker.input) picker.input.after(panel);
+  const anchor = picker.input.closest('.it-sw') || picker.input;
+  if (panel.previousElementSibling !== anchor) anchor.after(panel);
   panel.hidden = false;
 }
 
 function choosePickedProduct(p) {
   if (!p) return;
-  const td = picker.input.parentElement;
+  const td = picker.input.closest('.it-pick');
   const hidden = td.querySelector('.it-product');
   hidden.value = p.id;
   picker.input.value = productLabel(p);
@@ -2318,7 +2431,7 @@ document.addEventListener('focusin', (e) => {
   picker.input = e.target;
   picker.cat = null;
   picker.type = null;
-  const p = product(e.target.parentElement.querySelector('.it-product').value);
+  const p = product(e.target.closest('.it-pick').querySelector('.it-product').value);
   if (p) { picker.cat = p.category || ''; picker.type = p.type || null; }
   e.target.select();
   renderPicker();
@@ -2345,7 +2458,7 @@ document.addEventListener('focusout', (e) => {
       // Boshqa mahsulot maydoniga o'tilgan bo'lsa, uning ro'yxati ochiq qolsin
       if (!document.activeElement?.classList?.contains('it-search')) closePicker();
       // Tanlanmagan matn qolsa — avvalgi tanlovni qaytaramiz
-      const p = product(e.target.parentElement.querySelector('.it-product').value);
+      const p = product(e.target.closest('.it-pick').querySelector('.it-product').value);
       e.target.value = productLabel(p);
     }
   }, 150);
@@ -2482,7 +2595,18 @@ function bindDocForm(type, editingId) {
     recalc();
   }));
   $('#customBlock')?.addEventListener('input', recalc);
-  $('#modalBody [name=payNow]')?.addEventListener('input', () => { payTouched = true; recalc(); });
+  $('#modalBody [name=payNow]')?.addEventListener('input', () => { payTouched = true; recalc(); renderReceiptLine(); });
+  // Naqd bo'lmagan to'lov tanlansa — chek suratini olish oynasi ochiladi
+  receiptFiles = [];
+  const payMethodSel = $('#modalBody [name=payMethod]');
+  if ($('#receiptLine') && payMethodSel) {
+    payMethodSel.addEventListener('change', () => {
+      renderReceiptLine();
+      if (NEEDS_RECEIPT.includes(payMethodSel.value) && num($('#modalBody [name=payNow]')?.value) > 0 && !receiptFiles.length) openReceiptPicker();
+    });
+    $('#receiptLine').addEventListener('click', (e) => { if (e.target.closest('#receiptOpen')) openReceiptPicker(); });
+    renderReceiptLine();
+  }
   // "Xarid qildi" ↔ "Buyurtma berdi": kiritilganlarni saqlab, oynani boshqa turga o'tkazamiz
   $$('#modalBody [name=saleMode]').forEach((r) => r.addEventListener('change', () => {
     const f = Object.fromEntries(new FormData($('#modalForm')).entries());
@@ -2570,6 +2694,8 @@ function openDoc(type, existing, preset = {}) {
   let stock;
   const extra = [];
   if (existing) {
+    const rcs = db.payments.filter((p) => p.docId === existing.id).flatMap((p) => p.receipts || []);
+    if (rcs.length) extra.push({ label: `🧾 Chek (${rcs.length})`, onClick: () => showReceipts(rcs) });
     if (type === 'order') extra.push({ label: 'Shartnoma', cls: 'primary-soft', onClick: () => printContract(existing.id) });
     if (!hidesCost(t)) extra.push({ label: 'Chop etish', onClick: () => printDoc(existing.id) });
     if (['receipt', 'enter'].includes(type)) extra.push({ label: 'Etiketkalar', onClick: () => docLabels(existing.id) });
@@ -2725,12 +2851,27 @@ async function saveDoc(type, existing, preset, data, stock) {
   });
 
   if (!existing) {
-    db.docs.push(d);
     const pay = num(data.payNow);
+    // Karta / terminal / perechisleniye: chek surati Telegramga yuboriladi
+    let receipts;
+    if (pay > 0 && t.pay === 'in' && NEEDS_RECEIPT.includes(data.payMethod)) {
+      if (!receiptFiles.length) {
+        if (!confirm(`${PAY_METHODS[data.payMethod]} orqali to'lov — chek surati qo'shilmagan.\n\nChek suratisiz saqlansinmi?`)) { openReceiptPicker(); return false; }
+      } else {
+        try {
+          const who = party(counterpartyId);
+          receipts = await sendReceipts(`🧾 Chek · ${t.one} ${d.no}\n💰 ${money(pay)} · ${PAY_METHODS[data.payMethod]}\n👥 Mijoz: ${who?.name || ''}${who?.phone ? ' ' + who.phone : ''}\n📅 ${fmtDate(d.date)}`);
+        } catch (e) {
+          if (!confirm(`Chek Telegramga yuborilmadi: ${e.message}\n\nChek suratisiz saqlansinmi? («Bekor» — qayta urinish uchun)`)) return false;
+        }
+      }
+    }
+    db.docs.push(d);
     if (pay > 0) {
       db.payments.push({
         id: uid(), no: await nextNo(t.pay === 'in' ? 'payIn' : 'payOut'), dir: t.pay, date: d.date, counterpartyId, docId: d.id,
         amount: pay, method: data.payMethod, purpose: t.pay === 'in' ? PAY_PURPOSES_IN[0] : PAY_PURPOSES_OUT[0], note: '', userId: me?.id,
+        receipts: receipts?.length ? receipts : undefined,
       });
     }
     // Asos hujjat holatini yangilaymiz
@@ -3333,6 +3474,169 @@ function telegramOnStockIn(d) {
   telegramPostProducts(d.items.map((it) => it.productId), true);
 }
 
+// ---------- Shtrix-kod / QR skaner (kamera) ----------
+// Telefonda: Chrome/Android'da brauzerning o'z BarcodeDetector'i, qolganlarida (iPhone) — ZXing kutubxonasi.
+// Etiketkalarda shtrix-kod va QR ichida mahsulot artikuli yozilgan; zavod shtrix-kodlari (EAN) ham o'qiladi.
+let zxingLoad = null;
+function loadZxing() {
+  if (window.ZXing) return Promise.resolve();
+  zxingLoad = zxingLoad || new Promise((res, rej) => {
+    const sc = document.createElement('script');
+    sc.src = 'vendor/zxing.min.js';
+    sc.onload = res;
+    sc.onerror = () => { zxingLoad = null; rej(new Error("Skaner kutubxonasi yuklanmadi")); };
+    document.head.appendChild(sc);
+  });
+  return zxingLoad;
+}
+
+async function makeDecoder() {
+  const formats = ['qr_code', 'code_128', 'ean_13', 'ean_8', 'code_39', 'upc_a', 'upc_e', 'itf', 'data_matrix'];
+  if ('BarcodeDetector' in window) {
+    try {
+      const supported = await window.BarcodeDetector.getSupportedFormats();
+      const det = new window.BarcodeDetector({ formats: formats.filter((f) => supported.includes(f)) });
+      return async (video) => (await det.detect(video))[0]?.rawValue || '';
+    } catch (e) { /* ZXing ga o'tamiz */ }
+  }
+  await loadZxing();
+  const Z = window.ZXing;
+  const hints = new Map();
+  hints.set(Z.DecodeHintType.POSSIBLE_FORMATS, [Z.BarcodeFormat.QR_CODE, Z.BarcodeFormat.CODE_128, Z.BarcodeFormat.EAN_13, Z.BarcodeFormat.EAN_8, Z.BarcodeFormat.CODE_39, Z.BarcodeFormat.UPC_A, Z.BarcodeFormat.ITF, Z.BarcodeFormat.DATA_MATRIX]);
+  hints.set(Z.DecodeHintType.TRY_HARDER, true);
+  const reader = new Z.MultiFormatReader();
+  reader.setHints(hints);
+  const canvas = document.createElement('canvas');
+  const c2d = canvas.getContext('2d', { willReadFrequently: true });
+  return async (video) => {
+    const w = video.videoWidth;
+    const h = video.videoHeight;
+    if (!w || !h) return '';
+    const scale = Math.min(1, 960 / Math.max(w, h));
+    canvas.width = Math.round(w * scale);
+    canvas.height = Math.round(h * scale);
+    c2d.drawImage(video, 0, 0, canvas.width, canvas.height);
+    try {
+      const bmp = new Z.BinaryBitmap(new Z.HybridBinarizer(new Z.HTMLCanvasElementLuminanceSource(canvas)));
+      return reader.decode(bmp).getText();
+    } catch (e) {
+      return '';
+    } finally {
+      reader.reset();
+    }
+  };
+}
+
+// Kamerani ochib, kodni o'qiydi. Natija — matn (bekor qilinsa null).
+function scanCode(title = 'Shtrix-kod yoki QR-kodni ramkaga to\'g\'rilang') {
+  return new Promise((resolve) => {
+    let dlg = $('#scanner');
+    if (!dlg) {
+      dlg = document.createElement('dialog');
+      dlg.id = 'scanner';
+      dlg.className = 'scanner';
+      dlg.innerHTML = `<video playsinline muted autoplay></video><div class="sc-frame"><i></i></div>
+        <div class="lb-top"><span class="sc-title"></span><span class="lb-gap"></span>
+          <button type="button" class="lb-btn sc-torch" title="Chiroq" hidden>💡</button>
+          <button type="button" class="lb-btn sc-close" title="Yopish">×</button></div>
+        <div class="sc-msg"></div>
+        <div class="sc-manual"><input class="sc-input" placeholder="yoki kodni qo'lda yozing" autocomplete="off"><button type="button" class="sc-ok">OK</button></div>`;
+      document.body.appendChild(dlg);
+    }
+    const video = $('video', dlg);
+    const msg = $('.sc-msg', dlg);
+    $('.sc-title', dlg).textContent = title;
+    $('.sc-input', dlg).value = '';
+    msg.textContent = 'Kamera yoqilmoqda...';
+    let stream = null;
+    let done = false;
+    let timer = null;
+    const finish = (val) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      stream?.getTracks().forEach((t) => t.stop());
+      video.srcObject = null;
+      if (dlg.open) dlg.close();
+      resolve(val ? String(val).trim() : null);
+    };
+    dlg.onclose = () => finish(null);
+    $('.sc-close', dlg).onclick = () => finish(null);
+    $('.sc-ok', dlg).onclick = () => finish($('.sc-input', dlg).value);
+    $('.sc-input', dlg).onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); finish(e.target.value); } };
+    dlg.showModal();
+    (async () => {
+      if (!navigator.mediaDevices?.getUserMedia) { msg.textContent = "Bu qurilmada kamera ishlamaydi — kodni pastga qo'lda yozing."; return; }
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false });
+      } catch (e) {
+        msg.textContent = /denied|NotAllowed/i.test(e.name + e.message)
+          ? "Kameraga ruxsat berilmagan. Telefon sozlamalarida brauzerga kamera ruxsatini bering."
+          : 'Kamera ochilmadi: ' + e.message;
+        return;
+      }
+      if (done) { stream.getTracks().forEach((t) => t.stop()); return; }
+      video.srcObject = stream;
+      await video.play().catch(() => {});
+      const track = stream.getVideoTracks()[0];
+      const torchBtn = $('.sc-torch', dlg);
+      torchBtn.hidden = !track.getCapabilities?.().torch;
+      let torch = false;
+      torchBtn.onclick = () => { torch = !torch; track.applyConstraints({ advanced: [{ torch }] }).catch(() => {}); };
+      let decode;
+      try { decode = await makeDecoder(); } catch (e) { msg.textContent = e.message; return; }
+      msg.textContent = 'Qidirilmoqda...';
+      const tick = async () => {
+        if (done) return;
+        const val = await decode(video).catch(() => '');
+        if (val) {
+          if (navigator.vibrate) navigator.vibrate(60);
+          return finish(val);
+        }
+        timer = setTimeout(tick, 120);
+      };
+      tick();
+    })();
+  });
+}
+
+// O'qilgan kod bo'yicha mahsulot: artikul (katta-kichik harf farqsiz), so'ng nomi
+function productByScan(text) {
+  const t = String(text || '').trim().toLowerCase();
+  if (!t) return null;
+  const list = db.products.filter((p) => !p.archived);
+  return list.find((p) => (p.code || '').trim().toLowerCase() === t)
+    || list.find((p) => p.name.trim().toLowerCase() === t)
+    || null;
+}
+
+// Hujjat va komplekt qatorlaridagi 📷 tugma: skanerlab, mahsulotni qatorga qo'yadi
+document.addEventListener('click', async (e) => {
+  const btn = e.target.closest('.it-scan');
+  if (!btn || btn.dataset.act) return;
+  e.preventDefault();
+  if (btn.classList.contains('code-scan')) {
+    // Mahsulot kartochkasi: zavod shtrix-kodini artikul maydoniga yozish
+    const field = btn.parentElement.querySelector('input');
+    const code = await scanCode('Mahsulotdagi shtrix-kodni ramkaga to\'g\'rilang');
+    if (code) { field.value = code; field.dispatchEvent(new Event('input', { bubbles: true })); }
+    return;
+  }
+  const input = btn.closest('.it-pick').querySelector('.it-search');
+  const code = await scanCode();
+  if (!code) return;
+  const p = productByScan(code);
+  picker.input = input;
+  if (p && (pickKits || !isKit(p))) {
+    choosePickedProduct(p);
+  } else {
+    // Topilmadi — kod qidiruvga yoziladi: o'xshashlari yoki «yangi mahsulot sifatida kirim» chiqadi
+    input.focus();
+    input.value = code;
+    renderPicker();
+  }
+});
+
 // ---------- Ko'rinishlar (sahifalar) ----------
 
 // Uchinchi element 'A' — faqat administrator ko'radi
@@ -3380,9 +3684,11 @@ function filterVal(key, def = '') {
   return filters[key] ?? def;
 }
 
+const SCAN_VIEWS = ['products', 'stock', 'labels', 'kits'];
 function toolbar(view, { search = true, buttons = '', extra = '' } = {}) {
   return `<div class="toolbar">
     ${search ? `<input data-filter="${view}.q" placeholder="Qidirish..." value="${esc(filterVal(view + '.q'))}">` : ''}
+    ${search && SCAN_VIEWS.includes(view) ? `<button type="button" class="icon-only it-scan" data-act="scanFilter" data-view="${view}" title="Shtrix-kod / QR bilan qidirish" aria-label="Skaner">${icon('scan')}</button>` : ''}
     ${extra}
     ${buttons}
   </div>`;
@@ -3426,7 +3732,7 @@ function viewDashboard() {
     ['Bugungi savdo', money(daySales), `${sales.filter((d) => d.date === t).length} ta sotuv`],
     ['Shu oy savdosi', money(monthTotal), `${monthSales.length} ta sotuv`],
     ['Shu oy yalpi foydasi', money(gross), 'savdo − tannarx'],
-    ['Pul qoldig\'i', money(cash.cash + cash.card + cash.bank), `kassa ${fmt(cash.cash)} · karta ${fmt(cash.card)} · hisob ${fmt(cash.bank)}`],
+    ['Pul qoldig\'i', money(cashTotal(cash)), `kassa ${fmt(cash.cash || 0)} · karta ${fmt(cash.card || 0)} · terminal ${fmt(cash.terminal || 0)} · hisob ${fmt(cash.bank || 0)}`],
     ['Bizga qarzlar', money(receivable), 'debitorlik', 'debt'],
     ['Bizning qarzlar', money(payable), 'kreditorlik', 'warn'],
     ['Ombordagi tovar', money(stockValue), `${db.products.length} xil mahsulot`],
@@ -3438,7 +3744,7 @@ function viewDashboard() {
       ['Faol buyurtmalar', activeOrders.length, `${money(sumOf(activeOrders))}`],
       ['Mijozlar qarzi', money(receivable), 'undirilishi kerak', 'debt'],
     ] : []),
-    ...(can('money') ? [['Pul qoldig\'i', money(cash.cash + cash.card + cash.bank), `kassa ${fmt(cash.cash)} · karta ${fmt(cash.card)} · hisob ${fmt(cash.bank)}`], ['Bizning qarzlar', money(payable), 'kreditorlik', 'warn']] : []),
+    ...(can('money') ? [['Pul qoldig\'i', money(cashTotal(cash)), `kassa ${fmt(cash.cash || 0)} · karta ${fmt(cash.card || 0)} · terminal ${fmt(cash.terminal || 0)} · hisob ${fmt(cash.bank || 0)}`], ['Bizning qarzlar', money(payable), 'kreditorlik', 'warn']] : []),
     ...(can('costs') ? [['Ombordagi tovar', money(stockValue), `${db.products.length} xil mahsulot`]] : []),
     ...(!can('sale') ? [['Mahsulotlar', db.products.filter((p) => !p.archived).length, 'faol mahsulot']] : []),
   ];
@@ -3740,7 +4046,7 @@ function viewPayments() {
     return `<tr><td>${esc(p.no)}</td><td>${fmtDate(p.date)}</td><td>${p.dir === 'in' ? badge('Kirim', 'done') : badge('Chiqim', 'cancel')}</td>
       <td>${esc(p.purpose)}</td><td>${esc(party(p.counterpartyId)?.name || '—')}</td>
       <td>${d ? `<a href="javascript:void 0" data-act="openDoc" data-id="${d.id}">${esc(d.no)}</a>` : ''}</td>
-      <td>${esc(PAY_METHODS[p.method])}</td><td class="num">${money(p.amount)}</td><td>${esc(p.note)}</td>
+      <td>${esc(PAY_METHODS[p.method] || '')}${p.receipts?.length ? ` <button type="button" class="small rc-show" data-act="showReceipt" data-id="${p.id}" title="Chek surati">🧾</button>` : ''}</td><td class="num">${money(p.amount)}</td><td>${esc(p.note)}</td>
       <td class="actions">${admin ? `<button class="small danger" data-act="deletePayment" data-id="${p.id}">×</button>` : ''}</td></tr>`;
   }).join('');
   return toolbar('payments', {
@@ -3754,7 +4060,7 @@ function viewPayments() {
 function viewCash() {
   const b = cashBalances();
   return `<div class="stats">${Object.entries(PAY_METHODS).map(([k, v]) => `<div class="stat"><div class="label">${v}</div><div class="value">${money(b[k] || 0)}</div></div>`).join('')}
-    <div class="stat"><div class="label">Jami</div><div class="value">${money(b.cash + b.card + b.bank)}</div></div></div>
+    <div class="stat"><div class="label">Jami</div><div class="value">${money(cashTotal(b))}</div></div></div>
     <div class="card"><p class="muted">Qoldiqlar barcha kirim va chiqim to'lovlaridan hisoblanadi. Boshlang'ich qoldiqni kiritish uchun "Boshqa kirim" moddasi bilan kirim to'lovi yarating.</p>
     <button data-act="newPayment" data-dir="in">${icon('arrowIn')}Kirim</button> <button data-act="newPayment" data-dir="out">${icon('arrowOut')}Chiqim</button></div>`;
 }
@@ -4719,6 +5025,15 @@ const ACTIONS = {
   newProduct: () => newProduct(),
   newKit: () => editKit(null),
   newExpense: (ds) => newExpense(ds.cat),
+  scanFilter: async (ds) => {
+    const code = await scanCode();
+    if (!code) return;
+    const p = productByScan(code);
+    if (p && ds.view === 'products') return editProduct(p.id);
+    filters[ds.view + '.q'] = p ? p.code || p.name : code;
+    render();
+  },
+  showReceipt: (ds) => showReceipts(db.payments.find((p) => p.id === ds.id)?.receipts),
   loMove: (ds) => moveLayout(ds),
   loOpen: (ds) => { filters['layout.open'] = filterVal('layout.open') === ds.sec ? '' : ds.sec; render(); },
   loReset: () => { if (!confirm("Bo'limlar va tablar asl tartibga qaytarilsinmi?")) return; db.uiOrder = { sections: [], tabs: {} }; save(); },
