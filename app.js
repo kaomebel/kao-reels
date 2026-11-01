@@ -158,6 +158,7 @@ function emptyDb() {
     colors: DEFAULT_COLORS.slice(),
     featureSets: JSON.parse(JSON.stringify(DEFAULT_FEATURE_SETS)),
     categoryIcons: {},
+    categoryColors: {}, // kategoriyaning o'z ranglari (bo'sh — umumiy ranglar)
     expenseCats: JSON.parse(JSON.stringify(DEFAULT_EXPENSE_CATS)),
     uiOrder: { sections: [], tabs: {} },
     drivers: [],
@@ -1331,7 +1332,10 @@ function featureBlock(cat, type, p = {}) {
   const colorBox = (colors, label, note = '') => `<div class="field full"><span class="field-label">${label}</span>
     ${note ? `<div class="muted small feat-note">${note}</div>` : chipPicker('colorChips', colors, p.color, '+ Yangi rang')}
     <input type="hidden" name="color" value="${esc(p.color || '')}"></div>`;
-  if (!set) return `<div class="form-grid">${colorBox(db.colors, 'Rangi')}</div>`;
+  if (!set) {
+    const own = db.categoryColors?.[cat] || [];
+    return `<div class="form-grid">${colorBox(own.length ? own : db.colors, 'Rangi')}</div>`;
+  }
   const fields = set.fields || [];
   const ctl = fields.find((f) => f.name === set.colorField);
   const ctlVal = ctl ? p.attrs?.[ctl.name] || '' : '';
@@ -5218,18 +5222,20 @@ function catRow(name, types) {
       <input class="cat-name" value="${esc(name)}" placeholder="Kategoriya nomi">
       <button type="button" class="small danger icon-only" data-act="catDel" title="Kategoriyani olib tashlash">${icon('trash')}</button></div>
     <div class="cat-ic-grid" hidden>${FURNITURE_ICONS.map((ic) => `<button type="button" class="${ic === (chosen || categoryIcon(name)) ? 'on' : ''}" data-act="catIconSet" data-ic="${ic}">${icon(ic)}</button>`).join('')}</div>
-    ${chipEditor(types, '+ Tur qo\'shish (Enter)')}
+    <div class="cat-types">${chipEditor(types, '+ Tur qo\'shish (Enter)')}</div>
+    <span class="field-label cat-col-label">${icon('tag')} Ranglari <span class="muted small">— bo'sh qolsa, pastdagi umumiy ranglar chiqadi</span></span>
+    <div class="cat-colors">${chipEditor(db.categoryColors?.[name] || [], "+ Rang qo'shish (Enter)")}</div>
   </div>`;
 }
 
 function viewCategories() {
   return `<div class="lists-page"><div class="card narrow"><h3>${icon('tag')}Kategoriyalar va turlar</h3>
-      <p class="muted">Har bir kategoriyaning turlari mahsulot kartochkasida kategoriya tanlanganda chiqadi. Tur qo'shish uchun nomini yozib Enter bosing.</p>
+      <p class="muted">Har bir kategoriyaning turlari va ranglari mahsulot kartochkasida shu kategoriya tanlanganda chiqadi (masalan, shkafga — LDSP ranglari, divanga — mato ranglari). Qo'shish uchun nomini yozib Enter bosing. Stul kabi turlarning o'z material va ranglari pastdagi «Turga xos xususiyatlar» da.</p>
       <div id="catRows">${db.categories.map((c) => catRow(c, db.categoryTypes[c] || [])).join('')}</div>
       <button type="button" data-act="catAdd">${icon('plus')}Kategoriya qo'shish</button>
     </div>
-    <div class="card narrow"><h3>${icon('tag')}Ranglar</h3>
-      <p class="muted">Mahsulot kartochkasida tanlanadigan ranglar (masalan, Dub beliy, Belaya korona, Oq gladkiy).</p>
+    <div class="card narrow"><h3>${icon('tag')}Umumiy ranglar</h3>
+      <p class="muted">O'z ranglari berilmagan kategoriyalarda mahsulot kartochkasida shu ranglar chiqadi (masalan, Dub beliy, Belaya korona, Oq gladkiy).</p>
       <div id="colorEditor">${chipEditor(db.colors, "+ Rang qo'shish (Enter)")}</div>
     </div>
     <div class="card narrow"><h3>${icon('sofa')}Turga xos xususiyatlar</h3>
@@ -5265,18 +5271,22 @@ function saveLists(quiet = false) {
   });
   const categories = [];
   const types = {};
+  const colorsByCat = {};
   const renames = [];
   $$('#catRows .cat-row').forEach((row) => {
     const name = $('.cat-name', row).value.trim();
     if (!name || categories.includes(name)) return;
     categories.push(name);
-    types[name] = $$('.chip', row).map((c) => c.dataset.v);
+    types[name] = $$('.cat-types .chip', row).map((c) => c.dataset.v);
+    const cols = $$('.cat-colors .chip', row).map((c) => c.dataset.v);
+    if (cols.length) colorsByCat[name] = cols;
     if (row.dataset.orig && row.dataset.orig !== name) renames.push([row.dataset.orig, name]);
   });
   // Nomi o'zgargan kategoriya mahsulotlarda ham yangilanadi
   renames.forEach(([from, to]) => db.products.forEach((p) => { if (p.category === from) p.category = to; }));
   db.categories = categories;
   db.categoryTypes = types;
+  db.categoryColors = colorsByCat;
   // Qo'lda tanlangan ikonkalar (tanlanmagani nomidan o'zi aniqlanadi)
   db.categoryIcons = {};
   $$('#catRows .cat-row').forEach((row) => {

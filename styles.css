@@ -1311,3 +1311,5 @@ html.modal-open, html.modal-open body { overflow: hidden; overscroll-behavior: n
 .exp-subs .exp-tile { min-height: 60px; font-size: 15px; font-weight: 600; }
 .exp-subs .exp-new { border-style: dashed; color: var(--accent-dark); }
 .exp-subs .exp-other { font-weight: 400; color: var(--muted); }
+.cat-row .cat-col-label { display: flex; gap: 6px; align-items: center; margin: 10px 0 4px; font-size: 13px; }
+.cat-row .cat-col-label svg { width: 15px; height: 15px; }
