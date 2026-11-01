@@ -142,16 +142,28 @@ async function productPrice(p: any) {
 }
 
 async function findProduct(msg: any, text: string) {
-  const mid = msg.reply_to_message?.message_id;
+  // Temali guruhda har bir xabar tema boshiga «javob» bo'lib keladi — bu mahsulot e'loni emas
+  const rt = msg.reply_to_message;
+  const mid = rt && !rt.forum_topic_created && rt.message_id !== msg.message_thread_id ? rt.message_id : null;
   if (mid) {
     const { data } = await sb.from("products").select("id,data").filter("data->tgPost->msgIds", "cs", JSON.stringify([mid])).limit(1);
     if (data?.[0]) return data[0].data;
   }
-  // Artikul yozilgan bo'lsa (masalan A101)
-  const words = (text.match(/[A-Za-zА-Яа-я]{0,4}[-\s]?\d{2,}[A-Za-z]?/g) || []).map((w) => w.replace(/\s/g, "").toLowerCase());
-  if (!words.length) return null;
   const { data } = await sb.from("products").select("data").limit(5000);
-  return (data || []).map((r: any) => r.data).find((p: any) => !p.archived && p.code && words.includes(String(p.code).toLowerCase().replace(/\s/g, ""))) || null;
+  const all = (data || []).map((r: any) => r.data).filter((p: any) => !p.archived);
+  const norm = (x: string) => String(x || "").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+  // Eski e'longa javob: e'lon matnidagi mahsulot nomi yoki «Kod:» bo'yicha
+  const postText = mid ? norm(rt.caption || rt.text || "") : "";
+  if (postText) {
+    const byName = all.filter((p: any) => p.name && postText.includes(norm(p.name))).sort((a: any, b: any) => b.name.length - a.name.length)[0];
+    if (byName) return byName;
+  }
+  // Savolda artikul (masalan A101) yoki mahsulotning to'liq nomi yozilgan bo'lsa
+  const words = (text.match(/[A-Za-zА-Яа-я]{0,4}[-\s]?\d{2,}[A-Za-z]?/g) || []).map((w) => w.replace(/\s/g, "").toLowerCase());
+  const byCode = words.length ? all.find((p: any) => p.code && words.includes(String(p.code).toLowerCase().replace(/\s/g, ""))) : null;
+  if (byCode) return byCode;
+  const q = norm(text);
+  return all.filter((p: any) => p.name && norm(p.name).length > 3 && q.includes(norm(p.name))).sort((a: any, b: any) => b.name.length - a.name.length)[0] || null;
 }
 
 async function stockOf(pid: string) {
@@ -189,17 +201,21 @@ async function sendPriceDM(tg: any, userId: number, p: any) {
 
 async function handleGroup(tg: any, msg: any) {
   const cfg = Object.assign({}, BOT_DEFAULTS, tg.bot || {});
-  if (!cfg.answer || msg.from?.is_bot) return;
+  // Guruh nomidan yoki yashirin admin sifatida yozilgan xabar ham savol hisoblanadi (lichkaga yozib bo'lmaydi)
+  const anon = !!msg.sender_chat || msg.from?.username === "GroupAnonymousBot";
+  if (!cfg.answer || (msg.from?.is_bot && !anon)) return;
   const text = String(msg.text || msg.caption || "").trim();
   if (!text || text.startsWith("/")) return;
   const chat = String(msg.chat.id);
   const hours = Number(cfg.deleteAfterH) || 0;
   const reply = async (t: string, extra: Record<string, unknown> = {}) => {
-    const r = await tgCall(tg.token, "sendMessage", { chat_id: chat, text: t, parse_mode: "HTML", reply_to_message_id: msg.message_id, allow_sending_without_reply: true, ...(msg.message_thread_id ? { message_thread_id: msg.message_thread_id } : {}), ...extra });
+    const r = await tgCall(tg.token, "sendMessage", { chat_id: chat, text: t, parse_mode: "HTML", reply_to_message_id: msg.message_id, allow_sending_without_reply: true, ...(msg.message_thread_id && msg.is_topic_message ? { message_thread_id: msg.message_thread_id } : {}), ...extra });
     if (r.ok) { await remember(chat, msg.message_id, hours); await remember(chat, r.result.message_id, hours); }
+    else console.error("guruhga javob yuborilmadi:", r.description);
     return r;
   };
-  const who = msg.from?.username ? "@" + msg.from.username : esc(msg.from?.first_name || "");
+  const who = anon ? esc(msg.sender_chat?.title || "Hurmatli mijoz") : msg.from?.username ? "@" + msg.from.username : esc(msg.from?.first_name || "");
+  console.log("guruh savoli:", JSON.stringify({ text: text.slice(0, 60), anon, thread: msg.message_thread_id || null, reply: msg.reply_to_message?.message_id || null }));
   const company = await settings("company");
 
   if (RX.price.test(text) || RX.stock.test(text)) {
@@ -209,7 +225,7 @@ async function handleGroup(tg: any, msg: any) {
       return;
     }
     if (RX.price.test(text) && cfg.priceDM) {
-      const dm = await sendPriceDM(tg, msg.from.id, p);
+      const dm = anon ? { ok: false } : await sendPriceDM(tg, msg.from.id, p);
       if (dm.ok) return reply(`✅ ${who}, «${esc(p.name)}» narxini lichkangizga yozdik.`);
       // Foydalanuvchi botni hali ishga tushirmagan — lichkaga o'tish tugmasi
       const me = await tgCall(tg.token, "getMe", {});
