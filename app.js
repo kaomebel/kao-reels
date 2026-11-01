@@ -2033,8 +2033,13 @@ document.addEventListener('click', (e) => {
   input.dispatchEvent(new Event('change', { bubbles: true }));
 });
 
+// Sotuv va buyurtmada har bir qatorda «Chegirma (1 dona)» — sotish narxi = narx − chegirma
+const rowDiscDoc = (t) => t === DOC_TYPES.sale || t === DOC_TYPES.order;
+
 function itemRowHtml(t, it = {}, cur = 'UZS') {
   const p = product(it.productId);
+  const rd = rowDiscDoc(t);
+  const listPrice = rd && it.disc ? it.listPrice ?? it.price + it.disc : it.price;
   const kit = it.kitId ? ` data-kit-id="${esc(it.kitId)}" data-kit-name="${esc(it.kitName || '')}" data-kit-qty="${it.kitQty || ''}"` : '';
   return `<tr${kit}>
     <td class="it-pick"><input type="hidden" class="it-product" value="${esc(p ? p.id : '')}">
@@ -2042,7 +2047,8 @@ function itemRowHtml(t, it = {}, cur = 'UZS') {
       <div class="it-path muted small">${p ? esc(productPath(p)) : ''}${it.kitName ? ` · <b>Komplekt: ${esc(it.kitName)}</b>` : ''}</div></td>
     <td class="it-avail muted num"></td>
     <td>${qtyStepper('it-qty', it.qty || 1)}</td>
-    <td><span class="money-wrap"><input class="it-price money" data-cur="${cur}" inputmode="decimal" value="${esc(fmtIn(it.price ?? '', cur))}"><span class="cur">${CUR_SIGN[cur]}</span></span>
+    <td><span class="money-wrap"><input class="it-price money" data-cur="${cur}" inputmode="decimal" value="${esc(fmtIn(listPrice ?? '', cur))}"><span class="cur">${CUR_SIGN[cur]}</span></span>
+      ${rd ? `<label class="it-dl">Chegirma (1 dona)<span class="money-wrap"><input class="it-disc money" data-cur="${cur}" inputmode="numeric" placeholder="0" value="${esc(it.disc ? fmtIn(it.disc, cur) : '')}"><span class="cur">${CUR_SIGN[cur]}</span></span></label>` : ''}
       <div class="it-min muted small"></div></td>
     <td class="it-sum num"></td>
     <td><button type="button" class="small danger it-remove" title="O'chirish">×</button></td>
@@ -2147,7 +2153,9 @@ function docForm(type, d) {
     else {
       const q0 = Math.max(1, d.orderKind === 'custom' ? num(d.cQty) : (d.items || []).reduce((s, it) => s + num(it.qty), 0));
       const per = d.discount ? Math.round(d.discount / q0) : '';
-      foot += `<label>Chegirma (1 donaga)<span class="money-wrap"><input name="discount" class="money" data-cur="UZS" inputmode="numeric" autocomplete="off" placeholder="0" value="${esc(per ? fmtIn(per, 'UZS') : '')}"><span class="cur">so'm</span></span>
+      // Mahsulot qatorlarida o'z chegirmasi bor — umumiy maydon faqat nostandart buyurtmada (yoki eski hujjatda) chiqadi
+      const showDoc = !rowDiscDoc(t) || d.discount > 0 || d.orderKind === 'custom';
+      foot += `<label id="docDiscWrap" ${showDoc ? '' : 'hidden'} data-legacy="${d.discount > 0 ? 1 : ''}">Chegirma (1 donaga)<span class="money-wrap"><input name="discount" class="money" data-cur="UZS" inputmode="numeric" autocomplete="off" placeholder="0" value="${esc(per ? fmtIn(per, 'UZS') : '')}"><span class="cur">so'm</span></span>
         <input type="hidden" name="discountK" value="${q0}"><span class="muted small disc-hint" id="discHint"></span></label>`;
     }
   }
@@ -2657,10 +2665,15 @@ function bindDocForm(type, editingId) {
 
   const recalc = () => {
     let sum = 0;
+    let rowDisc = 0;
     $$('tr', body).forEach((tr) => {
       const p = product($('.it-product', tr).value);
       const priceEl = $('.it-price', tr);
-      const line = num($('.it-qty', tr).value) * num(priceEl.value);
+      const discEl = $('.it-disc', tr);
+      const dOne = discEl ? num(discEl.value) : 0;
+      const final = num(priceEl.value) - dOne;
+      const line = num($('.it-qty', tr).value) * final;
+      rowDisc += num($('.it-qty', tr).value) * dOne;
       sum += line;
       $('.it-sum', tr).textContent = p ? fmtIn(round2(line), curOf()) : '';
       const avail = p ? qtyIn(stock, p.id, whSel.value) : '';
@@ -2671,8 +2684,12 @@ function bindDocForm(type, editingId) {
       if (availCell.dataset.html !== availHtml) { availCell.innerHTML = availHtml; availCell.dataset.html = availHtml; }
       // Savdoda: sotuvchi eng kam narxni ko'radi, undan pastga tushsa ogohlantiriladi
       const min = p && t.price === 'sale' && type !== 'salesReturn' ? minPriceUZS(p) : 0;
-      $('.it-min', tr).textContent = min ? `eng kami: ${fmt(min)}` : '';
-      priceEl.classList.toggle('below-min', !!min && num(priceEl.value) < min);
+      const low = !!min && final < min;
+      $('.it-min', tr).innerHTML = (dOne > 0 ? `Sotish narxi: <b>${fmt(final)}</b>` : '')
+        + (min ? `${dOne > 0 ? ' · ' : ''}eng kami: ${fmt(min)}` : '')
+        + (low && dOne > 0 ? `<br><b class="debt">Chegirma juda katta! Ko'pi bilan ${fmt(Math.max(0, num(priceEl.value) - min))}</b>` : '');
+      priceEl.classList.toggle('below-min', low && !dOne);
+      discEl?.classList.toggle('below-min', low && dOne > 0);
     });
     if (isCustom()) sum = num($('#modalBody [name=cQty]').value) * num($('#modalBody [name=cPrice]').value);
     // Chegirma 1 donaga: mahsulotlar soniga ko'paytiriladi
@@ -2693,7 +2710,8 @@ function bindDocForm(type, editingId) {
     }
     const total = Math.max(0, sum - disc);
     const brk = $('#docBreak');
-    if (brk) brk.innerHTML = disc && curOf() === 'UZS' ? `${money(sum)} − chegirma ${money(Math.min(disc, sum))} = ` : '';
+    const allDisc = Math.min(disc, sum) + rowDisc;
+    if (brk) brk.innerHTML = allDisc && curOf() === 'UZS' ? `${money(sum + rowDisc)} − chegirma ${money(allDisc)} = ` : '';
     $('#docTotal').innerHTML = curOf() === 'USD'
       ? `${fmtUsd(total)} <span class="muted">≈ ${money(total * rateOf())}</span>`
       : money(total);
@@ -2753,7 +2771,7 @@ function bindDocForm(type, editingId) {
     const cur = curOf();
     const rate = rateOf();
     $('#rateField').hidden = cur !== 'USD';
-    [...$$('.it-price', body), discount].filter(Boolean).forEach((el) => {
+    [...$$('.it-price, .it-disc', body), discount].filter(Boolean).forEach((el) => {
       const v = num(el.value);
       if (v && rate) el.value = cur === 'USD' ? round2(v / rate) : Math.round(v * rate);
       setMoneyCurrency(el, cur);
@@ -2765,6 +2783,8 @@ function bindDocForm(type, editingId) {
   $$('#modalBody [name=orderKind]').forEach((r) => r.addEventListener('change', () => {
     $('#customBlock').hidden = !isCustom();
     $('#stdBlock').hidden = isCustom();
+    const w = $('#docDiscWrap');
+    if (w && rowDiscDoc(t)) w.hidden = !isCustom() && !w.dataset.legacy;
     recalc();
   }));
   $('#customBlock')?.addEventListener('input', recalc);
@@ -2845,6 +2865,9 @@ function readItems() {
     const productId = $('.it-product', tr).value;
     if (!productId) return;
     const it = { productId, qty: Math.max(1, num($('.it-qty', tr).value)), price: num($('.it-price', tr).value) };
+    // Qatordagi chegirma: saqlanadigan narx — sotish narxi (narx − chegirma), etiketka narxi va chegirma ham yoziladi
+    const dOne = num($('.it-disc', tr)?.value);
+    if (dOne > 0) Object.assign(it, { listPrice: it.price, disc: dOne, price: it.price - dOne });
     // Komplekt tarkibidagi qator: komplekt belgisi saqlanadi (mahsulot almashtirilmagan bo'lsa)
     const k = tr.dataset.kitId && product(tr.dataset.kitId);
     if (k && kitParts(k).some((c) => c.productId === productId)) Object.assign(it, { kitId: k.id, kitName: tr.dataset.kitName, kitQty: num(tr.dataset.kitQty) || undefined });
@@ -2942,7 +2965,7 @@ async function saveDoc(type, existing, preset, data, stock) {
       .map(({ it, p }) => `${p.name}: ${fmt(it.price)} < eng kami ${fmt(minPriceUZS(p))} so'm`);
     if (low.length) {
       if (!can('costs')) {
-        alert("Narx eng kam narxdan past:\n" + low.join('\n') + "\n\nNarxni oshiring yoki administratorga murojaat qiling.");
+        alert("Narx eng kam narxdan past:\n" + low.join('\n') + "\n\nChegirmani kamaytiring (yoki narxni oshiring) — yoki administratorga murojaat qiling.");
         return false;
       }
       if (!confirm("Narx eng kam narxdan past:\n" + low.join('\n') + "\n\nBaribir saqlansinmi?")) return false;

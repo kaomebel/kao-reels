@@ -1325,3 +1325,8 @@ html.modal-open, html.modal-open body { overflow: hidden; overscroll-behavior: n
 .del-cat .del-to { margin-left: 28px; width: calc(100% - 28px); }
 .del-cat .del-note { margin: -4px 0 0 28px; }
 .del-cat .del-list { margin: 4px 0 0; padding-left: 20px; }
+
+/* Sotuv qatoridagi chegirma (1 dona) */
+.it-dl { display: block; margin-top: 6px; font-size: 12px; color: var(--muted); }
+.it-dl .money-wrap { margin-top: 2px; }
+.it-min b { color: var(--text); }
