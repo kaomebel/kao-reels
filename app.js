@@ -2028,7 +2028,7 @@ function maxDiscount(items) {
   }, 0);
 }
 
-// Chegirma maydoni: savdoda ming so'mlarda (discountK = 1000), xaridlarda — to'liq summa
+// Chegirma maydoni: savdoda 1 dona uchun (discountK = mahsulotlar soni), xaridlarda — to'liq summa
 const discountOf = (data) => num(data.discount) * (num(data.discountK) || 1);
 
 // Kirim / hisobdan chiqarish / ko'chirishda narx — kelish narxi; tannarx ruxsati yo'q xodimga ko'rsatilmaydi
@@ -2112,10 +2112,12 @@ function docForm(type, d) {
   let foot = '';
   if (t.money || type === 'order' || type === 'purchaseOrder') {
     if (t.fx) foot += moneyField('Chegirma', 'discount', d.discount || '', cur, 'placeholder="0"');
-    // Savdoda chegirma ming so'mlarda yoziladi: 5 → 5 000, 50 → 50 000 so'm
+    // Savdoda chegirma 1 dona uchun yoziladi: jami chegirma = chegirma × hamma mahsulotlar soni
     else {
-      foot += `<label>Chegirma<span class="money-wrap"><input name="discount" class="money disc-k" data-cur="USD" inputmode="decimal" autocomplete="off" placeholder="0" value="${esc(d.discount ? fmtIn(Math.round(d.discount / 10) / 100, 'USD') : '')}"><span class="cur">ming so'm</span></span>
-        <input type="hidden" name="discountK" value="1000"><span class="muted small disc-hint" id="discHint"></span></label>`;
+      const q0 = Math.max(1, d.orderKind === 'custom' ? num(d.cQty) : (d.items || []).reduce((s, it) => s + num(it.qty), 0));
+      const per = d.discount ? Math.round(d.discount / q0) : '';
+      foot += `<label>Chegirma (1 donaga)<span class="money-wrap"><input name="discount" class="money" data-cur="UZS" inputmode="numeric" autocomplete="off" placeholder="0" value="${esc(per ? fmtIn(per, 'UZS') : '')}"><span class="cur">so'm</span></span>
+        <input type="hidden" name="discountK" value="${q0}"><span class="muted small disc-hint" id="discHint"></span></label>`;
     }
   }
   if (!d.id && t.pay) {
@@ -2641,12 +2643,20 @@ function bindDocForm(type, editingId) {
       priceEl.classList.toggle('below-min', !!min && num(priceEl.value) < min);
     });
     if (isCustom()) sum = num($('#modalBody [name=cQty]').value) * num($('#modalBody [name=cPrice]').value);
-    const disc = discountOf({ discount: discount?.value, discountK: $('#modalForm [name=discountK]')?.value });
+    // Chegirma 1 donaga: mahsulotlar soniga ko'paytiriladi
+    const kEl = $('#modalForm [name=discountK]');
+    let units = 1;
+    if (kEl) {
+      units = Math.max(1, isCustom() ? num($('#modalBody [name=cQty]')?.value) : readItems().reduce((s, it) => s + num(it.qty), 0));
+      kEl.value = units;
+    }
+    const disc = discountOf({ discount: discount?.value, discountK: kEl?.value });
     const hint = $('#discHint');
     if (hint) {
       const maxD = t.price === 'sale' && type !== 'salesReturn' && !isCustom() ? maxDiscount(readItems()) : Infinity;
       const over = disc > maxD;
-      hint.innerHTML = disc ? `= ${money(disc)}${over ? ` <b class="debt">— juda katta! Ko'pi bilan ${money(maxD)}</b>` : ''}` : '';
+      const perMax = Math.floor(maxD / units);
+      hint.innerHTML = disc ? `${fmt(num(discount.value))} × ${units} dona = <b>${money(disc)}</b>${over ? ` <b class="debt">— juda katta! 1 donaga ko'pi bilan ${money(perMax)}</b>` : ''}` : '';
       discount?.classList.toggle('below-min', over);
     }
     const total = Math.max(0, sum - disc);
@@ -2910,7 +2920,8 @@ async function saveDoc(type, existing, preset, data, stock) {
   if (t.price === 'sale' && type !== 'salesReturn' && discountOf(data) > 0 && data.orderKind !== 'custom') {
     const maxD = maxDiscount(items);
     if (discountOf(data) > maxD) {
-      const msg = `Chegirma juda katta: ${money(discountOf(data))}.\nMahsulotlarning eng kam narxi bo'yicha ko'pi bilan ${money(maxD)} chegirma qilish mumkin.`;
+      const units = Math.max(1, num(data.discountK) || 1);
+      const msg = `Chegirma juda katta: 1 donaga ${money(num(data.discount))} (jami ${money(discountOf(data))}).\nEng kam narx bo'yicha 1 donaga ko'pi bilan ${money(Math.floor(maxD / units))} chegirma qilish mumkin.`;
       if (!isAdmin()) { alert(msg + '\n\nSotish mumkin emas — chegirmani kamaytiring.'); $('#modalBody [name=discount]')?.focus(); return false; }
       if (!confirm(msg + '\n\nBaribir saqlansinmi? (faqat administrator)')) return false;
     }
