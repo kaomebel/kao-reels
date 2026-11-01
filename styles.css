@@ -1280,3 +1280,20 @@ tr.sale-late > td:first-child { box-shadow: inset 4px 0 0 var(--danger); }
 html.modal-open, html.modal-open body { overflow: hidden; overscroll-behavior: none; }
 .money-box .total-line { display: block; text-align: left; font-size: 16px; line-height: 1.6; }
 .money-box #docBreak { display: block; }
+
+/* Telefonda tanlash ro'yxati — butun ekranli oyna */
+.sel-sheet { position: fixed; inset: auto 0 0 0; width: 100vw; max-width: 100vw; height: auto; max-height: min(88dvh, 88vh); margin: 0; padding: 0; border: none; border-radius: 18px 18px 0 0; background: var(--card); color: var(--text); display: none; flex-direction: column; overflow: hidden; box-shadow: 0 -8px 30px rgba(0, 0, 0, .25); }
+.sel-sheet[open] { display: flex; }
+.sel-sheet::backdrop { background: var(--overlay); }
+.ss-head { display: flex; align-items: center; gap: 10px; padding: 14px 16px 10px; border-bottom: 1px solid var(--border); }
+.ss-title { flex: 1; font-size: 17px; }
+.ss-close { width: 44px; height: 44px; padding: 0; border-radius: 50%; font-size: 24px; line-height: 1; }
+.ss-search { margin: 10px 16px 4px; width: auto; }
+.ss-list { overflow-y: auto; overscroll-behavior: contain; padding: 6px 8px max(16px, env(safe-area-inset-bottom)); -webkit-overflow-scrolling: touch; }
+.ss-opt { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; min-height: 52px; padding: 12px 14px; text-align: left; font-size: 16px; border: none; border-radius: 12px; background: transparent; box-shadow: none; }
+.ss-opt + .ss-opt { margin-top: 2px; }
+.ss-opt.on { background: var(--accent-soft); color: var(--accent-dark); font-weight: 600; }
+.ss-opt svg { width: 20px; height: 20px; flex: none; }
+.ss-opt:active { background: var(--accent-soft); }
+.ss-group { padding: 12px 14px 4px; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+.ss-empty { padding: 20px; text-align: center; }

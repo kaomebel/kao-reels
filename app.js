@@ -3668,6 +3668,94 @@ function telegramOnStockIn(d) {
   telegramPostProducts(d.items.map((it) => it.productId), true);
 }
 
+// ---------- Telefonda tanlash ro'yxatlari (select) — butun ekranda ----------
+// Android/iPhone'ning o'z tanlash oynasi ba'zan juda kichik ochiladi (2-3 qator ko'rinadi).
+// Telefonda har qanday ro'yxat o'rniga dasturning o'z oynasi ochiladi: hamma variantlar ko'rinadi,
+// uzun ro'yxatda qidiruv bor. Tanlangach select qiymati o'zgaradi va «change» hodisasi yuboriladi.
+function selectLabel(sel) {
+  const lbl = sel.closest('label');
+  if (lbl) {
+    const t = [...lbl.childNodes].filter((n) => n.nodeType === 3).map((n) => n.textContent.trim()).join(' ').trim();
+    if (t) return t;
+  }
+  return sel.getAttribute('aria-label') || sel.title || 'Tanlang';
+}
+
+function openSelectSheet(sel) {
+  let dlg = $('#selSheet');
+  if (!dlg) {
+    dlg = document.createElement('dialog');
+    dlg.id = 'selSheet';
+    dlg.className = 'sel-sheet';
+    dlg.innerHTML = `<div class="ss-head"><b class="ss-title"></b><button type="button" class="ss-close" aria-label="Yopish">×</button></div>
+      <input class="ss-search" type="search" placeholder="Qidirish..." autocomplete="off" hidden>
+      <div class="ss-list" role="listbox"></div>`;
+    document.body.appendChild(dlg);
+  }
+  const list = $('.ss-list', dlg);
+  const search = $('.ss-search', dlg);
+  const opts = [...sel.querySelectorAll('option')];
+  $('.ss-title', dlg).textContent = selectLabel(sel);
+  const draw = (q = '') => {
+    const s = q.trim().toLowerCase();
+    let html = '';
+    let group = null;
+    for (const o of opts) {
+      if (o.hidden || (s && !o.textContent.toLowerCase().includes(s))) continue;
+      const g = o.parentElement.tagName === 'OPTGROUP' ? o.parentElement.label : null;
+      if (g !== group) { group = g; if (g) html += `<div class="ss-group">${esc(g)}</div>`; }
+      html += `<button type="button" class="ss-opt ${o.selected ? 'on' : ''}" data-i="${opts.indexOf(o)}" ${o.disabled ? 'disabled' : ''} role="option">${esc(o.textContent)}${o.selected ? icon('check') : ''}</button>`;
+    }
+    list.innerHTML = html || '<div class="ss-empty muted">Topilmadi</div>';
+  };
+  search.hidden = opts.length <= 8;
+  search.value = '';
+  draw();
+  search.oninput = () => draw(search.value);
+  list.onclick = (e) => {
+    const b = e.target.closest('.ss-opt');
+    if (!b || b.disabled) return;
+    const o = opts[+b.dataset.i];
+    dlg.close();
+    if (sel.value !== o.value || !o.selected) {
+      sel.value = o.value;
+      sel.dispatchEvent(new Event('input', { bubbles: true }));
+      sel.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+  };
+  $('.ss-close', dlg).onclick = () => dlg.close();
+  dlg.onclick = (e) => { if (e.target === dlg) dlg.close(); }; // fon bosilsa yopiladi
+  if (document.activeElement && document.activeElement !== document.body) document.activeElement.blur(); // klaviatura yopilsin
+  if (!dlg.open) dlg.showModal();
+  requestAnimationFrame(() => list.querySelector('.ss-opt.on')?.scrollIntoView({ block: 'center' }));
+}
+
+(function bindSelectSheets() {
+  const usable = (sel) => sel && !sel.multiple && !sel.disabled && !sel.closest('fieldset[disabled]') && isTouch() && sel.options.length > 0;
+  let start = null;
+  document.addEventListener('touchstart', (e) => {
+    const sel = e.target.closest?.('select');
+    start = usable(sel) ? { sel, x: e.touches[0].clientX, y: e.touches[0].clientY } : null;
+  }, { passive: true });
+  document.addEventListener('touchend', (e) => {
+    if (!start) return;
+    const t = e.changedTouches[0];
+    const moved = Math.abs(t.clientX - start.x) > 10 || Math.abs(t.clientY - start.y) > 10;
+    const sel = start.sel;
+    start = null;
+    if (moved) return; // barmoq surilgan — sahifa aylantirilmoqda
+    e.preventDefault(); // tizimning kichik oynasi ochilmasin
+    openSelectSheet(sel);
+  }, { passive: false });
+  // Sichqoncha bilan (kichik ekranli kompyuter) — ham shu oyna
+  document.addEventListener('mousedown', (e) => {
+    const sel = e.target.closest?.('select');
+    if (!usable(sel) || e.sourceCapabilities?.firesTouchEvents) return;
+    e.preventDefault();
+    openSelectSheet(sel);
+  });
+})();
+
 // ---------- Shtrix-kod / QR skaner (kamera) ----------
 // Telefonda: Chrome/Android'da brauzerning o'z BarcodeDetector'i, qolganlarida (iPhone) — ZXing kutubxonasi.
 // Etiketkalarda shtrix-kod va QR ichida mahsulot artikuli yozilgan; zavod shtrix-kodlari (EAN) ham o'qiladi.
