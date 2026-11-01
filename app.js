@@ -1123,7 +1123,7 @@ function productForm(p = {}, readonly = false) {
     </div>
     <div class="form-grid">
       ${field('Nomi *', 'name', p.name, 'required', 'full')}
-      ${sizeField(p.size)}
+      ${sizeField(p.size, noSizeType(p.type))}
       <label>Kod / artikul<span class="it-sw"><input name="code" value="${esc(p.code || '')}" autocomplete="off"><button type="button" class="it-scan code-scan" title="Shtrix-kodni skanerlab yozish" aria-label="Skaner">${icon('scan')}</button></span></label>
       ${selectField('Kategoriya', 'category', cats, p.category || '', '', 'id="catSel"')}
       <label>Turi<select name="type" id="typeSel">${typeOptions(p.category, p.type)}</select>
@@ -1132,8 +1132,7 @@ function productForm(p = {}, readonly = false) {
         <input name="makerNew" id="makerNew" placeholder="Fabrika yoki ta'minotchi nomi" hidden></label>
       <div class="field full feat-wrap" id="featBlock">${featureBlock(p.category, p.type, p)}</div>
       ${field('Ishlab chiqarilgan joyi', 'origin', p.origin, 'placeholder="O\'zbekiston, Toshkent / Turkiya..."')}
-      ${field("O'lchov birligi", 'unit', p.unit || 'dona')}
-      ${field('Minimal qoldiq', 'minQty', p.minQty ?? 1, 'type="number" inputmode="numeric" min="0"')}
+      ${isAdmin() ? field('Minimal qoldiq', 'minQty', p.minQty ?? 1, 'type="number" inputmode="numeric" min="0"') : ''}
       <div class="field full price-block">
         <span class="field-label">Narxlar valyutasi</span>
         <div class="seg seg-sm" role="radiogroup">
@@ -1200,9 +1199,12 @@ function renderPhotoList(readonly) {
 // O'lcham uch katakda: raqamdan keyin probel (yoki x, *, vergul, Enter) — keyingi katakka o'tadi
 const DIM_NAMES = ['Uzunlik', 'Kenglik', 'Balandlik'];
 
-function sizeField(size) {
+// Stul va kreslolarda o'lcham so'ralmaydi
+const noSizeType = (type) => /stul|kreslo/i.test(type || '');
+
+function sizeField(size, hidden = false) {
   const parts = String(size || '').split(/[x×х*,\s]+/i).filter(Boolean);
-  return `<label class="wide2">O'lchami (sm): uzunlik × kenglik × balandlik
+  return `<label class="wide2" id="sizeLbl" ${hidden ? 'hidden' : ''}>O'lchami (sm): uzunlik × kenglik × balandlik
     <div class="dims">
       ${DIM_NAMES.map((n, i) => `${i ? '<span class="dim-x">×</span>' : ''}<input class="dim" inputmode="decimal" enterkeyhint="${i < 2 ? 'next' : 'done'}" placeholder="${n}" aria-label="${n}" value="${esc(parts[i] === '?' ? '' : parts[i] || '')}">`).join('')}
     </div>
@@ -1390,6 +1392,7 @@ function bindProductForm(p, readonly = false) {
   bindSizeField();
   bindTypeField();
   bindPriceBlock();
+  $('#typeSel')?.addEventListener('change', (e) => { const l = $('#sizeLbl'); if (l) l.hidden = noSizeType(e.target.value); });
   const maker = $('#makerSel');
   maker.addEventListener('change', () => {
     $('#makerNew').hidden = maker.value !== '__new';
@@ -1580,13 +1583,14 @@ function readProduct(d, p) {
     origin: d.origin.trim(),
     supplierId: supplierId || '',
     maker,
-    unit: d.unit.trim() || 'dona',
+    unit: p.unit || 'dona', // hamma mahsulot donada
     priceCurrency: d.priceCurrency === 'USD' ? 'USD' : 'UZS',
     // Sotuvchi kelish narxini ko'rmaydi — uning formasida bu maydon yo'q
     buyPrice: d.buyPrice !== undefined ? num(d.buyPrice) : p.buyPrice || 0,
     salePrice: num(d.salePrice),
     minPrice: num(d.minPrice),
-    minQty: num(d.minQty),
+    // Minimal qoldiqni faqat administrator kiritadi
+    minQty: d.minQty !== undefined ? num(d.minQty) : p.minQty ?? 1,
     note: d.note.trim(),
   });
 }
