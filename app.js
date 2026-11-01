@@ -290,7 +290,7 @@ const ROLES = { admin: 'Administrator', seller: 'Sotuvchi', purchaser: "Ta'minot
 // Administrator har bir foydalanuvchiga qaysi bo'limlar ochiqligini belgilaydi
 const PERMS = {
   sale: ['Sotish', "Sotuv, buyurtma, mijozdan qaytarish; mijozlar va ulardan to'lov olish"],
-  enter: ['Kirim qilish', "Omborga tovar kiritish (Kirim qilish hujjati)"],
+  enter: ['Kirim qilish', "Omborga tovar kiritish (Kirim qilish hujjati) va yangi mahsulot qo'shish"],
   purchase: ['Xaridlar', "Ta'minotchiga buyurtma, qabul qilish, qaytarish; ta'minotchilar"],
   stockOps: ['Ombor amallari', "Hisobdan chiqarish, ko'chirish, inventarizatsiya"],
   products: ['Mahsulotlar', "Mahsulot qo'shish va kartochkani o'zgartirish"],
@@ -300,6 +300,8 @@ const PERMS = {
   reports: ['Hisobotlar', 'Foyda va zarar, savdo tahlili'],
 };
 const can = (perm) => isAdmin() || permsOf(me).includes(perm);
+// Yangi mahsulot qo'shish: «Mahsulotlar» yoki «Kirim qilish» ruxsati bilan (o'zgartirish — faqat «Mahsulotlar»)
+const canAddProducts = () => can('products') || can('enter');
 // Hujjat turi → kerakli ruxsat
 const DOC_PERM = { order: 'sale', sale: 'sale', salesReturn: 'sale', purchaseOrder: 'purchase', receipt: 'purchase', purchaseReturn: 'purchase', enter: 'enter', writeoff: 'stockOps', move: 'stockOps', inventory: 'stockOps' };
 
@@ -903,7 +905,7 @@ let docFormCtx = null; // { quick, warehouseId(), refresh(), row }
 function quickEntry({ productId, name = '', qty = 1, row }) {
   if (!can('enter')) return alert("Kirim qilish uchun ruxsatingiz yo'q. Administratordan «Kirim qilish» ruxsatini so'rang.");
   const p = product(productId);
-  if (!p && !can('products')) return alert("Bu mahsulot bazada yo'q. Yangi mahsulot qo'shish uchun «Mahsulotlar» ruxsati kerak — administratorga murojaat qiling.");
+  if (!p && !canAddProducts()) return alert("Bu mahsulot bazada yo'q. Yangi mahsulot qo'shish uchun «Kirim qilish» yoki «Mahsulotlar» ruxsati kerak — administratorga murojaat qiling.");
   const wh = docFormCtx?.warehouseId?.() || db.warehouses[0]?.id;
   const showCost = can('costs');
   openSubModal({
@@ -1604,6 +1606,7 @@ async function withPhotos(fn) {
 }
 
 function newProduct() {
+  if (!canAddProducts()) return alert("Mahsulot qo'shish uchun ruxsatingiz yo'q.");
   openModal({
     title: 'Yangi mahsulot',
     body: productForm(),
@@ -2458,7 +2461,7 @@ function renderPicker() {
   if (q.trim() && q !== productLabel(chosen)) {
     const found = searchProducts(q);
     html = found.length ? found.slice(0, 30).map(productRow).join('') : '<div class="pick-empty">Topilmadi — artikul yoki nomni tekshiring</div>';
-    if (docFormCtx?.quick && can('enter') && can('products')) {
+    if (docFormCtx?.quick && can('enter') && canAddProducts()) {
       html += `<button type="button" class="pick-row pick-quick" data-pick="quickNew"><span class="pick-ic">${icon('plus')}</span><span><b>«${esc(q.trim())}» — yangi mahsulot sifatida kirim qilish</b><span class="pick-sub">Sotuvdan chiqmasdan omborga kiritiladi</span></span></button>`;
     }
   } else {
@@ -4123,7 +4126,7 @@ function viewDashboard() {
     ['sale', 'Sotish', 'bag', 'primary'], ['order', 'Buyurtma', 'receipt'], ['receipt', 'Qabul qilish', 'truck'], ['enter', 'Kirim qilish', 'arrowIn'],
   ].filter(([type]) => canUseDoc(type))
     .map(([type, label, ic, cls]) => `<button class="${cls || ''}" data-act="newDoc" data-type="${type}">${icon(ic)}${label}</button>`).join('') +
-    (can('products') ? `<button data-act="newProduct">${icon('sofa')}Mahsulot</button>` : '') +
+    (canAddProducts() ? `<button data-act="newProduct">${icon('sofa')}Mahsulot</button>` : '') +
     (can('sale') || can('money') ? `<button data-act="newPayment" data-dir="in">${icon('arrowIn')}Kirim to'lovi</button>` : '') +
     (can('money') ? `<button data-act="newPayment" data-dir="out">${icon('arrowOut')}Xarajat</button>` : '');
 
@@ -4279,7 +4282,7 @@ function viewProducts() {
 
   return toolbar('products', {
     extra: `<select data-filter="products.arch"><option value="">Faol</option><option value="1" ${arch ? 'selected' : ''}>Arxiv</option></select>`,
-    buttons: can('products') ? `<button class="primary" data-act="newProduct">${icon('plus')}Mahsulot</button><button data-act="exportProducts">${icon('download')}CSV</button>` : '',
+    buttons: (canAddProducts() ? `<button class="primary" data-act="newProduct">${icon('plus')}Mahsulot</button>` : '') + (can('products') ? `<button data-act="exportProducts">${icon('download')}CSV</button>` : ''),
   }) + categoryBar('products.cat', db.products.filter((p) => !!p.archived === arch))
     + (cat ? typeBar('products.type', cat, db.products.filter((p) => !!p.archived === arch && p.category === cat)) : '')
     + `<div class="card"><div class="table-wrap"><table><thead><tr><th></th><th>Mahsulot</th>
@@ -6176,7 +6179,7 @@ Object.assign(ACTIONS, {
 
 // Sotuvchi tugmani ko'rmasa ham, bu amallarni bajara olmasligi kerak
 // Ruxsatga bog'liq amallar (tugma ko'rinmasa ham bajarilmasin)
-const ACTION_PERMS = { newProduct: 'products', newKit: 'products', exportProducts: 'products' };
+const ACTION_PERMS = { newKit: 'products', exportProducts: 'products' };
 const ADMIN_ACTIONS = ['deleteProduct', 'unarchive', 'exportProducts', 'tgProduct', 'deleteParty', 'deletePayment',
   'ecAdd', 'ecDel', 'ecSave', 'staffAdd', 'staffDel', 'loMove', 'loReset', 'drvEdit', 'drvDel', 'drvLink', 'botSetup', 'tgSave', 'tgDetect', 'tgTest', 'tgAll', 'bfAdd', 'bfDel', 'tgTopicsCreate', 'tgTopicsReset', 'tgTopicIcons', 'coSave', 'editWh', 'deleteWh', 'catSave', 'catAdd', 'catDel', 'catIconOpen', 'catIconSet', 'fsAdd', 'fsDel', 'fsFieldAdd', 'fsFieldDel', 'regAdd', 'regDel', 'chipRemove', 'backup', 'backupDetect', 'backupSend', 'demo', 'reset', 'editUser', 'exportDocs',
   'serverSettings', 'refreshUsage', 'migrateLocal', 'rateRefresh', 'rateManual', 'rateAuto',

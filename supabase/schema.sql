@@ -594,3 +594,13 @@ end;
 $$;
 revoke execute on function public.accept_handover(text) from public, anon;
 grant execute on function public.accept_handover(text) to authenticated;
+
+-- «Kirim qilish» ruxsati bor xodim yangi mahsulot (va uning rasmini) qo'sha oladi; o'zgartirish/o'chirish — faqat «Mahsulotlar»
+do $$ begin
+  if not exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'products' and policyname = 'products_insert_enter') then
+    create policy products_insert_enter on public.products for insert to authenticated with check (public.has_perm('enter'));
+  end if;
+  if not exists (select 1 from pg_policies where schemaname = 'storage' and tablename = 'objects' and policyname = 'photos_insert_enter') then
+    create policy photos_insert_enter on storage.objects for insert to authenticated with check (bucket_id = 'photos' and public.has_perm('enter'));
+  end if;
+end $$;
