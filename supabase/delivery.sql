@@ -70,3 +70,10 @@ begin
     alter publication supabase_realtime add table public.driver_chats;
   end if;
 end $$;
+
+-- Har kuni ertalab 08:57 da (Toshkent) yopilmagan sotuvlar ro'yxati administratorning Telegramiga:
+-- insert into public.bot_private (id, data) values ('cron', jsonb_build_object('key', encode(gen_random_bytes(16), 'hex'))) on conflict (id) do nothing;
+-- select cron.schedule('open-sales-remind', '57 3 * * *', $cron$
+--   select net.http_post(url := '<PROJECT_URL>/functions/v1/tg-bot', headers := '{"Content-Type": "application/json"}'::jsonb,
+--     body := jsonb_build_object('action', 'remind', 'key', (select data->>'key' from public.bot_private where id = 'cron')), timeout_milliseconds := 60000);
+-- $cron$);

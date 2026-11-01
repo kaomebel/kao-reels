@@ -315,6 +315,34 @@ async function onUpdate(tg: any, u: any) {
   }
 }
 
+// Yopilmagan sotuvlar (Yetkazilishi kerak / Yo'lda): administratorga har kuni ertalab eslatma
+async function remindOpenSales(tg: any) {
+  if (!tg.token || !tg.backupChatId) return { ok: false, error: "chat yo'q" };
+  const { data } = await sb.from("docs").select("data").eq("type", "sale").in("data->>status", ["pending", "onway"]);
+  const list = (data || []).map((r: any) => r.data).sort((a: any, b: any) => String(a.deliveryDate || a.date).localeCompare(String(b.deliveryDate || b.date)));
+  if (!list.length) return { ok: true, sent: 0 };
+  const today = new Date(Date.now() + 5 * 3600e3).toISOString().slice(0, 10); // Toshkent vaqti
+  const days = (d: string) => Math.floor((Date.parse(today) - Date.parse(d)) / 864e5);
+  const drivers = (await settings("drivers")) || [];
+  const { data: users } = await sb.from("profiles").select("id,name");
+  const uname = (id: string) => (users || []).find((u: any) => u.id === id)?.name || "";
+  const lines: string[] = [];
+  let late = 0;
+  for (const d of list.slice(0, 30)) {
+    const b = await docBundle(d.id);
+    const over = d.deliveryDate ? d.deliveryDate < today : days(d.date) > 2;
+    if (over) late++;
+    const drv = drivers.find((x: any) => x.id === d.driverId)?.name;
+    lines.push(`${over ? "🔴" : d.status === "onway" ? "🟣" : "🟡"} <b>${esc(d.no)}</b> · ${esc(b?.party?.name || "")}` +
+      `\n    ${d.status === "onway" ? "Yo'lda" : "Yetkazilishi kerak"}${d.deliveryDate ? ` · muddat ${fmtDate(d.deliveryDate)}` : ` · ${days(d.date)} kun`}` +
+      `${drv ? ` · 🚚 ${esc(drv)}` : ""}${uname(d.userId) ? ` · 👤 ${esc(uname(d.userId))}` : ""}${b && b.rest > 0 ? ` · qoldi ${money(b.rest)}` : ""}`);
+  }
+  const text = `⏳ <b>Yopilmagan sotuvlar: ${list.length}</b>${late ? ` · 🔴 muddati o'tgan: ${late}` : ""}\n\n${lines.join("\n")}` +
+    (list.length > 30 ? `\n… yana ${list.length - 30} ta` : "") + `\n\nMijozga yetib borgach dasturda «Yetkazildi» qiling.`;
+  const r = await tgCall(tg.token, "sendMessage", { chat_id: tg.backupChatId, text, parse_mode: "HTML" });
+  return { ok: !!r.ok, sent: list.length };
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
   const tg = (await settings("telegram")) || {};
@@ -327,6 +355,13 @@ Deno.serve(async (req) => {
     try { await cleanup(tg); } catch (e) { console.error(e); }
     return new Response("ok");
   }
+  const body = await req.json().catch(() => ({}));
+  // Har kungi eslatma (pg_cron): yopilmagan sotuvlar ro'yxati administratorga
+  if (body.action === "remind") {
+    const key = (await priv("cron")).key;
+    if (!key || body.key !== key) return out({ ok: false }, 403);
+    return out(await remindOpenSales(tg));
+  }
   // Dastur so'rovi — foydalanuvchi tekshiriladi
   const jwt = (req.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "");
   const { data: who } = await sb.auth.getUser(jwt);
@@ -334,7 +369,6 @@ Deno.serve(async (req) => {
   const { data: prof } = await sb.from("profiles").select("role, active, perms").eq("id", who.user.id).maybeSingle();
   if (!prof?.active) return out({ ok: false, error: "Ruxsat yo'q" }, 403);
   if (!tg.token) return out({ ok: false, error: "Telegram bot sozlanmagan (Sozlamalar → Telegram)" }, 400);
-  const body = await req.json().catch(() => ({}));
 
   if (body.action === "setup") {
     if (prof.role !== "admin") return out({ ok: false, error: "Faqat administrator" }, 403);
