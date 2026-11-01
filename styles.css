@@ -1313,3 +1313,15 @@ html.modal-open, html.modal-open body { overflow: hidden; overscroll-behavior: n
 .exp-subs .exp-other { font-weight: 400; color: var(--muted); }
 .cat-row .cat-col-label { display: flex; gap: 6px; align-items: center; margin: 10px 0 4px; font-size: 13px; }
 .cat-row .cat-col-label svg { width: 15px; height: 15px; }
+
+/* O'ng tugma menyusi va o'chirish oynasi (Sozlamalar → Ro'yxatlar) */
+.ctx-menu { position: fixed; z-index: 1000; min-width: 210px; padding: 6px; background: var(--card); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 10px 30px rgba(0, 0, 0, .25); display: flex; flex-direction: column; gap: 2px; }
+.ctx-menu button { justify-content: flex-start; text-align: left; border: none; box-shadow: none; background: transparent; min-height: 44px; padding: 8px 12px; border-radius: 8px; }
+.ctx-menu button:hover, .ctx-menu button:focus-visible { background: var(--accent-soft); }
+.ctx-menu button.danger { color: var(--danger, #b3261e); }
+.chips-edit .chip:focus { outline: 2px solid var(--accent); outline-offset: 2px; }
+.del-cat { display: flex; flex-direction: column; gap: 10px; }
+.del-cat .check { display: flex; gap: 8px; align-items: center; font-weight: 600; }
+.del-cat .del-to { margin-left: 28px; width: calc(100% - 28px); }
+.del-cat .del-note { margin: -4px 0 0 28px; }
+.del-cat .del-list { margin: 4px 0 0; padding-left: 20px; }

@@ -5155,7 +5155,7 @@ function deleteWarehouse(id) {
 }
 
 function editChip(v) {
-  return `<span class="chip on" data-v="${esc(v)}">${esc(v)}<button type="button" class="chip-x" data-act="chipRemove" title="Olib tashlash" aria-label="${esc(v)} — olib tashlash">×</button></span>`;
+  return `<span class="chip on" tabindex="0" data-v="${esc(v)}">${esc(v)}<button type="button" class="chip-x" data-act="chipRemove" title="Olib tashlash" aria-label="${esc(v)} — olib tashlash">×</button></span>`;
 }
 
 function chipEditor(values, placeholder) {
@@ -5230,7 +5230,7 @@ function catRow(name, types) {
 
 function viewCategories() {
   return `<div class="lists-page"><div class="card narrow"><h3>${icon('tag')}Kategoriyalar va turlar</h3>
-      <p class="muted">Har bir kategoriyaning turlari va ranglari mahsulot kartochkasida shu kategoriya tanlanganda chiqadi (masalan, shkafga — LDSP ranglari, divanga — mato ranglari). Qo'shish uchun nomini yozib Enter bosing. Stul kabi turlarning o'z material va ranglari pastdagi «Turga xos xususiyatlar» da.</p>
+      <p class="muted">Har bir kategoriyaning turlari va ranglari mahsulot kartochkasida shu kategoriya tanlanganda chiqadi (masalan, shkafga — LDSP ranglari, divanga — mato ranglari). Qo'shish uchun nomini yozib Enter bosing. O'chirish: × / 🗑 tugmasi, belgilab Delete tugmasi yoki sichqonchaning o'ng tugmasi (telefonda — bosib turing). Stul kabi turlarning o'z material va ranglari pastdagi «Turga xos xususiyatlar» da.</p>
       <div id="catRows">${db.categories.map((c) => catRow(c, db.categoryTypes[c] || [])).join('')}</div>
       <button type="button" data-act="catAdd">${icon('plus')}Kategoriya qo'shish</button>
     </div>
@@ -5361,6 +5361,143 @@ document.addEventListener('click', (e) => {
 const flushLists = () => { if (listsTimer) { clearTimeout(listsTimer); listsTimer = null; if ($('#catRows') && isAdmin() && !$$('#catRows .cat-name, #regionRows .cat-name').some((i) => !i.value.trim())) saveLists(true); } };
 window.addEventListener('hashchange', flushLists, true);
 document.addEventListener('visibilitychange', () => { if (document.hidden) flushLists(); });
+
+// ---------- Ro'yxatlar: kategoriya va turni o'chirish / nomini o'zgartirish ----------
+// O'chirish tugmasi, klaviaturadagi Delete yoki o'ng tugma (telefonda — bosib turish) menyusi orqali.
+// Ichida mahsulot bo'lsa — ularni boshqa joyga ko'chirish, birga o'chirish yoki tegmaslik so'raladi.
+const catRowName = (row) => row.dataset.orig || $('.cat-name', row).value.trim();
+const catRowsNow = () => $$('#catRows .cat-row').map((r) => ({ row: r, name: $('.cat-name', r).value.trim(), types: $$('.cat-types .chip', r).map((c) => c.dataset.v) })).filter((x) => x.name);
+
+function removeCatEntry(kind, row, chip) {
+  if (!row) return;
+  const cat = catRowName(row);
+  const type = chip?.dataset.v;
+  const label = kind === 'type' ? `«${type}» turi` : `«${cat || 'Nomsiz'}» kategoriyasi`;
+  const list = cat ? db.products.filter((p) => p.category === cat && (kind !== 'type' || p.type === type)) : [];
+  const drop = () => { if (kind === 'type') chip.remove(); else row.remove(); };
+  if (!list.length) {
+    if (confirm(`${label} o'chirilsinmi?`)) { drop(); scheduleListsSave(); }
+    return;
+  }
+  // Ko'chirish mumkin bo'lgan joylar (sahifadagi joriy holatdan)
+  const rows = catRowsNow();
+  const opts = [];
+  if (kind === 'type') {
+    opts.push([JSON.stringify([cat, '']), `${cat} — turi ko'rsatilmagan`]);
+    rows.forEach((r) => r.types.forEach((t) => { if (!(r.name === cat && t === type)) opts.push([JSON.stringify([r.name, t]), `${r.name} › ${t}`]); }));
+  } else {
+    rows.filter((r) => r.row !== row).forEach((r) => {
+      opts.push([JSON.stringify([r.name, null]), `${r.name} (turi saqlanadi, bo'lsa)`]);
+      r.types.forEach((t) => opts.push([JSON.stringify([r.name, t]), `${r.name} › ${t}`]));
+    });
+  }
+  const used = list.filter((p) => db.docs.some((d) => d.items.some((it) => it.productId === p.id))).length;
+  openModal({
+    title: `${label}ni o'chirish`,
+    submitText: "O'chirish",
+    body: `<div class="del-cat">
+      <p>${kind === 'type' ? 'Bu turda' : 'Bu kategoriyada'} <b>${list.length} ta mahsulot</b> bor. Ular bilan nima qilamiz?</p>
+      <label class="check"><input type="radio" name="how" value="move" ${opts.length ? 'checked' : 'disabled'}> Mahsulotlarni boshqa joyga ko'chirish</label>
+      ${opts.length ? `<select name="to" class="del-to">${opts.map(([v, t]) => `<option value="${esc(v)}">${esc(t)}</option>`).join('')}</select>` : ''}
+      <label class="check"><input type="radio" name="how" value="delete"> Mahsulotlar bilan birga o'chirish</label>
+      ${used ? `<p class="muted small del-note">${used} tasi sotuv/kirim hujjatlarida ishlatilgan — ular o'chirilmaydi, arxivga o'tadi.</p>` : ''}
+      <label class="check"><input type="radio" name="how" value="keep" ${opts.length ? '' : 'checked'}> Mahsulotlarga tegmaslik (faqat ro'yxatdan olib tashlash)</label>
+      <ul class="muted small del-list">${list.slice(0, 8).map((p) => `<li>${esc(p.name)}</li>`).join('')}${list.length > 8 ? `<li>… yana ${list.length - 8} ta</li>` : ''}</ul></div>`,
+    onOpen: () => { $('#modalBody .del-to')?.addEventListener('change', () => { $('#modalBody [name=how][value=move]').checked = true; }); },
+    onSubmit: async (d) => {
+      const how = d.how || 'keep';
+      if (how === 'delete' && !confirm(`${label} va undagi ${list.length} ta mahsulot o'chirilsinmi? Buni qaytarib bo'lmaydi.`)) return false;
+      if (how !== 'delete' && !confirm(`${label} o'chirilsinmi?`)) return false;
+      const photos = [];
+      if (how === 'move' && d.to) {
+        const [toCat, toType] = JSON.parse(d.to);
+        const toTypes = (rows.find((r) => r.name === toCat) || { types: [] }).types;
+        list.forEach((p) => { p.category = toCat; p.type = toType === null ? (toTypes.includes(p.type) ? p.type : '') : toType; });
+      } else if (how === 'delete') {
+        const usedIds = new Set(db.docs.flatMap((x) => x.items.map((it) => it.productId)));
+        list.forEach((p) => { if (usedIds.has(p.id)) p.archived = true; else photos.push(...(p.photos || []).flatMap((ph) => [ph.path, ph.thumb])); });
+        const gone = new Set(list.filter((p) => !usedIds.has(p.id)).map((p) => p.id));
+        db.products = db.products.filter((p) => !gone.has(p.id));
+      }
+      drop();
+      saveLists(true);
+      if (photos.length) commitQueue.then(() => backend.deletePhotos?.(photos.filter(Boolean)));
+    },
+  });
+}
+
+function renameCatType(row, chip) {
+  const cat = catRowName(row);
+  const old = chip.dataset.v;
+  const v = (prompt(`«${old}» turining yangi nomi:`, old) || '').trim();
+  if (!v || v === old) return;
+  if ($$('.cat-types .chip', row).some((c) => c !== chip && c.dataset.v.toLowerCase() === v.toLowerCase())) return alert(`«${v}» turi allaqachon bor.`);
+  chip.outerHTML = editChip(v);
+  db.products.forEach((p) => { if (p.category === cat && p.type === old) p.type = v; });
+  // Turga xos xususiyatlardagi bog'lanish ham yangilanadi
+  $$('#fsRows .fs-applies .chip').forEach((c) => { if (c.dataset.v === `${cat} › ${old}`) c.outerHTML = editChip(`${cat} › ${v}`); });
+  saveLists(true);
+}
+
+function showCtxMenu(x, y, items) {
+  $('#ctxMenu')?.remove();
+  const m = document.createElement('div');
+  m.id = 'ctxMenu';
+  m.className = 'ctx-menu';
+  m.innerHTML = items.map(([t, , danger], i) => `<button type="button" data-i="${i}" class="${danger ? 'danger' : ''}">${t}</button>`).join('');
+  document.body.appendChild(m);
+  const r = m.getBoundingClientRect();
+  m.style.left = Math.max(8, Math.min(x, innerWidth - r.width - 8)) + 'px';
+  m.style.top = Math.max(8, Math.min(y, innerHeight - r.height - 8)) + 'px';
+  const close = () => { m.remove(); document.removeEventListener('pointerdown', away, true); };
+  const away = (e) => { if (!m.contains(e.target)) close(); };
+  setTimeout(() => document.addEventListener('pointerdown', away, true));
+  m.addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; close(); items[+b.dataset.i][1](); });
+  window.addEventListener('scroll', close, { once: true, capture: true });
+  m.querySelector('button')?.focus();
+}
+
+document.addEventListener('contextmenu', (e) => {
+  const row = e.target.closest?.('#catRows .cat-row');
+  if (!row || e.target.closest('.chip-add') || e.target.closest('.cat-colors')) return;
+  e.preventDefault();
+  const chip = e.target.closest('.cat-types .chip');
+  showCtxMenu(e.clientX, e.clientY, chip ? [
+    ["✏️ Nomini o'zgartirish", () => renameCatType(row, chip)],
+    ["🗑 Turni o'chirish", () => removeCatEntry('type', row, chip), true],
+  ] : [
+    ["✏️ Nomini o'zgartirish", () => { const i = $('.cat-name', row); i.focus(); i.select(); }],
+    ["➕ Tur qo'shish", () => $('.cat-types .chip-add', row)?.focus()],
+    ["🗑 Kategoriyani o'chirish", () => removeCatEntry('cat', row), true],
+  ]);
+});
+
+// iPhone'da «contextmenu» chiqmaydi — tur yoki kategoriya ikonkasini bosib turish menyuni ochadi
+(() => {
+  let timer = null;
+  document.addEventListener('touchstart', (e) => {
+    const el = e.target.closest?.('#catRows .cat-types .chip, #catRows .cat-ic-btn');
+    if (!el || e.target.closest('.chip-x')) return;
+    const t = e.touches[0];
+    timer = setTimeout(() => { timer = null; el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: t.clientX, clientY: t.clientY })); }, 550);
+  }, { passive: true });
+  const stop = () => { clearTimeout(timer); timer = null; };
+  ['touchend', 'touchmove', 'touchcancel'].forEach((ev) => document.addEventListener(ev, stop, { passive: true }));
+})();
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') $('#ctxMenu')?.remove();
+  if (e.key !== 'Delete') return;
+  const row = e.target.closest?.('#catRows .cat-row');
+  if (!row || e.target.closest('.chip-add') || e.target.closest('.cat-colors')) return;
+  const chip = e.target.closest('.cat-types .chip');
+  if (chip) { e.preventDefault(); removeCatEntry('type', row, chip); return; }
+  // Kategoriya nomida: butun nom belgilangan bo'lsa (Ctrl+A) — kategoriya o'chiriladi, aks holda oddiy harf o'chirish
+  const inp = e.target.closest('.cat-name');
+  if (inp && !(inp.value && inp.selectionStart === 0 && inp.selectionEnd === inp.value.length)) return;
+  e.preventDefault();
+  removeCatEntry('cat', row);
+});
 
 function backupAutoCard() {
   const tg = db.telegram;
@@ -5897,7 +6034,11 @@ const ACTIONS = {
     syncChips(box);
     if (box.dataset.ctl) refreshFeatures();
   },
-  chipRemove: (ds, el) => el.closest('.chip').remove(),
+  chipRemove: (ds, el) => {
+    // Kategoriya turi — so'rab, mahsulotlari bilan nima qilishni tanlab o'chiriladi
+    if (el.closest('#catRows .cat-types')) return removeCatEntry('type', el.closest('.cat-row'), el.closest('.chip'));
+    el.closest('.chip').remove();
+  },
   regAdd: () => {
     $('#regionRows').insertAdjacentHTML('beforeend', `<div class="cat-row reg-row" data-orig="">
       <div class="cat-head"><input class="cat-name" placeholder="Viloyat nomi">
@@ -5921,12 +6062,8 @@ const ACTIONS = {
     $('#catRows').insertAdjacentHTML('beforeend', catRow('', []));
     $('#catRows .cat-row:last-child .cat-name').focus();
   },
-  catDel: (ds, el) => {
-    const row = el.closest('.cat-row');
-    const used = db.products.filter((p) => p.category === row.dataset.orig).length;
-    if (used && !confirm(`"${row.dataset.orig}" kategoriyasida ${used} ta mahsulot bor. Kategoriya ro'yxatdan olib tashlansinmi? (mahsulotlar o'chmaydi)`)) return;
-    row.remove();
-  },
+  catDel: (ds, el) => removeCatEntry('cat', el.closest('.cat-row')),
+
   serverSettings: () => { if (!serverLocked()) openServerSettings(); },
   rateRefresh: () => refreshRate(true),
   contract: (ds) => printContract(ds.id),
