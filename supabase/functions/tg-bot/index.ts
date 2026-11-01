@@ -10,6 +10,7 @@
 //    • { action: 'send', docId, driverId } — sotuv ma'lumotlarini shofyorga yuboradi
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
+import Anthropic from "npm:@anthropic-ai/sdk";
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -199,6 +200,88 @@ async function sendPriceDM(tg: any, userId: number, p: any) {
       (company?.phone ? `\n\n📞 ${esc(company.phone)} — savollaringiz bo'lsa, qo'ng'iroq qiling.` : "") });
 }
 
+// ---- Sun'iy intellekt (Claude): ro'yxatda yo'q savollarga javob ----
+// ANTHROPIC_API_KEY — Supabase → Edge Functions → Secrets da saqlanadi; bo'lmasa bot faqat qoidalar bilan ishlaydi.
+const AI_KEY = Deno.env.get("ANTHROPIC_API_KEY");
+const ai = AI_KEY ? new Anthropic({ apiKey: AI_KEY }) : null;
+const QUESTION_RX = /\?|\b(nima|nimaga|qanday|qachon|qayer|qaysi|nechta|necha|kim|bormi|kerak|bo'ladimi|mumkinmi|qilasizmi|berasizmi|bormi|как|что|где|когда|сколько|есть|можно|какой|какая|почему)\b|mi\s*$/i;
+const AI_PER_HOUR = 40;
+
+const AI_SCHEMA = {
+  type: "object",
+  properties: {
+    reply: { type: "boolean", description: "false — xabar do'konga savol emas (salom, rahmat, suhbat) va javob kerak emas" },
+    answer: { type: "string", description: "Guruhga yoziladigan qisqa javob (narxsiz). reply=false bo'lsa bo'sh" },
+    product_id: { type: ["string", "null"], description: "Savol aynan qaysi mahsulot haqida bo'lsa — katalogdagi id, aks holda null" },
+    wants_price: { type: "boolean", description: "Mijoz narxni so'rayapti" },
+  },
+  required: ["reply", "answer", "product_id", "wants_price"],
+  additionalProperties: false,
+};
+
+async function aiRateOk() {
+  const hour = new Date().toISOString().slice(0, 13);
+  const st = await priv("ai:rate");
+  const n = st.hour === hour ? st.n || 0 : 0;
+  if (n >= AI_PER_HOUR) return false;
+  await setPriv("ai:rate", { hour, n: n + 1 });
+  return true;
+}
+
+async function catalogText() {
+  const [{ data: prods }, { data: docs }] = await Promise.all([
+    sb.from("products").select("data").limit(800),
+    sb.from("docs").select("data").in("type", ["receipt", "enter", "salesReturn", "purchaseReturn", "sale", "writeoff"]).limit(20000),
+  ]);
+  const sign: Record<string, number> = { receipt: 1, enter: 1, salesReturn: 1, purchaseReturn: -1, sale: -1, writeoff: -1 };
+  const stock = new Map<string, number>();
+  for (const r of docs || []) for (const it of r.data.items || []) if (it.productId) stock.set(it.productId, (stock.get(it.productId) || 0) + (sign[r.data.type] || 0) * it.qty);
+  return (prods || []).map((r: any) => r.data).filter((p: any) => !p.archived)
+    .map((p: any) => [p.id, p.name, [p.category, p.type].filter(Boolean).join(" › "), p.size && `${p.size} sm`, p.color, p.material,
+      Object.values(p.attrs || {}).join(", "), (stock.get(p.id) || 0) > 0 ? "omborda bor" : "buyurtma asosida"].filter(Boolean).join(" | "))
+    .join("\n");
+}
+
+async function aiAnswer(tg: any, msg: any, text: string, cfg: any, company: any) {
+  if (!ai || !(await aiRateOk())) return null;
+  const facts = [
+    `Do'kon: ${company?.name || "KAO Mebel"} (mebel do'koni)`,
+    company?.phone && `Telefon: ${company.phone}`,
+    (cfg.address || company?.address) && `Manzil: ${cfg.address || company.address}`,
+    cfg.hours && `Ish vaqti: ${cfg.hours}`,
+    cfg.delivery && `Yetkazib berish: ${cfg.delivery}`,
+    ...(cfg.extra || []).map((x: any) => `Savol «${x.q}» — javob: ${x.a}`),
+  ].filter(Boolean).join("\n");
+  const system = [
+    { type: "text" as const, text:
+      "Siz mebel do'koni Telegram guruhidagi yordamchisiz. Mijozlar savollariga qisqa (1-3 gap), xushmuomala javob bering. " +
+      "Savol qaysi tilda bo'lsa, o'sha tilda yozing (odatda o'zbek lotin, ruscha savolga — ruscha). " +
+      "Faqat quyidagi do'kon ma'lumotlari va katalogga tayaning; bilmagan narsangizni o'ylab topmang — bunday holda menejer javob berishini ayting va telefonni bering. " +
+      "Narxni guruhda HECH QACHON yozmang: narx so'ralsa wants_price=true qiling, mahsulotni katalogdan aniqlasangiz product_id ni bering, answer da esa narxni lichkaga yozishimizni ayting. " +
+      "Salom, rahmat, o'zaro suhbat yoki do'konga tegishli bo'lmagan xabarlarga reply=false qiling." },
+    { type: "text" as const, text: `DO'KON MA'LUMOTLARI:\n${facts}\n\nKATALOG (id | nomi | kategoriya | o'lcham | rang | material | xususiyat | holat):\n${await catalogText()}`,
+      cache_control: { type: "ephemeral" as const } },
+  ];
+  const quoted = msg.reply_to_message && !msg.reply_to_message.forum_topic_created ? String(msg.reply_to_message.caption || msg.reply_to_message.text || "").slice(0, 800) : "";
+  try {
+    const res: any = await ai.beta.messages.create({
+      model: "claude-opus-5-5",
+      max_tokens: 2000,
+      betas: ["server-side-fallback-2026-07-01"],
+      fallbacks: "default",
+      output_config: { effort: "low", format: { type: "json_schema", schema: AI_SCHEMA } },
+      system,
+      messages: [{ role: "user", content: (quoted ? `(Mijoz shu e'longa javob yozgan: «${quoted}»)\n\n` : "") + `Mijoz savoli: ${text}` }],
+    } as any);
+    if (res.stop_reason === "refusal") return null;
+    const block = (res.content || []).find((b: any) => b.type === "text");
+    return block ? JSON.parse(block.text) : null;
+  } catch (e) {
+    console.error("AI xatosi:", (e as Error).message);
+    return null;
+  }
+}
+
 async function handleGroup(tg: any, msg: any) {
   const cfg = Object.assign({}, BOT_DEFAULTS, tg.bot || {});
   // Guruh nomidan yoki yashirin admin sifatida yozilgan xabar ham savol hisoblanadi (lichkaga yozib bo'lmaydi)
@@ -219,7 +302,15 @@ async function handleGroup(tg: any, msg: any) {
   const company = await settings("company");
 
   if (RX.price.test(text) || RX.stock.test(text)) {
-    const p = await findProduct(msg, text);
+    let p = await findProduct(msg, text);
+    if (!p && ai) {
+      const r = await aiAnswer(tg, msg, text, cfg, company);
+      if (r?.product_id) {
+        const { data } = await sb.from("products").select("data").eq("id", r.product_id).maybeSingle();
+        p = data?.data || null;
+      }
+      if (!p && r?.reply && r.answer) return reply(esc(r.answer));
+    }
     if (!p) {
       if (RX.price.test(text)) return reply(`${who}, qaysi mahsulot narxi kerak? Mahsulot e'loniga <b>javob (reply)</b> qilib so'rang yoki artikulini yozing — narxini lichkangizga yozamiz.`);
       return;
@@ -242,6 +333,19 @@ async function handleGroup(tg: any, msg: any) {
   const low = text.toLowerCase();
   const hit = (cfg.extra || []).find((x: any) => String(x.q).split(",").map((w: string) => w.trim().toLowerCase()).filter(Boolean).some((w: string) => low.includes(w)));
   if (hit) return reply(esc(hit.a));
+  // Boshqa har qanday savol — sun'iy intellekt javob beradi
+  if (ai && QUESTION_RX.test(text) && text.length >= 4) {
+    const r = await aiAnswer(tg, msg, text, cfg, company);
+    if (!r?.reply || !r.answer) return;
+    if (r.wants_price && r.product_id && cfg.priceDM) {
+      const { data } = await sb.from("products").select("data").eq("id", r.product_id).maybeSingle();
+      if (data?.data) {
+        const dm = anon ? { ok: false } : await sendPriceDM(tg, msg.from.id, data.data);
+        if (dm.ok) return reply(`✅ ${who}, «${esc(data.data.name)}» narxini lichkangizga yozdik.`);
+      }
+    }
+    return reply(esc(r.answer));
+  }
 }
 
 async function onUpdate(tg: any, u: any) {
