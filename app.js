@@ -316,6 +316,7 @@ const PERMS = {
   purchase: ['Xaridlar', "Ta'minotchiga buyurtma, qabul qilish, qaytarish; ta'minotchilar"],
   stockOps: ['Ombor amallari', "Hisobdan chiqarish, ko'chirish, inventarizatsiya"],
   products: ['Mahsulotlar', "Mahsulot qo'shish va kartochkani o'zgartirish"],
+  partyAdd: ["Kontragent qo'shish", "Kontragentlar bo'limida yangi mijoz yoki ta'minotchi qo'shish (sotuvda yangi xaridor baribir yoziladi)"],
   costs: ['Tannarx', "Kelish narxi, tannarx va ombordagi tovar qiymatini ko'rish"],
   money: ['Pul', "Kassa, xarajatlar, barcha kirim-chiqim to'lovlari va qarzlar"],
   expenses: ['Xarajatlar', "Xarajat kiritish (oylik, ijara, yoqilg'i, obed, yo'lkira...) va xarajatlar ro'yxati"],
@@ -324,6 +325,8 @@ const PERMS = {
 const can = (perm) => isAdmin() || permsOf(me).includes(perm);
 // Yangi mahsulot qo'shish: «Mahsulotlar» yoki «Kirim qilish» ruxsati bilan (o'zgartirish — faqat «Mahsulotlar»)
 const canAddProducts = () => can('products') || can('enter');
+// Kontragentlar bo'limida yangi kontragent qo'shish — alohida ruxsat
+const canAddParty = () => can('partyAdd');
 // Hujjat turi → kerakli ruxsat
 const DOC_PERM = { order: 'sale', sale: 'sale', salesReturn: 'sale', purchaseOrder: 'purchase', receipt: 'purchase', purchaseReturn: 'purchase', enter: 'enter', writeoff: 'stockOps', move: 'stockOps', inventory: 'stockOps' };
 
@@ -1142,9 +1145,9 @@ function productForm(p = {}, readonly = false) {
       <div class="muted small">${MAX_PHOTOS} tagacha. Birinchisi — asosiy (Telegram va ro'yxatda). Rasm ustiga bosilsa — to'liq ekranda ochiladi; «★ Asosiy qilish» — asosiy rasm qiladi.</div>`}
     </div>
     <div class="form-grid">
-      ${field('Nomi *', 'name', p.name, 'required', 'full')}
+      ${field('Mahsulot *', 'name', p.name, 'required', 'full')}
+      <label class="full">Artikul<span class="it-sw"><input name="code" value="${esc(p.code || '')}" autocomplete="off"><button type="button" class="it-scan code-scan" title="Shtrix-kodni skanerlab yozish" aria-label="Skaner">${icon('scan')}</button></span></label>
       ${sizeField(p.size, noSizeType(p.type))}
-      <label>Kod / artikul<span class="it-sw"><input name="code" value="${esc(p.code || '')}" autocomplete="off"><button type="button" class="it-scan code-scan" title="Shtrix-kodni skanerlab yozish" aria-label="Skaner">${icon('scan')}</button></span></label>
       ${selectField('Kategoriya', 'category', cats, p.category || '', '', 'id="catSel"')}
       <label>Turi<select name="type" id="typeSel">${typeOptions(p.category, p.type)}</select>
         <input name="typeNew" id="typeNew" placeholder="Yangi tur nomi" hidden></label>
@@ -1384,7 +1387,16 @@ function bindTypeField() {
     const box = $('#featBlock');
     if (box) box.innerHTML = featureBlock(cat.value, type.value, readFeatureDraft());
   };
-  cat.addEventListener('change', () => { type.innerHTML = typeOptions(cat.value, ''); toggle(); refresh(); });
+  cat.addEventListener('change', () => {
+    type.innerHTML = typeOptions(cat.value, ''); toggle(); refresh();
+    // Kategoriya tanlanishi bilan turlar ro'yxati o'zi ochiladi
+    if (cat.value && [...type.options].some((o) => o.value && o.value !== '__new')) {
+      setTimeout(() => {
+        if (isTouch()) openSelectSheet(type);
+        else { type.focus(); try { type.showPicker?.(); } catch (e) { /* brauzer ruxsat bermadi */ } }
+      }, 150);
+    }
+  });
   type.addEventListener('change', () => { toggle(); refresh(); });
 }
 
@@ -2075,7 +2087,7 @@ function docForm(type, d) {
     const who = t.party === 'supplier' ? "ta'minotchi" : 'mijoz';
     const cur = party(d.counterpartyId);
     head += phoneField('Telefon raqami', 'partyPhone', cur && cur.id !== 'retail' ? cur.phone : '', 'id="partyPhone"');
-    head += selectField(t.party === 'supplier' ? "Ta'minotchi *" : 'Mijoz *', 'counterpartyId', [...partyOptions(t.party), ['__new', `+ Yangi ${who}...`]], d.counterpartyId || (t.party === 'customer' ? 'retail' : ''), '', 'id="partySel"');
+    head += selectField(t.party === 'supplier' ? "Ta'minotchi *" : 'Mijoz *', 'counterpartyId', [...partyOptions(t.party), ...(t.party === 'customer' || canAddParty() ? [['__new', `+ Yangi ${who}...`]] : [])], d.counterpartyId || (t.party === 'customer' ? 'retail' : ''), '', 'id="partySel"');
     head += `<label class="new-party" hidden>Yangi ${who} ismi *<input name="newPartyName" id="newPartyName" placeholder="Ism familiya" autocomplete="off"></label>`;
     head += `<div class="full party-hint" id="partyHint"></div>`;
   }
@@ -2203,7 +2215,8 @@ function bindPartyLookup(kind) {
     if (key.length === 9) {
       const exact = found.find((c) => phoneKey(c.phone) === key);
       if (exact) return pick(exact);
-      // Yangi raqam — yangi mijoz
+      // Yangi raqam — yangi mijoz (ta'minotchi qo'shishga ruxsat bo'lmasa — faqat xabar)
+      if (![...sel.options].some((o) => o.value === '__new')) { hint.innerHTML = `<span class="muted">Bu raqam bilan ${kind === 'supplier' ? "ta'minotchi" : 'mijoz'} topilmadi.</span>`; return; }
       sel.value = '__new';
       nameField.hidden = false;
       hint.innerHTML = `<span class="muted">Bu raqam bilan ${kind === 'supplier' ? "ta'minotchi" : 'mijoz'} topilmadi — ismini yozing, saqlanganda yangi ${kind === 'supplier' ? "ta'minotchi" : 'mijoz'} qo'shiladi.</span>`;
@@ -4237,7 +4250,7 @@ const SECTIONS = [
   { id: 'purchases', icon: 'truck', title: 'Xaridlar', views: [['purchaseOrder', '', 'purchase'], ['receipt', '', 'purchase'], ['purchaseReturn', '', 'purchase']] },
   { id: 'sales', icon: 'bag', title: 'Savdo', views: [['order', '', 'sale'], ['sale', '', 'sale'], ['salesReturn', '', 'sale']] },
   { id: 'goods', icon: 'sofa', title: 'Tovarlar', views: [['products', 'Mahsulotlar'], ['kits', 'Komplektlar'], ['stock', 'Qoldiqlar'], ['enter', '', 'enter'], ['writeoff', '', 'stockOps'], ['move', '', 'stockOps'], ['inventory', '', 'stockOps'], ['warehouses', 'Omborlar', 'A'], ['labels', 'Etiketkalar'], ['labelDesign', 'Etiketka dizayni', 'A']] },
-  { id: 'parties', icon: 'users', title: 'Kontragentlar', views: [['parties', 'Kontragentlar', 'sale|purchase|money'], ['debts', 'Qarzlar', 'money']] },
+  { id: 'parties', icon: 'users', title: 'Kontragentlar', views: [['customers', 'Mijozlar', 'sale|money'], ['suppliers', "Ta'minotchilar", 'purchase|products|money'], ['debts', 'Qarzlar', 'money']] },
   { id: 'money', icon: 'wallet', title: 'Pul', views: [['payments', "To'lovlar", 'sale|money'], ['cash', 'Kassa va hisoblar', 'money']] },
   { id: 'expenses', icon: 'arrowOut', title: 'Xarajatlar', views: [['expenses', 'Xarajatlar', 'money|expenses'], ['expenseCats', 'Moddalar', 'A']] },
   { id: 'reports', icon: 'chart', title: 'Hisobotlar', views: [['profit', 'Foyda va zarar', 'reports'], ['top', 'Savdo tahlili', 'reports']] },
@@ -4558,12 +4571,13 @@ function viewStock() {
 
 // --- Kontragentlar ---
 
-function viewParties() {
+// fixed — «Mijozlar» yoki «Ta'minotchilar» sahifasi (har biri alohida ro'yxat)
+function viewParties(fixed = '') {
   const q = filterVal('parties.q').toLowerCase();
   // Faqat bitta turdagi kontragentlarni ko'radigan xodimga — o'shalar
   const kinds = partyKinds().map(([k]) => k);
-  const kind = isAdmin() || kinds.length > 1 ? filterVal('parties.kind') : kinds[0] === 'supplier' ? 'supplier' : 'customer';
-  const ctype = filterVal('parties.ctype');
+  const kind = fixed || (isAdmin() || kinds.length > 1 ? filterVal('parties.kind') : kinds[0] === 'supplier' ? 'supplier' : 'customer');
+  const ctype = kind === 'supplier' ? '' : filterVal('parties.ctype');
   const list = db.counterparties
     .filter((c) => !kind || c.kind === kind || c.kind === 'both')
     .filter((c) => !ctype || c.ctype === ctype)
@@ -4577,9 +4591,9 @@ function viewParties() {
       <td class="actions">${full || money_ ? `<button class="small" data-act="statement" data-id="${c.id}">${icon('receipt')}Hisob-kitob</button>` : ''}${isAdmin() ? `<button class="small danger icon-only" data-act="deleteParty" data-id="${c.id}" title="O'chirish">${icon('trash')}</button>` : ''}</td></tr>`;
   }).join('');
   return toolbar('parties', {
-    extra: (!(isAdmin() || kinds.length > 1) ? '' : `<select data-filter="parties.kind"><option value="">Hammasi</option><option value="customer" ${kind === 'customer' ? 'selected' : ''}>Mijozlar</option><option value="supplier" ${kind === 'supplier' ? 'selected' : ''}>Ta'minotchilar</option></select>`)
-      + `<select data-filter="parties.ctype"><option value="">Barcha mijoz turlari</option>${db.customerTypes.map((x) => `<option ${x === ctype ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select>`,
-    buttons: `<button class="primary" data-act="newParty">${icon('plus')}Kontragent</button>`,
+    extra: (fixed || !(isAdmin() || kinds.length > 1) ? '' : `<select data-filter="parties.kind"><option value="">Hammasi</option><option value="customer" ${kind === 'customer' ? 'selected' : ''}>Mijozlar</option><option value="supplier" ${kind === 'supplier' ? 'selected' : ''}>Ta'minotchilar</option></select>`)
+      + (kind === 'supplier' ? '' : `<select data-filter="parties.ctype"><option value="">Barcha mijoz turlari</option>${db.customerTypes.map((x) => `<option ${x === ctype ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select>`),
+    buttons: canAddParty() ? `<button class="primary" data-act="newParty" data-kind="${fixed}">${icon('plus')}${fixed === 'supplier' ? "Ta'minotchi" : fixed === 'customer' ? 'Mijoz' : 'Kontragent'}</button>` : '',
   }) + `<div class="card"><div class="table-wrap"><table><thead><tr><th>Nomi</th><th>Turi</th><th>Telefon</th><th>Manzil</th><th class="num">Balans</th><th></th></tr></thead>
     <tbody>${rows || emptyRow(6, "Kontragent yo'q")}</tbody></table></div>
     <p class="muted small">Balans: qizil — kontragent bizga qarzdor, sariq — biz qarzdormiz.</p></div>`;
@@ -5669,7 +5683,7 @@ async function loadDemo() {
 // ---------- Chizish va navigatsiya ----------
 
 const VIEWS = {
-  dashboard: viewDashboard, products: viewProducts, stock: viewStock, parties: viewParties, debts: viewDebts,
+  dashboard: viewDashboard, products: viewProducts, stock: viewStock, parties: () => viewParties(), customers: () => viewParties('customer'), suppliers: () => viewParties('supplier'), debts: viewDebts,
   payments: viewPayments, cash: viewCash, profit: viewProfit, top: viewTop, users: viewUsers,
   telegram: viewTelegram, company: viewCompany, warehouses: viewWarehouses, categories: viewCategories, backup: viewBackup,
   server: viewServer, profile: viewProfile, layout: viewLayout, drivers: viewDrivers, kits: viewKits, expenses: viewExpenses, expenseCats: viewExpenseCats, currency: viewCurrency, install: viewInstall, labels: viewLabels, labelDesign: viewLabelDesign,
@@ -5793,7 +5807,7 @@ const ACTIONS = {
   productHistory: (ds) => productHistory(ds.id),
   exportProducts: () => exportProducts(),
   tgProduct: (ds) => telegramPostProducts([ds.id], true),
-  newParty: () => newParty(filterVal('parties.kind') || 'customer'),
+  newParty: (ds) => { if (canAddParty()) newParty(ds.kind || filterVal('parties.kind') || 'customer'); },
   editParty: (ds) => editParty(ds.id),
   deleteParty: (ds) => deleteParty(ds.id),
   statement: (ds) => partyStatement(ds.id),
