@@ -1297,8 +1297,8 @@ function categoryBar(filterKey, list) {
 
 function typeBar(filterKey, cat, list) {
   const cur = filterVal(filterKey);
-  const types = [...new Set([...(db.categoryTypes[cat] || []), ...list.map((p) => p.type).filter(Boolean)])];
-  const n = (t) => list.filter((p) => p.type === t).length;
+  const types = uniqNames([...(db.categoryTypes[cat] || []), ...list.map((p) => p.type)]);
+  const n = (t) => list.filter((p) => nameKey(p.type) === nameKey(t)).length;
   const btn = (v, label, ic, k) => `<button type="button" class="cat-chip sm ${v === cur ? 'on' : ''}" data-act="catFilter" data-f="${filterKey}" data-v="${esc(v)}">${icon(ic)}<span>${esc(label)}</span><small>${k}</small></button>`;
   return `<div class="cat-bar type-bar">${btn('', 'Barcha turlar', categoryIcon(cat), list.length)}${types.map((t) => btn(t, t, typeIcon(cat, t), n(t))).join('')}</div>`;
 }
@@ -1372,9 +1372,22 @@ function readFeatureDraft() {
 }
 
 // Turi — tanlangan kategoriyaning o'z turlari
+// Nomlar katta-kichik harf va bo'shliqlardan qat'i nazar bir xil hisoblanadi («xontaxta» = «Xontaxta»)
+const nameKey = (v) => String(v || '').trim().replace(/\s+/g, ' ').toLowerCase();
+const capFirst = (v) => { const t = String(v || '').trim().replace(/\s+/g, ' '); return t ? t[0].toLocaleUpperCase() + t.slice(1) : t; };
+function uniqNames(list) {
+  const seen = new Set();
+  return list.filter((v) => { const k = nameKey(v); if (!k || seen.has(k)) return false; seen.add(k); return true; });
+}
+// Kategoriya turlari: sozlamalardagi ro'yxat + mahsulotlarda ishlatilganlari (masalan, xodim qo'shgan tur)
+const typesOf = (cat) => uniqNames([...(db.categoryTypes[cat] || []), ...db.products.filter((p) => p.category === cat).map((p) => p.type)]);
+// Kategoriyalar: sozlamalardagi + mahsulotlarda ishlatilganlari (komplektlarsiz)
+const categoriesAll = () => uniqNames([...db.categories, ...db.products.filter((p) => !isKit(p)).map((p) => p.category)]);
+
 function typeOptions(cat, value) {
-  const types = (db.categoryTypes[cat] || []).slice();
-  if (value && !types.includes(value)) types.push(value);
+  const types = typesOf(cat);
+  if (value && !types.some((t) => nameKey(t) === nameKey(value))) types.push(value);
+  value = types.find((t) => nameKey(t) === nameKey(value)) || value;
   return [['', '—'], ...types.map((t) => [t, t]), ...(can('products') ? [['__new', '+ Yangi tur...']] : [])]
     .map(([v, t]) => `<option value="${esc(v)}" ${v === (value || '') ? 'selected' : ''}>${esc(t)}</option>`).join('');
 }
@@ -1571,11 +1584,13 @@ async function hydratePhotos(root = document) {
 }
 
 function readProduct(d, p) {
-  const type = d.type === '__new' ? d.typeNew.trim() : d.type;
+  let type = d.type === '__new' ? capFirst(d.typeNew) : d.type;
+  // Bor tur boshqacha yozilgan bo'lsa (xontaxta / Xontaxta) — ro'yxatdagi yozilishi olinadi
+  type = typesOf(d.category).find((t) => nameKey(t) === nameKey(type)) || type;
   // Yangi tur va materiallar keyingi safar ro'yxatda tursin
   if (type && d.category) {
     const list = (db.categoryTypes[d.category] = db.categoryTypes[d.category] || []);
-    if (!list.includes(type)) list.push(type);
+    if (!list.some((t) => nameKey(t) === nameKey(type))) list.push(type);
   }
   // Yangi ranglar va xususiyat qiymatlari keyingi safar ro'yxatda tursin
   const set = featureSetFor(d.category, type);
@@ -4492,7 +4507,7 @@ function viewProducts() {
   const list = db.products
     .filter((p) => !!p.archived === arch)
     .filter((p) => !cat || p.category === cat)
-    .filter((p) => !ptype || p.type === ptype)
+    .filter((p) => !ptype || nameKey(p.type) === nameKey(ptype))
     .filter((p) => !q || [p.name, p.code, p.type, p.material, p.color, p.origin, p.maker, p.size, ...Object.values(p.attrs || {})].join(' ').toLowerCase().includes(q));
 
   const admin = isAdmin();
@@ -5231,7 +5246,7 @@ function catRow(name, types) {
 function viewCategories() {
   return `<div class="lists-page"><div class="card narrow"><h3>${icon('tag')}Kategoriyalar va turlar</h3>
       <p class="muted">Har bir kategoriyaning turlari va ranglari mahsulot kartochkasida shu kategoriya tanlanganda chiqadi (masalan, shkafga — LDSP ranglari, divanga — mato ranglari). Qo'shish uchun nomini yozib Enter bosing. O'chirish: × / 🗑 tugmasi, belgilab Delete tugmasi yoki sichqonchaning o'ng tugmasi (telefonda — bosib turing). Stul kabi turlarning o'z material va ranglari pastdagi «Turga xos xususiyatlar» da.</p>
-      <div id="catRows">${db.categories.map((c) => catRow(c, db.categoryTypes[c] || [])).join('')}</div>
+      <div id="catRows">${categoriesAll().map((c) => catRow(c, typesOf(c))).join('')}</div>
       <button type="button" data-act="catAdd">${icon('plus')}Kategoriya qo'shish</button>
     </div>
     <div class="card narrow"><h3>${icon('tag')}Umumiy ranglar</h3>
@@ -5284,6 +5299,11 @@ function saveLists(quiet = false) {
   });
   // Nomi o'zgargan kategoriya mahsulotlarda ham yangilanadi
   renames.forEach(([from, to]) => db.products.forEach((p) => { if (p.category === from) p.category = to; }));
+  // Mahsulotlardagi tur boshqacha yozilgan bo'lsa (katta-kichik harf) — ro'yxatdagi yozilishga keltiriladi
+  db.products.forEach((p) => {
+    const t = (types[p.category] || []).find((x) => nameKey(x) === nameKey(p.type));
+    if (t && t !== p.type) p.type = t;
+  });
   db.categories = categories;
   db.categoryTypes = types;
   db.categoryColors = colorsByCat;
