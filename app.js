@@ -106,10 +106,30 @@ const CHAIR_COLORS_BY = {
 
 // Kategoriya/turga xos xususiyatlar: shu turdagi mahsulot kartochkasida o'z ranglari va qo'shimcha
 // maydonlari chiqadi (Sozlamalar → Ro'yxatlar da o'zgartiriladi). "applies" — "Kategoriya" yoki "Kategoriya › Tur"
+// Stullar: LDSP/MDF ranglari o'rniga qoplama materiali (mago, meshkovina, charm) va karkas
+const STUL_SET = {
+  id: 'stul',
+  name: 'Stullar',
+  applies: ['Stol va stul › Stul', 'Oshxona › Oshxona stuli', 'Oshxona › Bar stuli', 'Ofis mebeli › Stul'],
+  colors: ['Kulrang', 'Bej', 'Qora', 'Oq', 'Jigarrang', 'Kapuchino', 'Yashil', "To'q ko'k", 'Pushti'],
+  colorField: 'Qoplama materiali',
+  colorsBy: {
+    Mago: ['Kulrang', "To'q kulrang", 'Bej', 'Kapuchino', 'Yashil', "To'q ko'k", 'Pushti', 'Qora'],
+    Meshkovina: ['Bej', 'Qum rang', 'Kulrang', 'Jigarrang', 'Zaytun'],
+    Charm: ['Qora', 'Jigarrang', 'Oq', 'Bej', 'Kapuchino', 'Konyak'],
+    'Eko-charm': ['Qora', 'Oq', 'Jigarrang', 'Bej', 'Kapuchino', 'Kulrang'],
+    Velyur: ['Kulrang', 'Bej', 'Yashil', "To'q ko'k", 'Pushti'],
+  },
+  fields: [
+    { name: 'Qoplama materiali', options: ['Mago', 'Meshkovina', 'Charm', 'Eko-charm', 'Velyur'] },
+    { name: 'Karkas', options: ['Temir', "Yog'och", 'Plastmas'] },
+  ],
+};
+
 const DEFAULT_FEATURE_SETS = [{
   id: 'chairs',
   name: 'Ofis kreslo va stullar',
-  applies: ['Ofis mebeli › Ofis kreslo', 'Ofis mebeli › Rahbar kreslosi', 'Ofis mebeli › Stul'],
+  applies: ['Ofis mebeli › Ofis kreslo', 'Ofis mebeli › Rahbar kreslosi'],
   colors: ['Qora', 'Kulrang', 'Oq', 'Bej', 'Jigarrang', "To'q ko'k", "Ko'k", 'Qizil', 'Yashil', "To'q sariq"],
   // Avval material tanlanadi, keyin shu materialning ranglari chiqadi
   colorField: 'Qoplama materiali',
@@ -119,7 +139,7 @@ const DEFAULT_FEATURE_SETS = [{
     { name: 'Krestovina turi', options: ['Plastik', 'Neylon', 'Xrom', 'Alyuminiy', "Yog'och", "Metall (bo'yalgan)"] },
     { name: 'Mexanizm', options: ["Piastra (oddiy ko'tarish)", 'Tilt (tebranish)', 'Top-Gun', 'Multiblok', 'Sinxron', 'Anyfix'] },
   ],
-}];
+}, STUL_SET];
 
 const DEFAULT_MATERIALS = ['LDSP', 'MDF', 'DSP', 'Massiv (yog\'och)', 'Faner', 'Metall', 'Shisha', 'Oyna', 'Velyur', 'Ekokoja', 'Charm', 'Mato', 'Rattan', 'Plastik'];
 
