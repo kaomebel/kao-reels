@@ -41,15 +41,16 @@ const PAY_PURPOSES_OUT = ["Ta'minotchiga to'lov", 'Mijozga qaytarish', 'Ijara', 
 const EXPENSE_PURPOSES = PAY_PURPOSES_OUT.slice(2);
 
 // Xarajat moddalari (Xarajatlar → Moddalar bo'limida o'zgartiriladi)
+// subs — modda ichidagi tugmalar (masalan, Kommunal → Elektr, Gaz), subsOn — ular yoqilganmi.
+// Oylik moddasida ichki tugmalar — xodimlar ismlari.
 const DEFAULT_EXPENSE_CATS = [
-  { name: 'Ish haqi (oylik)', emoji: '👷' },
+  { name: 'Ish haqi (oylik)', emoji: '👷', subsOn: true, subs: [] },
   { name: 'Ombor (sklad) ijarasi', emoji: '🏭' },
   { name: "Do'kon ijarasi", emoji: '🏪' },
-  { name: "Kommunal to'lovlar", emoji: '💡' },
+  { name: "Kommunal to'lovlar", emoji: '💡', subsOn: true, subs: ['Elektr', 'Maxsustrans', 'Gaz'] },
   { name: "Avtomashina yoqilg'isi", emoji: '⛽' },
   { name: 'Ovqat (obed)', emoji: '🍽' },
-  { name: "Yo'lkira", emoji: '🚌' },
-  { name: 'Yuk tashish / yetkazish', emoji: '🚚' },
+  { name: "Yo'lkira", emoji: '🚚', subsOn: true, subs: ['Yetkazish', 'Olib kelish'] },
   { name: 'Reklama', emoji: '📣' },
   { name: 'Soliq', emoji: '🧾' },
   { name: "Ta'mirlash", emoji: '🔧' },
@@ -3313,18 +3314,69 @@ const isExpense = (p) => p.dir === 'out' && !p.counterpartyId && (p.expense || E
 const expenseCat = (name) => (db.expenseCats || []).find((c) => c.name === name);
 const expenseEmoji = (name) => expenseCat(name)?.emoji || (isSalaryCat(name) ? '👷' : '📦');
 
+const expenseCatsList = () => (db.expenseCats?.length ? db.expenseCats : DEFAULT_EXPENSE_CATS);
+const salaryCat = () => expenseCatsList().find((c) => isSalaryCat(c.name));
+// Modda ichidagi tugmalar (oylikda — xodimlar: moddadagi ro'yxat + avvalgi «Oylik oladigan xodimlar»)
+function expenseSubs(c) {
+  if (!c) return [];
+  const list = isSalaryCat(c.name) ? [...(c.subs || []), ...(db.staffNames || [])] : (c.subs || []);
+  return [...new Set(list.map((x) => String(x).trim()).filter(Boolean))];
+}
+const salarySubs = () => expenseSubs(salaryCat());
+const hasSubs = (c) => !!c?.subsOn;
+
+// Xarajatlar sahifasida modda bosilganda: ichida tugmalar bo'lsa — avval ular chiqadi
+function openExpenseSubs(name) {
+  const c = expenseCat(name);
+  if (!hasSubs(c)) return newExpense(name);
+  const salary = isSalaryCat(c.name);
+  const subs = expenseSubs(c);
+  openModal({
+    title: `${c.emoji || '📦'} ${c.name}`,
+    body: `<p class="muted small">${salary ? 'Kimga oylik berilyapti?' : 'Nima uchun?'}</p>
+      <div class="exp-quick exp-subs">${subs.map((x) => `<button type="button" class="exp-tile" data-sub="${esc(x)}"><span>${esc(x)}</span></button>`).join('')}
+        <button type="button" class="exp-tile exp-new" data-sub-new="1"><span class="exp-emoji">➕</span><span>${salary ? 'Yangi xodim qo\'shish' : 'Yangi qo\'shish'}</span></button>
+        <button type="button" class="exp-tile exp-other" data-sub=""><span>${salary ? 'Ro\'yxatda yo\'q' : 'Boshqa (tanlamasdan)'}</span></button></div>`,
+    onOpen: () => {
+      $('#modalBody .exp-subs').addEventListener('click', async (e) => {
+        const b = e.target.closest('.exp-tile');
+        if (!b) return;
+        let sub = b.dataset.sub;
+        if (b.dataset.subNew) {
+          sub = (prompt(salary ? 'Yangi xodim ismi:' : 'Yangi tugma nomi:') || '').trim();
+          if (!sub) return;
+          // Administrator qo'shgani ro'yxatda saqlanadi — keyingi safar tugma bo'lib chiqadi
+          if (isAdmin() && !subs.some((x) => x.toLowerCase() === sub.toLowerCase())) {
+            c.subs = [...(c.subs || []), sub];
+            if (!db.expenseCats?.length) db.expenseCats = JSON.parse(JSON.stringify(DEFAULT_EXPENSE_CATS));
+            commit(true);
+          }
+        }
+        newExpense(c.name, sub);
+      });
+    },
+  });
+}
+
 // Oylik oladigan xodimlar: Moddalar sahifasidagi ro'yxat + dastur foydalanuvchilari + avval oylik berilganlar
 function staffNames() {
-  const names = [...(db.staffNames || []), ...db.users.filter((u) => u.active !== false).map((u) => u.name),
+  const names = [...salarySubs(), ...db.users.filter((u) => u.active !== false).map((u) => u.name),
     ...db.payments.filter((p) => p.employee).map((p) => p.employee)];
   return [...new Set(names.map((n) => String(n).trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b));
 }
 
-function newExpense(catName) {
+function newExpense(catName, sub = '') {
   if (!can('money') && !can('expenses')) return alert("Xarajat kiritish uchun ruxsatingiz yo'q.");
-  const cats = db.expenseCats?.length ? db.expenseCats : DEFAULT_EXPENSE_CATS;
+  const cats = expenseCatsList();
   const cat = catName || cats[0].name;
   const staff = staffNames();
+  if (sub && isSalaryCat(cat) && !staff.includes(sub)) staff.push(sub);
+  const subOpts = (name, chosen) => {
+    const c = expenseCat(name);
+    const list = hasSubs(c) && !isSalaryCat(name) ? expenseSubs(c) : [];
+    if (chosen && list.length && !list.includes(chosen)) list.push(chosen);
+    return list.length ? `<option value="">—</option>${list.map((x) => `<option ${x === chosen ? 'selected' : ''}>${esc(x)}</option>`).join('')}` : '';
+  };
   openModal({
     title: 'Yangi xarajat',
     body: `<div class="form-grid">
@@ -3332,9 +3384,10 @@ function newExpense(catName) {
         ${moneyField('Summa *', 'amount', '', 'UZS', 'required')}
         ${field('Sana', 'date', today(), 'type="date" required')}
         ${selectField("To'lov usuli", 'method', Object.entries(PAY_METHODS), 'cash')}
+        <label class="full" id="subLbl" ${subOpts(cat, sub) ? '' : 'hidden'}>Nima uchun<select name="sub">${subOpts(cat, sub)}</select></label>
         <div class="full salary-box" id="salaryBox" ${isSalaryCat(cat) ? '' : 'hidden'}>
           <div class="form-grid">
-            ${staff.length ? `<label>Xodim<select name="employeeSel"><option value="">— ro'yxatdan tanlang —</option>${staff.map((n) => `<option>${esc(n)}</option>`).join('')}<option value="__new">+ Yangi xodim...</option></select></label>` : ''}
+            ${staff.length ? `<label>Xodim<select name="employeeSel"><option value="">— ro'yxatdan tanlang —</option>${staff.map((n) => `<option ${n === sub && isSalaryCat(cat) ? 'selected' : ''}>${esc(n)}</option>`).join('')}<option value="__new">+ Yangi xodim...</option></select></label>` : ''}
             <label id="empNewLbl" ${staff.length ? 'hidden' : ''}>${staff.length ? 'Yangi xodim ismi' : 'Xodim'}<input name="employee" autocomplete="off" placeholder="Ism familiya"></label>
             ${field('Qaysi oy uchun', 'forMonth', today().slice(0, 7), 'type="month"')}
           </div>
@@ -3343,7 +3396,12 @@ function newExpense(catName) {
       </div>`,
     onOpen: () => {
       const sel = $('#modalBody [name=purpose]');
-      sel.addEventListener('change', () => { $('#salaryBox').hidden = !isSalaryCat(sel.value); });
+      sel.addEventListener('change', () => {
+        $('#salaryBox').hidden = !isSalaryCat(sel.value);
+        const o = subOpts(sel.value, '');
+        $('#modalBody [name=sub]').innerHTML = o;
+        $('#subLbl').hidden = !o;
+      });
       $('#modalBody [name=employeeSel]')?.addEventListener('change', (e) => {
         $('#empNewLbl').hidden = e.target.value !== '__new';
         if (e.target.value === '__new') $('#modalBody [name=employee]').focus();
@@ -3360,9 +3418,15 @@ function newExpense(catName) {
         id: uid(), no: await nextNo('payOut'), dir: 'out', expense: true, date: d.date, amount, method: d.method,
         purpose: d.purpose, counterpartyId: null, docId: null, note: d.note.trim(), userId: me?.id,
         employee: salary ? d.employee.trim() : undefined, forMonth: salary ? d.forMonth : undefined,
+        sub: !salary && d.sub ? d.sub : undefined,
       });
-      // Yangi xodim ismi ro'yxatga yoziladi (administrator) — keyingi safar tanlanadi
-      if (salary && isAdmin() && !(db.staffNames || []).includes(d.employee.trim())) db.staffNames = [...(db.staffNames || []), d.employee.trim()];
+      // Yangi xodim ismi oylik moddasining tugmalariga yoziladi (administrator) — keyingi safar tanlanadi
+      const sc = salaryCat();
+      if (salary && sc && isAdmin() && !salarySubs().includes(d.employee.trim())) {
+        if (!db.expenseCats?.length) db.expenseCats = JSON.parse(JSON.stringify(DEFAULT_EXPENSE_CATS));
+        const c = salaryCat();
+        c.subs = [...(c.subs || []), d.employee.trim()];
+      }
       await save();
     },
   });
@@ -3374,23 +3438,23 @@ function viewExpenses() {
   const all = db.payments.filter((p) => isExpense(p) && inPeriod('expenses', p.date));
   const list = all
     .filter((p) => !cat || p.purpose === cat)
-    .filter((p) => !q || [p.no, p.purpose, p.note, p.employee].join(' ').toLowerCase().includes(q))
+    .filter((p) => !q || [p.no, p.purpose, p.sub, p.note, p.employee].join(' ').toLowerCase().includes(q))
     .sort((a, b) => b.date.localeCompare(a.date) || String(b.no).localeCompare(String(a.no)));
   const byCat = {};
   all.forEach((p) => { byCat[p.purpose] = (byCat[p.purpose] || 0) + p.amount; });
   const total = all.reduce((s, p) => s + p.amount, 0);
   const shown = list.reduce((s, p) => s + p.amount, 0);
   const max = Math.max(1, ...Object.values(byCat));
-  const cats = db.expenseCats?.length ? db.expenseCats : DEFAULT_EXPENSE_CATS;
+  const cats = expenseCatsList();
   const admin = isAdmin();
-  const quick = `<div class="exp-quick">${cats.map((c) => `<button type="button" class="exp-tile" data-act="newExpense" data-cat="${esc(c.name)}"><span class="exp-emoji">${c.emoji || '📦'}</span><span>${esc(c.name)}</span></button>`).join('')}</div>`;
+  const quick = `<div class="exp-quick">${cats.map((c) => `<button type="button" class="exp-tile" data-act="expTile" data-cat="${esc(c.name)}"><span class="exp-emoji">${c.emoji || '📦'}</span><span>${esc(c.name)}${hasSubs(c) ? ' ›' : ''}</span></button>`).join('')}</div>`;
   const summary = Object.entries(byCat).sort((a, b) => b[1] - a[1]).map(([name, sum]) => `
     <button type="button" class="exp-row ${cat === name ? 'on' : ''}" data-act="expFilter" data-cat="${esc(name)}">
       <span class="exp-emoji">${expenseEmoji(name)}</span><span class="exp-name">${esc(name)}</span><b>${money(sum)}</b>
       <span class="exp-bar"><i style="width:${Math.round((sum / max) * 100)}%"></i></span></button>`).join('');
   const rows = list.map((p) => `<tr>
       <td>${fmtDate(p.date)}<div class="muted small">${esc(p.no || '')}</div></td>
-      <td>${expenseEmoji(p.purpose)} ${esc(p.purpose)}${p.employee ? `<div class="small"><b>${esc(p.employee)}</b>${p.forMonth ? ` · ${esc(p.forMonth)} oy uchun` : ''}</div>` : ''}</td>
+      <td>${expenseEmoji(p.purpose)} ${esc(p.purpose)}${p.sub ? ` › <b>${esc(p.sub)}</b>` : ''}${p.employee ? `<div class="small"><b>${esc(p.employee)}</b>${p.forMonth ? ` · ${esc(p.forMonth)} oy uchun` : ''}</div>` : ''}</td>
       <td>${esc(p.note || '')}<div class="muted small">${esc(userName(p.userId))}</div></td>
       <td>${esc(PAY_METHODS[p.method] || '')}</td>
       <td class="num"><b>${money(p.amount)}</b></td>
@@ -3407,25 +3471,55 @@ function viewExpenses() {
 
 function viewExpenseCats() {
   const cats = db.expenseCats || [];
-  return `<div class="card narrow"><h3>Xarajat moddalari</h3>
-    <p class="muted small">Xarajatlar sahifasidagi tugmalar shu ro'yxatdan olinadi. Nomida «oylik» yoki «ish haqi» bo'lsa — xodim va oy so'raladi.</p>
-    <table class="exp-cats"><tbody>${cats.map((c, i) => `<tr>
-      <td><input class="ec-emoji" data-i="${i}" value="${esc(c.emoji || '')}" maxlength="4" aria-label="Belgi"></td>
-      <td><input class="ec-name" data-i="${i}" value="${esc(c.name)}" aria-label="Nomi"></td>
-      <td class="actions"><button class="small danger icon-only" data-act="ecDel" data-i="${i}" title="O'chirish">${icon('trash')}</button></td></tr>`).join('')}</tbody></table>
-    <div class="toolbar" style="margin-top:10px"><button data-act="ecAdd">${icon('plus')}Modda qo'shish</button><button class="primary" data-act="ecSave">Saqlash</button></div>
-    <p class="muted small">Moddani o'chirish yoki nomini o'zgartirish avval kiritilgan xarajatlarga ta'sir qilmaydi.</p></div>
-    <div class="card narrow"><h3>👷 Oylik oladigan xodimlar</h3>
-      <p class="muted small">Oylik berishda ism shu ro'yxatdan tanlanadi (dastur foydalanuvchilari ham ro'yxatda bo'ladi).</p>
-      <div class="chips staff-chips">${(db.staffNames || []).map((n, i) => `<span class="chip">${esc(n)} <button type="button" class="chip-x" data-act="staffDel" data-i="${i}" title="O'chirish">×</button></span>`).join('') || '<span class="muted small">Hali ism qo\'shilmagan</span>'}</div>
-      <div class="toolbar" style="margin-top:8px"><input id="staffNew" placeholder="Ism familiya" autocomplete="off"><button class="primary" data-act="staffAdd">${icon('plus')}Qo'shish</button></div></div>`;
+  return `<div class="card narrow ec-page"><h3>Xarajat moddalari</h3>
+    <p class="muted small">Xarajatlar sahifasidagi tugmalar shu ro'yxatdan olinadi. «Ichida tugmalar» yoqilsa — modda bosilganda avval uning ichidagi tugmalar chiqadi (masalan, Kommunal → Elektr, Gaz). Oylik moddasida ichki tugmalar — xodimlar ismlari. Har bir o'zgarish o'zi saqlanadi.</p>
+    <div class="exp-cats">${cats.map((c, i) => `<div class="ec-row" data-i="${i}">
+      <div class="ec-head"><input class="ec-emoji" value="${esc(c.emoji || '')}" maxlength="4" aria-label="Belgi">
+        <input class="ec-name" value="${esc(c.name)}" aria-label="Nomi">
+        <button class="small danger icon-only" data-act="ecDel" data-i="${i}" title="O'chirish">${icon('trash')}</button></div>
+      <label class="check ec-on"><input type="checkbox" class="ec-subs-on" ${c.subsOn ? 'checked' : ''}> Ichida tugmalar${isSalaryCat(c.name) ? ' (xodimlar)' : ''}</label>
+      <div class="ec-subs" ${c.subsOn ? '' : 'hidden'}>${chipEditor(expenseSubs(c), isSalaryCat(c.name) ? "+ Xodim qo'shish (Enter)" : "+ Tugma qo'shish (Enter)")}</div>
+    </div>`).join('')}</div>
+    <div class="toolbar" style="margin-top:10px"><button data-act="ecAdd">${icon('plus')}Modda qo'shish</button><span id="ecSaved" class="lists-saved"></span><button class="primary" data-act="ecSave">Saqlash</button></div>
+    <p class="muted small">Moddani yoki tugmani o'chirish, nomini o'zgartirish avval kiritilgan xarajatlarga ta'sir qilmaydi.</p></div>`;
 }
 
 function readExpenseCats() {
-  const cats = $$('.exp-cats tr').map((tr) => ({ emoji: $('.ec-emoji', tr).value.trim(), name: $('.ec-name', tr).value.trim() })).filter((c) => c.name);
+  const cats = $$('.exp-cats .ec-row').map((row) => {
+    const name = $('.ec-name', row).value.trim();
+    const subsOn = $('.ec-subs-on', row).checked;
+    const subs = $$('.ec-subs .chip', row).map((c) => c.dataset.v);
+    return { emoji: $('.ec-emoji', row).value.trim(), name, ...(subsOn || subs.length ? { subsOn, subs } : {}) };
+  }).filter((c) => c.name);
   const names = new Set();
-  return cats.filter((c) => !names.has(c.name) && names.add(c.name));
+  const out = cats.filter((c) => !names.has(c.name) && names.add(c.name));
+  // Avvalgi «Oylik oladigan xodimlar» ro'yxati endi oylik moddasining ichida
+  if (out.some((c) => isSalaryCat(c.name))) db.staffNames = [];
+  return out;
 }
+
+// Moddalar sahifasida har bir o'zgarishdan keyin o'zi saqlanadi
+let ecTimer = null;
+function scheduleEcSave() {
+  if (!$('.ec-page') || !isAdmin()) return;
+  clearTimeout(ecTimer);
+  ecTimer = setTimeout(() => {
+    ecTimer = null;
+    if ($$('.ec-page .ec-name').some((i) => !i.value.trim())) return;
+    db.expenseCats = readExpenseCats();
+    commit(true);
+    const el = $('#ecSaved');
+    if (el) { el.textContent = '✓ Saqlandi'; el.classList.add('show'); setTimeout(() => el.classList.remove('show'), 1800); }
+  }, 700);
+}
+document.addEventListener('change', (e) => {
+  if (!e.target.closest?.('.ec-page')) return;
+  if (e.target.classList.contains('ec-subs-on')) $('.ec-subs', e.target.closest('.ec-row')).hidden = !e.target.checked;
+  scheduleEcSave();
+});
+document.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target.closest?.('.ec-page .chip-add')) setTimeout(scheduleEcSave); });
+document.addEventListener('click', (e) => { if (e.target.closest?.('.ec-page [data-act=chipRemove]')) setTimeout(scheduleEcSave); });
+window.addEventListener('hashchange', () => { if (ecTimer) { clearTimeout(ecTimer); ecTimer = null; if ($('.ec-page') && !$$('.ec-page .ec-name').some((i) => !i.value.trim())) { db.expenseCats = readExpenseCats(); commit(true); } } }, true);
 
 // ---------- Telegram ----------
 
@@ -5632,6 +5726,7 @@ const ACTIONS = {
   newProduct: () => newProduct(),
   newKit: () => editKit(null),
   newExpense: (ds) => newExpense(ds.cat),
+  expTile: (ds) => openExpenseSubs(ds.cat),
   closeSale: (ds) => closeSale(ds.id),
   acceptHandover: (ds) => acceptHandover(ds.id),
   drvEdit: (ds) => editDriver(ds.id),
