@@ -173,7 +173,7 @@ let syncState = { offline: false, message: '' };
 let commitQueue = Promise.resolve();
 let retryTimer = null;
 
-function commit() {
+function commit(quiet = false) {
   commitQueue = commitQueue.then(async () => {
     try {
       await backend.commit(db);
@@ -192,7 +192,8 @@ function commit() {
         retryTimer = setTimeout(commit, 15000);
       }
     }
-    render();
+    // Sozlamalardagi ro'yxatlar o'zi saqlanganda sahifa qayta chizilmaydi (yozilayotgan matn yo'qolmasin)
+    if (!quiet) render();
   });
   return commitQueue;
 }
@@ -4350,6 +4351,8 @@ function viewProducts() {
 
   const admin = isAdmin();
   const showCost = can('costs');
+  // Xodimlarga (mahsulotlarni boshqarish huquqi bo'lmasa) ro'yxatda sotish narxi ko'rsatilmaydi
+  const showPrice = admin || can('products');
   const rows = list.map((p) => {
     const st = qtyIn(ctx.stock, p.id);
     const rs = qtyIn(ctx.reserve, p.id);
@@ -4359,7 +4362,7 @@ function viewProducts() {
         ${p.size || p.color || productAttrs(p).length ? `<div class="prod-meta">${p.size ? `<span class="dt">${esc(p.size)} sm</span>` : ''}${p.color ? `<span>${esc(p.color)}</span>` : ''}${productAttrs(p).map(([k, v]) => `<span title="${esc(k)}">${esc(v)}</span>`).join('')}</div>` : ''}
         ${p.origin || p.maker ? `<div class="muted small prod-origin">${icon('warehouse')}${esc([p.maker, p.origin].filter(Boolean).join(', '))}</div>` : ''}</td>
       ${showCost ? `<td class="num">${money(ctx.cost[p.id])}</td>` : ''}
-      <td class="num">${priceLabel(p)}${p.priceCurrency === 'USD' ? `<div class="muted small">${fmtUsd(p.salePrice)}</div>` : ''}${p.minPrice ? `<div class="muted small">eng kami: ${priceLabel(p, 'minPrice')}</div>` : ''}</td>
+      ${showPrice ? `<td class="num">${priceLabel(p)}${p.priceCurrency === 'USD' ? `<div class="muted small">${fmtUsd(p.salePrice)}</div>` : ''}${p.minPrice ? `<div class="muted small">eng kami: ${priceLabel(p, 'minPrice')}</div>` : ''}</td>` : ''}
       <td class="num ${st - rs <= (p.minQty || 0) ? 'debt' : ''}">${st}${rs ? `<div class="muted small">rezerv ${rs}</div>` : ''}</td>
       <td class="actions"><button class="small icon-only" data-act="labelOne" data-id="${p.id}" title="Etiketka chop etish">${icon('tag')}</button>${admin ? `
         <button class="small icon-only" data-act="tgProduct" data-id="${p.id}" title="Telegram guruhga yuborish">${icon('send')}</button>
@@ -4374,7 +4377,7 @@ function viewProducts() {
   }) + categoryBar('products.cat', db.products.filter((p) => !!p.archived === arch))
     + (cat ? typeBar('products.type', cat, db.products.filter((p) => !!p.archived === arch && p.category === cat)) : '')
     + `<div class="card"><div class="table-wrap"><table><thead><tr><th></th><th>Mahsulot</th>
-    ${showCost ? '<th class="num">Tannarx</th>' : ''}<th class="num">Sotish narxi</th><th class="num">Qoldiq</th><th></th></tr></thead>
+    ${showCost ? '<th class="num">Tannarx</th>' : ''}${showPrice ? '<th class="num">Sotish narxi</th>' : ''}<th class="num">Qoldiq</th><th></th></tr></thead>
     <tbody>${rows || emptyRow(6, "Mahsulot yo'q")}</tbody></table></div></div>`;
 }
 
@@ -5077,7 +5080,7 @@ function catRow(name, types) {
 }
 
 function viewCategories() {
-  return `<div class="card narrow"><h3>${icon('tag')}Kategoriyalar va turlar</h3>
+  return `<div class="lists-page"><div class="card narrow"><h3>${icon('tag')}Kategoriyalar va turlar</h3>
       <p class="muted">Har bir kategoriyaning turlari mahsulot kartochkasida kategoriya tanlanganda chiqadi. Tur qo'shish uchun nomini yozib Enter bosing.</p>
       <div id="catRows">${db.categories.map((c) => catRow(c, db.categoryTypes[c] || [])).join('')}</div>
       <button type="button" data-act="catAdd">${icon('plus')}Kategoriya qo'shish</button>
@@ -5103,8 +5106,108 @@ function viewCategories() {
       <p class="muted">Savdoda mijoz turi shu ro'yxatdan tanlanadi (Mebelchi, Domchi, Optomchi...).</p>
       <div id="ctypeEditor">${chipEditor(db.customerTypes, "+ Mijoz turi qo'shish (Enter)")}</div>
     </div>
-    <div class="toolbar"><button class="primary" data-act="catSave">${icon('check')}Saqlash</button></div>`;
+    <div class="toolbar lists-bar"><span id="listsSaved" class="lists-saved"></span><button class="primary" data-act="catSave">${icon('check')}Saqlash</button></div></div>`;
 }
+
+// Sozlamalar → Ro'yxatlar: kategoriyalar, turlar, ranglar, xususiyatlar, manzillar, mijoz turlari.
+// «Saqlash» tugmasi bosilmasa ham har bir o'zgarishdan keyin o'zi saqlanadi (quiet = sahifa qayta chizilmaydi).
+function saveLists(quiet = false) {
+  if (!$('#catRows')) return;
+  // Yozib qo'yilgan, lekin Enter bosilmagan qiymatlar ham saqlanadi
+  if (!quiet) $$('.lists-page .chip-add').forEach((inp) => {
+    const v = inp.value.trim();
+    const box = inp.closest('.chips');
+    if (v && !$$('[data-v]', box).some((c) => c.dataset.v.toLowerCase() === v.toLowerCase())) inp.insertAdjacentHTML('beforebegin', editChip(v));
+    inp.value = '';
+  });
+  const categories = [];
+  const types = {};
+  const renames = [];
+  $$('#catRows .cat-row').forEach((row) => {
+    const name = $('.cat-name', row).value.trim();
+    if (!name || categories.includes(name)) return;
+    categories.push(name);
+    types[name] = $$('.chip', row).map((c) => c.dataset.v);
+    if (row.dataset.orig && row.dataset.orig !== name) renames.push([row.dataset.orig, name]);
+  });
+  // Nomi o'zgargan kategoriya mahsulotlarda ham yangilanadi
+  renames.forEach(([from, to]) => db.products.forEach((p) => { if (p.category === from) p.category = to; }));
+  db.categories = categories;
+  db.categoryTypes = types;
+  // Qo'lda tanlangan ikonkalar (tanlanmagani nomidan o'zi aniqlanadi)
+  db.categoryIcons = {};
+  $$('#catRows .cat-row').forEach((row) => {
+    const name = $('.cat-name', row).value.trim();
+    if (name && row.dataset.icon) db.categoryIcons[name] = row.dataset.icon;
+  });
+  // Turga xos xususiyatlar (kategoriya nomi o'zgargan bo'lsa — bog'lanish ham yangilanadi)
+  const renamePath = (a) => renames.reduce((x, [from, to]) => (x === from ? to : x.startsWith(from + ' › ') ? to + x.slice(from.length) : x), a);
+  db.featureSets = $$('#fsRows .fs-row').map((row) => ({
+    id: row.dataset.id || uid(),
+    name: $('.fs-name', row).value.trim() || 'Xususiyatlar',
+    applies: $$('.fs-applies .chip', row).map((c) => renamePath(c.dataset.v)),
+    colors: $$('.fs-colors .chip', row).map((c) => c.dataset.v),
+    fields: $$('.fs-field', row).map((f) => ({ name: $('.fs-fname', f).value.trim(), options: $$('.chip', f).map((c) => c.dataset.v) })),
+  })).map((set, i) => {
+    // Ranglar bog'langan maydon (tartib raqami bo'yicha — nomi o'zgargan bo'lsa ham)
+    const row = $$('#fsRows .fs-row')[i];
+    const ctl = set.fields[Number($('.fs-ctl-sel', row).value)];
+    const old = (db.featureSets || []).find((x) => x.id === set.id) || {};
+    const colorsBy = Object.assign({}, old.colorsBy);
+    $$('.fs-cb', row).forEach((cb) => { colorsBy[cb.dataset.opt] = $$('.chip', cb).map((c) => c.dataset.v); });
+    return Object.assign(set, {
+      fields: set.fields.filter((f) => f.name),
+      colorField: $('.fs-ctl-sel', row).value !== '' && ctl?.name ? ctl.name : '',
+      colorsBy,
+    });
+  });
+  db.colors = $$('#colorEditor .chip').map((c) => c.dataset.v);
+  db.customerTypes = $$('#ctypeEditor .chip').map((c) => c.dataset.v);
+  // Viloyatlar: mavjud shahar/tumanlarning mahallalari saqlanib qoladi
+  const oldRegions = db.regions;
+  db.regions = $$('#regionRows .reg-row').map((row) => {
+    const name = $('.cat-name', row).value.trim();
+    const old = oldRegions.find((r) => r.name === row.dataset.orig) || { places: [] };
+    return { name, places: $$('.chip', row).map((c) => old.places.find((x) => x.name === c.dataset.v) || { name: c.dataset.v, spots: [] }) };
+  }).filter((r) => r.name);
+  // Keyingi saqlashlar uchun: nomi o'zgargan kategoriya/viloyat va yangi to'plamlar endi shu holatda
+  $$('#catRows .cat-row, #regionRows .reg-row').forEach((row) => { const n = $('.cat-name', row).value.trim(); if (n) row.dataset.orig = n; });
+  $$('#fsRows .fs-row').forEach((row, i) => { if (db.featureSets[i]) row.dataset.id = db.featureSets[i].id; });
+  if (quiet) { commit(true); listsSavedHint(); return; }
+  save();
+  alert('Saqlandi.');
+}
+
+function listsSavedHint() {
+  const el = $('#listsSaved');
+  if (!el) return;
+  el.textContent = '✓ Saqlandi';
+  el.classList.add('show');
+  clearTimeout(listsSavedHint.t);
+  listsSavedHint.t = setTimeout(() => el.classList.remove('show'), 1800);
+}
+
+// Ro'yxatlar sahifasidagi har bir o'zgarishdan keyin (bir oz kutib) o'zi saqlaydi
+let listsTimer = null;
+function scheduleListsSave() {
+  if (!$('#catRows') || !isAdmin()) return;
+  clearTimeout(listsTimer);
+  listsTimer = setTimeout(() => {
+    // Endi qo'shilgan, hali nomi yozilmagan qator bo'lsa — nom yozilguncha kutamiz (u yo'qolib qolmasin)
+    if ($$('#catRows .cat-name, #regionRows .cat-name').some((i) => !i.value.trim())) return;
+    saveLists(true);
+  }, 700);
+}
+document.addEventListener('change', (e) => { if (e.target.closest?.('.lists-page')) scheduleListsSave(); });
+document.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target.closest?.('.lists-page .chip-add')) setTimeout(scheduleListsSave); });
+document.addEventListener('click', (e) => {
+  const act = e.target.closest?.('.lists-page [data-act]')?.dataset.act;
+  if (act && ['chipRemove', 'catDel', 'regDel', 'fsDel', 'fsFieldDel', 'catIconSet'].includes(act)) setTimeout(scheduleListsSave);
+});
+// Sahifadan chiqib ketilsa yoki dastur yopilsa — kutib turgan saqlash darhol bajariladi
+const flushLists = () => { if (listsTimer) { clearTimeout(listsTimer); listsTimer = null; if ($('#catRows') && isAdmin() && !$$('#catRows .cat-name, #regionRows .cat-name').some((i) => !i.value.trim())) saveLists(true); } };
+window.addEventListener('hashchange', flushLists, true);
+document.addEventListener('visibilitychange', () => { if (document.hidden) flushLists(); });
 
 function backupAutoCard() {
   const tg = db.telegram;
@@ -5587,60 +5690,7 @@ const ACTIONS = {
   },
   editWh: (ds) => editWarehouse(ds.id),
   deleteWh: (ds) => deleteWarehouse(ds.id),
-  catSave: () => {
-    const categories = [];
-    const types = {};
-    const renames = [];
-    $$('#catRows .cat-row').forEach((row) => {
-      const name = $('.cat-name', row).value.trim();
-      if (!name || categories.includes(name)) return;
-      categories.push(name);
-      types[name] = $$('.chip', row).map((c) => c.dataset.v);
-      if (row.dataset.orig && row.dataset.orig !== name) renames.push([row.dataset.orig, name]);
-    });
-    // Nomi o'zgargan kategoriya mahsulotlarda ham yangilanadi
-    renames.forEach(([from, to]) => db.products.forEach((p) => { if (p.category === from) p.category = to; }));
-    db.categories = categories;
-    db.categoryTypes = types;
-    // Qo'lda tanlangan ikonkalar (tanlanmagani nomidan o'zi aniqlanadi)
-    db.categoryIcons = {};
-    $$('#catRows .cat-row').forEach((row) => {
-      const name = $('.cat-name', row).value.trim();
-      if (name && row.dataset.icon) db.categoryIcons[name] = row.dataset.icon;
-    });
-    // Turga xos xususiyatlar (kategoriya nomi o'zgargan bo'lsa — bog'lanish ham yangilanadi)
-    const renamePath = (a) => renames.reduce((x, [from, to]) => (x === from ? to : x.startsWith(from + ' › ') ? to + x.slice(from.length) : x), a);
-    db.featureSets = $$('#fsRows .fs-row').map((row) => ({
-      id: row.dataset.id || uid(),
-      name: $('.fs-name', row).value.trim() || 'Xususiyatlar',
-      applies: $$('.fs-applies .chip', row).map((c) => renamePath(c.dataset.v)),
-      colors: $$('.fs-colors .chip', row).map((c) => c.dataset.v),
-      fields: $$('.fs-field', row).map((f) => ({ name: $('.fs-fname', f).value.trim(), options: $$('.chip', f).map((c) => c.dataset.v) })),
-    })).map((set, i) => {
-      // Ranglar bog'langan maydon (tartib raqami bo'yicha — nomi o'zgargan bo'lsa ham)
-      const row = $$('#fsRows .fs-row')[i];
-      const ctl = set.fields[Number($('.fs-ctl-sel', row).value)];
-      const old = (db.featureSets || []).find((x) => x.id === set.id) || {};
-      const colorsBy = Object.assign({}, old.colorsBy);
-      $$('.fs-cb', row).forEach((cb) => { colorsBy[cb.dataset.opt] = $$('.chip', cb).map((c) => c.dataset.v); });
-      return Object.assign(set, {
-        fields: set.fields.filter((f) => f.name),
-        colorField: $('.fs-ctl-sel', row).value !== '' && ctl?.name ? ctl.name : '',
-        colorsBy,
-      });
-    });
-    db.colors = $$('#colorEditor .chip').map((c) => c.dataset.v);
-    db.customerTypes = $$('#ctypeEditor .chip').map((c) => c.dataset.v);
-    // Viloyatlar: mavjud shahar/tumanlarning mahallalari saqlanib qoladi
-    const oldRegions = db.regions;
-    db.regions = $$('#regionRows .reg-row').map((row) => {
-      const name = $('.cat-name', row).value.trim();
-      const old = oldRegions.find((r) => r.name === row.dataset.orig) || { places: [] };
-      return { name, places: $$('.chip', row).map((c) => old.places.find((x) => x.name === c.dataset.v) || { name: c.dataset.v, spots: [] }) };
-    }).filter((r) => r.name);
-    save();
-    alert('Saqlandi.');
-  },
+  catSave: () => saveLists(),
   backup: () => backupData(),
   demo: () => {
     // Haqiqiy ma'lumotlar orasiga namuna aralashib ketmasin

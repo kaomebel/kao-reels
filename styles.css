@@ -1297,3 +1297,8 @@ html.modal-open, html.modal-open body { overflow: hidden; overscroll-behavior: n
 .ss-opt:active { background: var(--accent-soft); }
 .ss-group { padding: 12px 14px 4px; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
 .ss-empty { padding: 20px; text-align: center; }
+
+/* Sozlamalar → Ro'yxatlar: saqlash paneli doim ko'rinib turadi, o'zi saqlanganda belgi chiqadi */
+.lists-bar { position: sticky; bottom: 0; z-index: 5; justify-content: flex-end; align-items: center; gap: 12px; padding: 10px 0 max(10px, env(safe-area-inset-bottom)); background: var(--bg); }
+.lists-saved { color: var(--ok, #2e7d32); font-size: 14px; opacity: 0; transition: opacity .3s; }
+.lists-saved.show { opacity: 1; }
