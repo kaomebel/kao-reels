@@ -2043,7 +2043,7 @@ function itemRowHtml(t, it = {}, cur = 'UZS') {
   const kit = it.kitId ? ` data-kit-id="${esc(it.kitId)}" data-kit-name="${esc(it.kitName || '')}" data-kit-qty="${it.kitQty || ''}"` : '';
   return `<tr${kit}>
     <td class="it-pick"><input type="hidden" class="it-product" value="${esc(p ? p.id : '')}">
-      <div class="it-sw"><input class="it-search" autocomplete="off" placeholder="Artikul yoki nomi — yoki tanlang" value="${esc(productLabel(p))}"><button type="button" class="it-scan" title="Shtrix-kod / QR skaner" aria-label="Skaner">${icon('scan')}</button></div>
+      <div class="it-sw">${rowThumbHtml(p)}<input class="it-search" autocomplete="off" placeholder="Artikul yoki nomi — yoki tanlang" value="${esc(productLabel(p))}"><button type="button" class="it-scan" title="Shtrix-kod / QR skaner" aria-label="Skaner">${icon('scan')}</button></div>
       <div class="it-path muted small">${p ? esc(productPath(p)) : ''}${it.kitName ? ` · <b>Komplekt: ${esc(it.kitName)}</b>` : ''}</div></td>
     <td class="it-avail muted num"></td>
     <td>${qtyStepper('it-qty', it.qty || 1)}</td>
@@ -2516,8 +2516,9 @@ function productRow(p) {
     const q = qtyIn(ctx.stock || {}, p.id, docFormCtx.warehouseId?.());
     stockTag = q > 0 ? `<span class="pick-stock">${q} ta</span>` : `<span class="pick-stock none">yo'q · + kirim</span>`;
   }
+  const ph = p.photos?.[0];
   return `<button type="button" class="pick-row" data-pick="product" data-value="${p.id}">
-    <span class="pick-ic">${icon(productIcon(p))}</span><span><b>${esc(p.name)}</b>${p.code ? ` <span class="pick-code">${esc(p.code)}</span>` : ''}<span class="pick-sub">${esc(productPath(p))}${p.size ? ' · ' + esc(p.size) : ''}</span></span>
+    ${ph ? `<span class="pick-ic pick-ph"><img data-photo="${esc(ph.thumb || ph.path)}" alt="" loading="lazy"></span>` : `<span class="pick-ic">${icon(productIcon(p))}</span>`}<span><b>${esc(p.name)}</b>${p.code ? ` <span class="pick-code">${esc(p.code)}</span>` : ''}<span class="pick-sub">${esc(productPath(p))}${p.size ? ' · ' + esc(p.size) : ''}</span></span>
     <span class="pick-price">${priceLabel(p)}${stockTag}</span></button>`;
 }
 
@@ -2557,10 +2558,24 @@ function renderPicker() {
     }
   }
   panel.innerHTML = html;
+  hydratePhotos(panel);
   // Ro'yxat maydonning o'zi ostida ochiladi (ekran tepasida emas)
   const anchor = picker.input.closest('.it-sw') || picker.input;
   if (panel.previousElementSibling !== anchor) anchor.after(panel);
   panel.hidden = false;
+}
+
+// Tanlangan mahsulot rasmi — qatorda qidiruv maydoni chetida (bosilsa katta ochiladi)
+function rowThumbHtml(p) {
+  const ph = p?.photos?.[0];
+  return ph ? `<button type="button" class="it-thumb" data-act="photoView" data-id="${p.id}" title="Rasmni kattalashtirish"><img data-photo="${esc(ph.thumb || ph.path)}" alt=""></button>` : '';
+}
+function setRowThumb(td, p) {
+  const sw = td.querySelector('.it-sw');
+  if (!sw) return;
+  sw.querySelector('.it-thumb')?.remove();
+  const html = rowThumbHtml(p);
+  if (html) { sw.insertAdjacentHTML('afterbegin', html); hydratePhotos(sw); }
 }
 
 function choosePickedProduct(p) {
@@ -2570,6 +2585,7 @@ function choosePickedProduct(p) {
   hidden.value = p.id;
   picker.input.value = productLabel(p);
   td.querySelector('.it-path').textContent = productPath(p);
+  setRowThumb(td, p);
   closePicker();
   hidden.dispatchEvent(new Event('change', { bubbles: true }));
   const tr = td.closest('tr');
@@ -2762,6 +2778,7 @@ function bindDocForm(type, editingId) {
       $('.it-product', e.target.closest('tr')).value = '';
       $('.it-search', e.target.closest('tr')).value = '';
       $('.it-path', e.target.closest('tr')).textContent = '';
+      $('.it-thumb', e.target.closest('tr'))?.remove();
     }
     recalc();
   });
