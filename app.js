@@ -1155,6 +1155,8 @@ function productForm(p = {}, readonly = false) {
       <label>Ishlab chiqaruvchi / ta'minotchi<select name="makerId" id="makerSel">${makerOptions(p)}</select>
         <input name="makerNew" id="makerNew" placeholder="Fabrika yoki ta'minotchi nomi" hidden></label>
       <div class="field full feat-wrap" id="featBlock">${featureBlock(p.category, p.type, p)}</div>
+      ${p.id ? '' : `<div class="field full"><span class="field-label">Boshlang'ich qoldiq — har bir omborda nechta bor</span>
+        <div class="wh-qty">${db.warehouses.map((w) => `<label>${esc(w.name)}<input type="number" min="0" step="1" name="initQty_${esc(w.id)}" value="0" inputmode="numeric"></label>`).join('')}</div></div>`}
       ${isAdmin() ? field('Minimal qoldiq', 'minQty', p.minQty ?? 1, 'type="number" inputmode="numeric" min="0"') : ''}
       <div class="field full price-block">
         <span class="field-label">Narxlar valyutasi</span>
@@ -1169,8 +1171,6 @@ function productForm(p = {}, readonly = false) {
         </div>
         <div class="price-preview muted small" id="pricePreview"></div>
       </div>
-      ${p.id ? '' : `<div class="field full"><span class="field-label">Boshlang'ich qoldiq — har bir omborda nechta bor</span>
-        <div class="wh-qty">${db.warehouses.map((w) => `<label>${esc(w.name)}<input type="number" min="0" step="1" name="initQty_${esc(w.id)}" value="0" inputmode="numeric"></label>`).join('')}</div></div>`}
       ${textArea('Tavsif', 'note', p.note)}
       ${!p.id && !readonly ? tgQuestion() : ''}
     </div>
@@ -2047,7 +2047,7 @@ function itemRowHtml(t, it = {}, cur = 'UZS') {
     <td class="it-avail muted num"></td>
     <td>${qtyStepper('it-qty', it.qty || 1)}</td>
     <td><span class="money-wrap"><input class="it-price money" data-cur="${cur}" inputmode="decimal" value="${esc(fmtIn(listPrice ?? '', cur))}"><span class="cur">${CUR_SIGN[cur]}</span></span>
-      ${rd ? `<label class="it-dl">Chegirma (1 dona)<span class="money-wrap"><input class="it-disc money" data-cur="${cur}" inputmode="numeric" placeholder="0" value="${esc(it.disc ? fmtIn(it.disc, cur) : '')}"><span class="cur">${CUR_SIGN[cur]}</span></span></label>` : ''}
+      ${rd ? `<label class="it-dl">Chegirma (1 dona)<span class="money-wrap"><input class="it-disc money disc-k" data-cur="USD" inputmode="decimal" placeholder="0" value="${esc(it.disc ? fmtIn(Math.round(it.disc / 10) / 100, 'USD') : '')}"><span class="cur">ming so'm</span></span></label>` : ''}
       <div class="it-min muted small"></div></td>
     <td class="it-sum num"></td>
     <td><button type="button" class="small danger it-remove" title="O'chirish">×</button></td>
@@ -2685,7 +2685,7 @@ function bindDocForm(type, editingId) {
       const p = product($('.it-product', tr).value);
       const priceEl = $('.it-price', tr);
       const discEl = $('.it-disc', tr);
-      const dOne = discEl ? num(discEl.value) : 0;
+      const dOne = discEl ? Math.round(num(discEl.value) * 1000) : 0; // ming so'mda yoziladi: 20 → 20 000
       const final = num(priceEl.value) - dOne;
       const line = num($('.it-qty', tr).value) * final;
       rowDisc += num($('.it-qty', tr).value) * dOne;
@@ -2700,9 +2700,9 @@ function bindDocForm(type, editingId) {
       // Savdoda: sotuvchi eng kam narxni ko'radi, undan pastga tushsa ogohlantiriladi
       const min = p && t.price === 'sale' && type !== 'salesReturn' ? minPriceUZS(p) : 0;
       const low = !!min && final < min;
-      $('.it-min', tr).innerHTML = (dOne > 0 ? `Sotish narxi: <b>${fmt(final)}</b>` : '')
+      $('.it-min', tr).innerHTML = (dOne > 0 ? `Chegirma ${fmt(dOne)} so'm · sotish narxi: <b>${fmt(final)}</b>` : '')
         + (min ? `${dOne > 0 ? ' · ' : ''}eng kami: ${fmt(min)}` : '')
-        + (low && dOne > 0 ? `<br><b class="debt">Chegirma juda katta! Ko'pi bilan ${fmt(Math.max(0, num(priceEl.value) - min))}</b>` : '');
+        + (low && dOne > 0 ? `<br><b class="debt">Chegirma juda katta! Ko'pi bilan ${fmt(Math.max(0, num(priceEl.value) - min))} so'm</b>` : '');
       priceEl.classList.toggle('below-min', low && !dOne);
       discEl?.classList.toggle('below-min', low && dOne > 0);
     });
@@ -2787,7 +2787,7 @@ function bindDocForm(type, editingId) {
     const cur = curOf();
     const rate = rateOf();
     $('#rateField').hidden = cur !== 'USD';
-    [...$$('.it-price, .it-disc', body), discount].filter(Boolean).forEach((el) => {
+    [...$$('.it-price', body), discount].filter(Boolean).forEach((el) => {
       const v = num(el.value);
       if (v && rate) el.value = cur === 'USD' ? round2(v / rate) : Math.round(v * rate);
       setMoneyCurrency(el, cur);
@@ -2882,7 +2882,7 @@ function readItems() {
     if (!productId) return;
     const it = { productId, qty: Math.max(1, num($('.it-qty', tr).value)), price: num($('.it-price', tr).value) };
     // Qatordagi chegirma: saqlanadigan narx — sotish narxi (narx − chegirma), etiketka narxi va chegirma ham yoziladi
-    const dOne = num($('.it-disc', tr)?.value);
+    const dOne = Math.round(num($('.it-disc', tr)?.value) * 1000);
     if (dOne > 0) Object.assign(it, { listPrice: it.price, disc: dOne, price: it.price - dOne });
     // Komplekt tarkibidagi qator: komplekt belgisi saqlanadi (mahsulot almashtirilmagan bo'lsa)
     const k = tr.dataset.kitId && product(tr.dataset.kitId);
@@ -4136,6 +4136,20 @@ const driverChat = (id) => (db.driverChats || []).find((x) => x.driver_id === id
 const pendingHandovers = () => db.payments.filter((p) => p.handover?.status === 'pending');
 const myHandovers = () => pendingHandovers().filter((p) => isAdmin() || p.handover.to === me?.id);
 
+// Hujjatdagi mahsulotlar qisqacha: «Divan "Oskar" ×1, Stul ×4» (komplekt bitta nom bilan)
+function docItemsText(d) {
+  const parts = [];
+  const kits = new Set();
+  (d.items || []).forEach((it) => {
+    if (it.kitId) {
+      if (!kits.has(it.kitId)) { kits.add(it.kitId); parts.push(`${it.kitName || 'Komplekt'} ×${it.kitQty || 1}`); }
+      return;
+    }
+    parts.push(`${product(it.productId)?.name || it.name || '—'} ×${it.qty}`);
+  });
+  return parts.join(', ');
+}
+
 function openSalesCard() {
   if (!can('sale')) return '';
   const list = openSales();
@@ -4147,7 +4161,8 @@ function openSalesCard() {
       const rest = Math.max(0, docTotal(d) - docPaid(d));
       const late = isOverdueSale(d);
       return `<tr class="click sale-${d.status} ${late ? 'sale-late' : ''}" data-act="openDoc" data-id="${d.id}">
-        <td><b>${esc(d.no)}</b><div class="muted small">${fmtDate(d.date)} · ${esc(userName(d.userId))}</div></td>
+        <td><b>${esc(d.no)}</b><div class="muted small">${fmtDate(d.date)} · ${esc(userName(d.userId))}</div>
+          <div class="small os-items">${esc(docItemsText(d))}</div></td>
         <td>${esc(party(d.counterpartyId)?.name || '')}<div class="muted small">${esc(d.address || '')}</div></td>
         <td>${badge(DELIVERY_STATUSES[d.status], d.status)}${late ? `<div class="debt small">⚠ ${d.deliveryDate ? `muddat ${fmtDate(d.deliveryDate)}` : `${daysSince(d.date)} kun`}</div>` : d.deliveryDate ? `<div class="muted small">${fmtDate(d.deliveryDate)}</div>` : ''}${d.driverId ? `<div class="muted small">🚚 ${esc(driver(d.driverId)?.name || '')}</div>` : ''}</td>
         <td class="num">${rest ? money(rest) : badge("To'langan", 'done')}</td>
