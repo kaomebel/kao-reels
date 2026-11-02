@@ -1155,7 +1155,6 @@ function productForm(p = {}, readonly = false) {
       <label>Ishlab chiqaruvchi / ta'minotchi<select name="makerId" id="makerSel">${makerOptions(p)}</select>
         <input name="makerNew" id="makerNew" placeholder="Fabrika yoki ta'minotchi nomi" hidden></label>
       <div class="field full feat-wrap" id="featBlock">${featureBlock(p.category, p.type, p)}</div>
-      ${field('Ishlab chiqarilgan joyi', 'origin', p.origin, 'placeholder="O\'zbekiston, Toshkent / Turkiya..."')}
       ${isAdmin() ? field('Minimal qoldiq', 'minQty', p.minQty ?? 1, 'type="number" inputmode="numeric" min="0"') : ''}
       <div class="field full price-block">
         <span class="field-label">Narxlar valyutasi</span>
@@ -1631,7 +1630,7 @@ function readProduct(d, p) {
     size: d.size.trim(),
     color: d.color.trim(),
     attrs,
-    origin: d.origin.trim(),
+    origin: p.origin || '', // maydon olib tashlangan — eski qiymat o'zgarmaydi
     supplierId: supplierId || '',
     maker,
     unit: p.unit || 'dona', // hamma mahsulot donada
@@ -3639,7 +3638,7 @@ function stockLine(p) {
 // Telegram xabaridagi qatorlar — administrator Sozlamalar → Telegram da yoqib/o'chiradi
 const TG_FIELDS = [
   ['type', 'Turi'], ['code', 'Kod (artikul)'], ['price', 'Narxi'], ['size', "O'lchami"], ['color', 'Rangi'],
-  ['attrs', 'Xususiyatlar (material, mexanizm...)'], ['origin', 'Ishlab chiqarilgan joyi'], ['stock', "Omborda bor / yo'q"],
+  ['attrs', 'Xususiyatlar (material, mexanizm...)'], ['origin', 'Ishlab chiqaruvchi'], ['stock', "Omborda bor / yo'q"],
   ['note', 'Izoh'], ['phone', 'Kompaniya telefoni'], ['tags', 'Heshteglar (#kategoriya)'],
 ];
 const tgShow = (k) => !db.telegram.hide?.[k];
@@ -3660,7 +3659,7 @@ function telegramCaption(p) {
   if (p.size && tgShow('size')) lines.push(`📐 O'lchami: ${esc(p.size)} sm`);
   if (p.color && tgShow('color')) lines.push(`🎨 Rangi: ${esc(p.color)}`);
   if (tgShow('attrs')) productAttrs(p).forEach(([k, v]) => lines.push(`▫️ ${esc(k)}: ${esc(v)}`));
-  if ((p.origin || p.maker) && tgShow('origin')) lines.push(`🏭 Ishlab chiqarilgan: ${esc([p.origin, p.maker].filter(Boolean).join(', '))}`);
+  if (p.maker && tgShow('origin')) lines.push(`🏭 Ishlab chiqaruvchi: ${esc(p.maker)}`);
   if (tgShow('stock')) lines.push(`📦 ${stockLine(p)}`);
   if (p.note && tgShow('note')) lines.push('', esc(p.note));
   if (db.company.phone && tgShow('phone')) lines.push('', `📞 ${esc(db.company.phone)}`);
@@ -4561,7 +4560,7 @@ function viewProducts() {
       ${thumbCell(p)}
       <td class="click" data-act="editProduct" data-id="${p.id}"><b>${esc(p.name)}</b><div class="muted small prod-path">${icon(productIcon(p))}${esc([p.code, p.category, p.type].filter(Boolean).join(' · '))}</div>
         ${p.size || p.color || productAttrs(p).length ? `<div class="prod-meta">${p.size ? `<span class="dt">${esc(p.size)} sm</span>` : ''}${p.color ? `<span>${esc(p.color)}</span>` : ''}${productAttrs(p).map(([k, v]) => `<span title="${esc(k)}">${esc(v)}</span>`).join('')}</div>` : ''}
-        ${p.origin || p.maker ? `<div class="muted small prod-origin">${icon('warehouse')}${esc([p.maker, p.origin].filter(Boolean).join(', '))}</div>` : ''}</td>
+        ${p.maker ? `<div class="muted small prod-origin">${icon('warehouse')}${esc(p.maker)}</div>` : ''}</td>
       ${showCost ? `<td class="num">${money(ctx.cost[p.id])}</td>` : ''}
       ${showPrice ? `<td class="num">${priceLabel(p)}${p.priceCurrency === 'USD' ? `<div class="muted small">${fmtUsd(p.salePrice)}</div>` : ''}${p.minPrice ? `<div class="muted small">eng kami: ${priceLabel(p, 'minPrice')}</div>` : ''}</td>` : ''}
       <td class="num ${st - rs <= (p.minQty || 0) ? 'debt' : ''}">${st}${rs ? `<div class="muted small">rezerv ${rs}</div>` : ''}</td>
@@ -6168,7 +6167,7 @@ const LABEL_FIELDS = {
   path: { title: 'Kategoriya va tur', text: (p) => productPath(p) },
   price: { title: 'Narx', text: (p) => priceLabel(p) },
   code: { title: 'Artikul', text: (p) => (p.code ? 'Art: ' + p.code : '') },
-  origin: { title: 'Ishlab chiqaruvchi', text: (p) => [p.maker, p.origin].filter(Boolean).join(', ') },
+  origin: { title: 'Ishlab chiqaruvchi', text: (p) => p.maker || '' },
   attrs: { title: 'Xususiyatlar (krestovina, mexanizm...)', text: (p) => productAttrs(p).map(([, v]) => v).join(' · ') },
   barcode: { title: 'Shtrix-kod', kind: 'barcode' },
   qr: { title: 'QR-kod', kind: 'qr' },
