@@ -1692,7 +1692,7 @@ function editProduct(id) {
   if (isKit(p)) return editKit(id);
   if (!can('products')) {
     // Mahsulot ruxsati yo'q — kartochkani faqat ko'radi
-    openModal({ title: p.name, body: `<fieldset disabled>${productForm(p, true)}</fieldset>`, wide: true, onOpen: () => bindProductForm(p, true), extra: [{ label: 'Etiketka', onClick: () => quickLabel(id) }] });
+    openModal({ title: p.name, body: `<p class="muted small ro-note">${icon('alert')} Faqat ko'rish. O'zgartirish uchun administrator sizga «Mahsulotlar» ruxsatini berishi kerak.</p><fieldset disabled>${productForm(p, true)}</fieldset>`, wide: true, onOpen: () => bindProductForm(p, true), extra: [{ label: 'Etiketka', onClick: () => quickLabel(id) }] });
     return;
   }
   openModal({
@@ -4579,7 +4579,7 @@ function viewProducts() {
       ${showCost ? `<td class="num">${money(ctx.cost[p.id])}</td>` : ''}
       ${showPrice ? `<td class="num">${priceLabel(p)}${p.priceCurrency === 'USD' ? `<div class="muted small">${fmtUsd(p.salePrice)}</div>` : ''}${p.minPrice ? `<div class="muted small">eng kami: ${priceLabel(p, 'minPrice')}</div>` : ''}</td>` : ''}
       <td class="num ${st - rs <= (p.minQty || 0) ? 'debt' : ''}">${st}${rs ? `<div class="muted small">rezerv ${rs}</div>` : ''}</td>
-      <td class="actions"><button class="small icon-only" data-act="labelOne" data-id="${p.id}" title="Etiketka chop etish">${icon('tag')}</button>${admin ? `
+      <td class="actions">${can('products') ? `<button class="small edit-btn" data-act="editProduct" data-id="${p.id}" title="Tahrirlash">${icon('edit')}<span>Tahrirlash</span></button>` : ''}<button class="small icon-only" data-act="labelOne" data-id="${p.id}" title="Etiketka chop etish">${icon('tag')}</button>${admin ? `
         <button class="small icon-only" data-act="tgProduct" data-id="${p.id}" title="Telegram guruhga yuborish">${icon('send')}</button>
         ${p.archived ? `<button class="small" data-act="unarchive" data-id="${p.id}">Tiklash</button>` : `<button class="small danger icon-only" data-act="deleteProduct" data-id="${p.id}" title="O'chirish">${icon('trash')}</button>`}` : ''}
       </td>
