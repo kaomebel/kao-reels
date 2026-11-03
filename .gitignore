@@ -1,0 +1,6 @@
+.env
+data/*.db
+media/rendered/*.mp4
+__pycache__/
+*.pyc
+.venv/
