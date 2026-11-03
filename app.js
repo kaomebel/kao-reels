@@ -1142,8 +1142,10 @@ function productForm(p = {}, readonly = false) {
   return `<div class="product-form">
     <div class="photo-box">
       <div class="photo-list" id="photoList"></div>
-      ${readonly ? '' : `<label class="filebtn">${icon('camera')}Rasm qo'shish<input type="file" id="photoInput" accept="image/*" multiple hidden></label>
-      <div class="muted small">${MAX_PHOTOS} tagacha. Birinchisi — asosiy (Telegram va ro'yxatda). Rasm ustiga bosilsa — to'liq ekranda ochiladi; «★ Asosiy qilish» — asosiy rasm qiladi.</div>`}
+      ${readonly ? '' : `<div class="photo-btns"><label class="filebtn">${icon('camera')}Suratga olish<input type="file" id="photoCam" accept="image/*" capture="environment" hidden></label>
+      <label class="filebtn">${icon('plus')}Galereyadan<input type="file" id="photoInput" accept="image/*" multiple hidden></label></div>
+      <input type="file" id="photoReplace" accept="image/*" hidden>
+      <div class="muted small">${MAX_PHOTOS} tagacha. Birinchisi — asosiy (Telegram va ro'yxatda). Rasm ustiga bosilsa — to'liq ekranda ochiladi; «🔄 Almashtirish» — boshqa rasmga almashtiradi; «★ Asosiy qilish» — asosiy rasm qiladi.</div>`}
     </div>
     <div class="form-grid">
       ${field('Mahsulot *', 'name', p.name, 'required', 'full')}
@@ -1214,7 +1216,7 @@ function renderPhotoList(readonly) {
   box.innerHTML = photoEdit.items.length ? photoEdit.items.map((ph, i) => `<div class="ph ${i === 0 ? 'main' : ''}">
       <img ${ph.file ? `src="${ph.url}"` : `data-photo="${esc(i === 0 ? ph.path : ph.thumb)}"`} data-i="${i}" alt="" title="Kattalashtirish">
       ${i === 0 ? '<span class="ph-main">Asosiy</span>' : readonly ? '' : `<button type="button" class="ph-star" data-i="${i}" title="Asosiy rasm qilish">★ Asosiy qilish</button>`}
-      ${readonly ? '' : `<button type="button" class="ph-del" data-i="${i}" title="O'chirish">×</button>`}
+      ${readonly ? '' : `<button type="button" class="ph-rep" data-i="${i}" title="Boshqa rasmga almashtirish">🔄 Almashtirish</button><button type="button" class="ph-del" data-i="${i}" title="O'chirish">×</button>`}
     </div>`).join('') : `<div class="photo-empty">${icon('camera')}<span>Rasm yo'q</span></div>`;
   hydratePhotos(box);
 }
@@ -1446,16 +1448,32 @@ function bindProductForm(p, readonly = false) {
     $('#makerNew').hidden = maker.value !== '__new';
     if (maker.value === '__new') $('#makerNew').focus();
   });
-  $('#photoInput').addEventListener('change', (e) => {
+  const addFiles = (e) => {
     const files = Array.from(e.target.files).slice(0, MAX_PHOTOS - photoEdit.items.length);
-    if (e.target.files.length > files.length) alert(`Ko'pi bilan ${MAX_PHOTOS} ta rasm.`);
+    if (e.target.files.length > files.length) alert(`Ko'pi bilan ${MAX_PHOTOS} ta rasm. Keraksizini o'chiring yoki «Almashtirish» ni bosing.`);
     files.forEach((file) => photoEdit.items.push({ file, url: URL.createObjectURL(file) }));
     e.target.value = '';
+    renderPhotoList();
+  };
+  $('#photoInput').addEventListener('change', addFiles);
+  $('#photoCam')?.addEventListener('change', addFiles);
+  // Bitta rasmni boshqasiga almashtirish (o'rni va «Asosiy» belgisi saqlanadi)
+  let replaceAt = -1;
+  $('#photoReplace')?.addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    e.target.value = '';
+    const old = photoEdit.items[replaceAt];
+    if (!file || !old) return;
+    if (old.file) URL.revokeObjectURL(old.url);
+    else photoEdit.removed.push(old.path, old.thumb);
+    photoEdit.items[replaceAt] = { file, url: URL.createObjectURL(file) };
     renderPhotoList();
   });
   $('#photoList').addEventListener('click', (e) => {
     const del = e.target.closest('.ph-del');
     const star = e.target.closest('.ph-star');
+    const rep = e.target.closest('.ph-rep');
+    if (rep) { replaceAt = +rep.dataset.i; $('#photoReplace').click(); return; }
     const img = e.target.closest('img[data-i]');
     if (del) {
       if (!confirm("Rasm o'chirilsinmi?\n\n(Kartochka saqlangandan keyin o'chadi — «Yopish» bosilsa, rasm joyida qoladi.)")) return;
@@ -4600,6 +4618,7 @@ function viewProducts() {
 function thumbCell(p) {
   return `<td class="thumb">${p.photos?.length
     ? `<button type="button" class="thumb-btn" data-act="photoView" data-id="${p.id}" title="Rasmlarni kattalashtirish"><img data-photo="${esc(p.photos[0].thumb)}" alt="${esc(p.name)}" loading="lazy">${p.photos.length > 1 ? `<span class="ph-count">${p.photos.length}</span>` : ''}</button>`
+    : can('products') ? `<button type="button" class="thumb-empty thumb-add" data-act="addPhoto" data-id="${p.id}" title="Rasm qo'shish">${icon('camera')}<small>Rasm qo'shish</small></button>`
     : `<span class="thumb-empty">${icon('camera')}</span>`}</td>`;
 }
 
@@ -6023,6 +6042,8 @@ const ACTIONS = {
   staffDel: (ds) => { const n = db.staffNames[+ds.i]; if (n && confirm(`«${n}» ro'yxatdan olib tashlansinmi?`)) { db.staffNames.splice(+ds.i, 1); save(); } },
   ecSave: async () => { db.expenseCats = readExpenseCats(); await save(); alert('Saqlandi.'); },
   editProduct: (ds) => editProduct(ds.id),
+  // Rasmsiz mahsulot: kartochka ochiladi va darhol rasm tanlash oynasi chiqadi
+  addPhoto: (ds) => { editProduct(ds.id); $('#photoInput')?.click(); },
   deleteProduct: (ds) => deleteProduct(ds.id),
   unarchive: (ds) => { product(ds.id).archived = false; save(); },
   productHistory: (ds) => productHistory(ds.id),

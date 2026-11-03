@@ -1340,3 +1340,11 @@ html.modal-open, html.modal-open body { overflow: hidden; overscroll-behavior: n
 .actions .edit-btn { display: inline-flex; align-items: center; gap: 6px; }
 .ro-note { display: flex; gap: 6px; align-items: center; margin: 0 0 10px; }
 @media (max-width: 700px) { .actions .edit-btn { min-height: 44px; padding: 0 14px; } }
+
+/* Rasm: almashtirish, kameradan olish, ro'yxatdan qo'shish */
+.photo-list .ph-rep { position: absolute; right: 6px; bottom: 6px; min-height: 0; padding: 3px 8px; border-radius: 6px; font-size: 11px; background: rgba(58, 41, 29, .85); color: #fff6ea; border: none; }
+@media (max-width: 700px) { .photo-list .ph-rep { padding: 6px 9px; font-size: 12px; } }
+.photo-btns { display: flex; gap: 8px; flex-wrap: wrap; }
+.photo-btns .filebtn { flex: 1; justify-content: center; }
+.thumb-add { cursor: pointer; padding: 0; gap: 2px; align-content: center; color: var(--accent-dark); border-color: var(--accent); background: var(--accent-soft); box-shadow: none; }
+.thumb-add small { font-size: 10px; line-height: 1.1; text-align: center; }
