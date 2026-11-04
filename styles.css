@@ -1349,12 +1349,12 @@ html.modal-open, html.modal-open body { overflow: hidden; overscroll-behavior: n
 .thumb-add { cursor: pointer; padding: 0; gap: 2px; align-content: center; color: var(--accent-dark); border-color: var(--accent); background: var(--accent-soft); box-shadow: none; }
 .thumb-add small { font-size: 10px; line-height: 1.1; text-align: center; }
 
-/* Asosiy oyna: «+ Kirim» / «− Chiqim» va xodimlardagi naqd pul */
-.money-btns { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 14px; }
-.money-btns button { min-height: 72px; font-size: 20px; font-weight: 700; border-radius: 16px; gap: 10px; justify-content: center; }
-.money-btns button span { font-size: 30px; line-height: 1; }
-.money-btns .mb-in { background: var(--ok); border-color: var(--ok); color: #fff; }
-.money-btns .mb-out { background: var(--danger, #b3261e); border-color: var(--danger, #b3261e); color: #fff; }
+/* Asosiy oyna: «+ Kirim» / «− Chiqim» (ixcham, yumshoq ranglar) */
+.money-btns { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 12px; max-width: 420px; }
+.money-btns button { min-height: 46px; font-size: 15px; font-weight: 600; border-radius: 12px; gap: 6px; justify-content: center; box-shadow: none; }
+.money-btns button span { font-size: 19px; line-height: 1; font-weight: 700; }
+.money-btns .mb-in { background: var(--ok-soft); border-color: var(--ok-soft); color: var(--ok); }
+.money-btns .mb-out { background: var(--danger-soft, #f6e1dc); border-color: var(--danger-soft, #f6e1dc); color: var(--danger, #b3261e); }
 .money-menu .exp-quick { margin-bottom: 10px; }
 .staff-cash .sc-row { display: grid; grid-template-columns: 1fr auto auto; gap: 10px; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--border); }
 .staff-cash .sc-all { border-bottom: none; font-weight: 700; }
