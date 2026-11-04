@@ -198,8 +198,11 @@ let retryTimer = null;
 function commit(quiet = false) {
   commitQueue = commitQueue.then(async () => {
     try {
+      if (navigator.onLine) await fixOfflineNumbers().catch((e) => { if (!isNetErr(e)) throw e; });
       await backend.commit(db);
       setSyncState(false);
+      // Dastur internetsiz (telefondagi nusxadan) ochilgan edi — endi serverdan yangi ma'lumotlar olinadi
+      if (backend.loadedOffline) setTimeout(reconnect, 0);
       if (stockFromServer()) await refreshServerStock();
     } catch (e) {
       console.error(e);
@@ -229,11 +232,43 @@ function setSyncState(offline, message = '') {
   syncState = { offline, message };
   const el = $('#syncBanner');
   if (!el) return;
-  el.hidden = !offline;
-  el.textContent = offline ? "⚠️ Internet yo'q — o'zgarishlar telefonda saqlandi va internet qaytganda (yoki dastur keyingi safar ochilganda) serverga o'zi yuboriladi." : '';
+  const cached = backend?.loadedOffline;
+  el.hidden = !offline && !cached;
+  let n = 0;
+  try { n = (JSON.parse(localStorage.getItem(backend.outboxKey) || 'null')?.items || []).reduce((s, x) => s + x.upserts.length + x.deletes.length, 0); } catch (e) { /* */ }
+  el.textContent = offline || cached
+    ? `📴 Internet yo'q — ishlashda davom etavering. ${cached ? `Oxirgi ma'lumotlar: ${fmtDateTime(cached)}. ` : ''}${n ? `${n} ta o'zgarish telefonda saqlandi — ` : 'Kiritganlaringiz telefonda saqlanadi va '}internet qaytishi bilan serverga o'zi yuboriladi.`
+    : '';
 }
 
-window.addEventListener('online', () => { if (syncState.offline) commit(); });
+// Internet qaytdimi — tekshiramiz: yuborilmaganlar yuboriladi, ma'lumotlar serverdan yangilanadi
+let reconnecting = false;
+async function reconnect() {
+  if (reconnecting || !me || backend.kind !== 'supabase') return;
+  if (!syncState.offline && !backend.loadedOffline) return;
+  reconnecting = true;
+  try {
+    await backend.ping();
+    if (backend.loadedOffline) {
+      if ($('#modal').open || $('#subModal')?.open) return; // oyna yopilgach (keyingi tekshiruvda) yangilanadi
+      // Kirish tokeni internetsiz yangilanmagan bo'lishi mumkin
+      await backend.sb.auth.getSession().catch(() => {});
+      await fixOfflineNumbers();
+      await backend.commit(db);
+      await loadData();
+      setSyncState(false);
+      render();
+    } else {
+      commit();
+    }
+  } catch (e) {
+    if (!isNetErr(e)) console.warn('Qayta ulanish:', e);
+  } finally {
+    reconnecting = false;
+  }
+}
+window.addEventListener('online', () => setTimeout(reconnect, 1500));
+setInterval(reconnect, 20e3);
 window.addEventListener('beforeunload', (e) => {
   if (syncState.offline) { e.preventDefault(); e.returnValue = ''; }
 });
@@ -246,8 +281,11 @@ async function refreshServerStock() {
   if (!stockFromServer()) { serverStock = null; return; }
   try {
     serverStock = await backend.stockLevels();
+    try { localStorage.setItem('bt-stock-' + me.id, JSON.stringify(serverStock)); } catch (e) { /* */ }
   } catch (e) {
     console.warn(e);
+    // Internet yo'q — oxirgi ma'lum qoldiq
+    if (!serverStock) try { serverStock = JSON.parse(localStorage.getItem('bt-stock-' + me?.id) || 'null'); } catch (x) { /* */ }
   }
 }
 
@@ -292,6 +330,7 @@ async function loadData() {
   }
   requestPersistentStorage();
   setTimeout(autoBackup, 5000);
+  if (backend.loadedOffline) { setSyncState(true); return; } // internetsiz — telefondagi nusxa bilan ishlaymiz
   // Oldingi safar internet yo'qligida kiritilib, yuborilmay qolgan o'zgarishlar — endi serverga
   const pending = backend.restoredPending;
   if (pending) {
@@ -511,8 +550,31 @@ const doc = (id) => db.docs.find((d) => d.id === id);
 const PAY_PREFIX = { payIn: 'PK', payOut: 'PC' };
 
 // Raqam serverda beriladi — bir vaqtda ishlayotgan sotuvchilarda takrorlanmaydi
-function nextNo(type) {
-  return backend.nextNo(type, DOC_TYPES[type]?.prefix || PAY_PREFIX[type] || 'P');
+// Internet yo'q bo'lsa — vaqtinchalik raqam (…-OFF…); internet qaytganda serverdan haqiqiy raqam olinadi
+const OFF_NO_RE = /-OFF[0-9A-Z]+$/;
+async function nextNo(type) {
+  const prefix = DOC_TYPES[type]?.prefix || PAY_PREFIX[type] || 'P';
+  try {
+    return await backend.nextNo(type, prefix);
+  } catch (e) {
+    if (backend.kind !== 'supabase' || !isNetErr(e)) throw e;
+    return `${prefix}-OFF${Date.now().toString(36).slice(-4).toUpperCase()}${Math.random().toString(36).slice(2, 4).toUpperCase()}`;
+  }
+}
+
+// Internetsiz kiritilgan hujjat va to'lovlarga haqiqiy raqam (server ulanmasa — keyingi safar)
+async function fixOfflineNumbers() {
+  if (backend.kind !== 'supabase') return;
+  const items = [
+    ...db.docs.filter((d) => OFF_NO_RE.test(d.no || '')).map((d) => [d, d.type]),
+    ...db.payments.filter((p) => OFF_NO_RE.test(p.no || '')).map((p) => [p, p.dir === 'in' ? 'payIn' : 'payOut']),
+  ];
+  for (const [x, kind] of items) {
+    const old = x.no;
+    x.no = await backend.nextNo(kind, DOC_TYPES[kind]?.prefix || PAY_PREFIX[kind] || 'P');
+    // Izohlarda eski raqam tilga olingan bo'lsa (inventarizatsiya) — ular ham yangilanadi
+    db.docs.forEach((d) => { if (d.note && d.note.includes(old)) d.note = d.note.split(old).join(x.no); });
+  }
 }
 
 function linesSum(d) {

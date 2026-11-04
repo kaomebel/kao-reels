@@ -28,6 +28,8 @@ self.addEventListener('fetch', (e) => {
         }
         return res;
       })
-      .catch(() => caches.match(e.request, { ignoreSearch: true }).then((r) => r || caches.match('./index.html'))),
+      // Sahifa so'ralsa — keshdagi index.html; boshqa fayl (masalan version.js) keshda bo'lmasa — bo'sh javob
+      .catch(() => caches.match(e.request, { ignoreSearch: true })
+        .then((r) => r || (e.request.mode === 'navigate' ? caches.match('./index.html') : new Response('', { status: 504 })))),
   );
 });

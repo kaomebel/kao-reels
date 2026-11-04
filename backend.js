@@ -353,7 +353,35 @@ class LocalBackend {
 
 // ---------- Supabase ----------
 
-const NETWORK_RE = /Failed to fetch|NetworkError|Load failed|fetch failed|ERR_|timeout/i;
+const NETWORK_RE = /Failed to fetch|NetworkError|Load failed|fetch failed|ERR_|timeout|Serverga ulanib bo'lmadi/i;
+// Internet / server bilan aloqa yo'qligi (ma'lumot yoki ruxsat xatosidan farqli)
+const isNetErr = (e) => !navigator.onLine || NETWORK_RE.test(e?.message || '') || NETWORK_RE.test(e?.details || '')
+  || e?.name === 'AuthRetryableFetchError' || e?.status === 0;
+
+// Oxirgi serverdan olingan ma'lumotlar telefonda (IndexedDB) — internetsiz ham dastur ochiladi
+const offlineStore = {
+  open() {
+    if (!this.p) this.p = new Promise((res, rej) => {
+      const r = indexedDB.open('bt-offline', 1);
+      r.onupgradeneeded = () => r.result.createObjectStore('kv');
+      r.onsuccess = () => res(r.result);
+      r.onerror = () => rej(r.error);
+    });
+    return this.p;
+  },
+  async get(key) {
+    try {
+      const d = await this.open();
+      return await new Promise((res, rej) => { const q = d.transaction('kv').objectStore('kv').get(key); q.onsuccess = () => res(q.result); q.onerror = () => rej(q.error); });
+    } catch (e) { console.warn('offline cache:', e); return null; }
+  },
+  async set(key, value) {
+    try {
+      const d = await this.open();
+      await new Promise((res, rej) => { const t = d.transaction('kv', 'readwrite'); t.objectStore('kv').put(value, key); t.oncomplete = res; t.onerror = () => rej(t.error); });
+    } catch (e) { console.warn('offline cache:', e); }
+  },
+};
 
 // Ruxsat yoki ma'lumot xatosi (qayta urinish foyda bermaydi) — internet uzilishidan farqli
 function syncError(error) {
@@ -404,12 +432,67 @@ class SupabaseBackend {
       throw new Error("Hisobingiz hali faollashtirilmagan yoki bloklangan. Administratorga murojaat qiling.");
     }
     this.profile = data;
+    try { localStorage.setItem('bt-profile-cache', JSON.stringify(data)); } catch (e) { /* */ }
+    return this.meOf(data);
+  }
+
+  meOf(data) {
     return { id: data.id, name: data.name, login: shortLogin(data.login), role: data.role, active: data.active, perms: data.perms ?? undefined };
   }
 
   async restoreSession() {
-    const { data } = await this.sb.auth.getSession();
-    return data.session ? this.loadProfile(data.session.user) : null;
+    let res;
+    try { res = await this.sb.auth.getSession(); } catch (e) { res = { data: {}, error: e }; }
+    const session = res.data?.session;
+    if (session) {
+      try { return await this.loadProfile(session.user); } catch (e) { if (!isNetErr(e)) throw e; return this.offlineProfile(); }
+    }
+    // Kirish tokeni internet yo'qligi sababli yangilanmadi — oxirgi kirgan foydalanuvchi bilan ochamiz
+    if ((res.error && isNetErr(res.error)) || !navigator.onLine) return this.offlineProfile();
+    return null;
+  }
+
+  offlineProfile() {
+    let p = null;
+    try {
+      const hasToken = Object.keys(localStorage).some((k) => /^sb-.*-auth-token$/.test(k));
+      if (hasToken) p = JSON.parse(localStorage.getItem('bt-profile-cache') || 'null');
+    } catch (e) { /* */ }
+    if (!p || !p.active) return null;
+    this.profile = p;
+    this.offline = true;
+    return this.meOf(p);
+  }
+
+  // Server bilan aloqa bormi (internet qaytganini bilish uchun)
+  async ping() {
+    const { error } = await this.sb.from('settings').select('id').limit(1);
+    if (error) throw error;
+    return true;
+  }
+
+  get cacheKey() { return 'db-' + (this.profile?.id || ''); }
+
+  // Serverdagi holat (snap) va dastur ma'lumotlari telefonga yoziladi
+  saveCacheSoon(db) {
+    clearTimeout(this.cacheTimer);
+    this.cacheTimer = setTimeout(() => {
+      const keep = {};
+      [...ENTITY_TABLES, ...SETTINGS_KEYS, 'users', 'driverChats'].forEach((k) => { if (db[k] !== undefined) keep[k] = db[k]; });
+      const snap = Object.fromEntries(Object.entries(this.snap).map(([t, m]) => [t, [...m]]));
+      offlineStore.set(this.cacheKey, { at: new Date().toISOString(), db: JSON.parse(JSON.stringify(keep)), snap });
+    }, 800);
+  }
+
+  async loadCached(defaults) {
+    const c = await offlineStore.get(this.cacheKey);
+    if (!c?.db) return null;
+    const db = Object.assign({}, defaults, c.db);
+    this.snap = Object.fromEntries(Object.entries(c.snap || {}).map(([t, e]) => [t, new Map(e)]));
+    this.hasDriverChats = false;
+    this.loadedOffline = c.at;
+    this.restoredPending = this.applyOutbox(db);
+    return db;
   }
 
   async signIn(login, password) {
@@ -491,6 +574,21 @@ class SupabaseBackend {
   }
 
   async load(defaults) {
+    try {
+      const db = await this.loadServer(defaults);
+      this.offline = false;
+      this.loadedOffline = null;
+      this.saveCacheSoon(db);
+      return db;
+    } catch (e) {
+      if (!isNetErr(e)) throw e;
+      const db = await this.loadCached(defaults);
+      if (!db) throw new Error("Internet yo'q va bu telefonda hali saqlangan ma'lumot yo'q. Internetga ulanib, dasturni bir marta oching.");
+      return db;
+    }
+  }
+
+  async loadServer(defaults) {
     const [rows, costs, settings, profiles] = await Promise.all([
       Promise.all(ENTITY_TABLES.map((t) => this.fetchAll(t))),
       this.canCosts ? this.fetchAll('product_costs') : Promise.resolve([]),
@@ -578,6 +676,7 @@ class SupabaseBackend {
       }
     }
     this.saveOutbox([]);
+    this.saveCacheSoon(db);
   }
 
   get outboxKey() {
@@ -654,7 +753,7 @@ class SupabaseBackend {
     this.channel = this.sb.channel('biznes-tizim');
     ['products', 'product_costs', 'warehouses', 'counterparties', 'docs', 'payments', 'settings', 'profiles', ...(this.hasDriverChats ? ['driver_chats'] : [])].forEach((table) => {
       this.channel.on('postgres_changes', { event: '*', schema: 'public', table }, (payload) => {
-        if (this.applyChange(db, table, payload)) onChange(table);
+        if (this.applyChange(db, table, payload)) { onChange(table); this.saveCacheSoon(db); }
       });
     });
     this.channel.subscribe();
