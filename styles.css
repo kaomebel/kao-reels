@@ -1401,3 +1401,7 @@ html.modal-open, html.modal-open body { overflow: hidden; overscroll-behavior: n
   .modal-actions .ma-main button.ma-cancel { flex: 0 0 auto; min-height: 38px; }
   .modal-actions .ma-main #modalSubmit, .modal-actions .ma-main #subSubmit { flex: 1 1 auto; max-width: 70%; }
 }
+
+/* Mahsulot kartochkasida material */
+.mat-more { margin-top: 6px; }
+#matChips .chip-add { min-width: 140px; }

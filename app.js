@@ -73,6 +73,28 @@ const DEFAULT_CATEGORY_TYPES = {
   Matras: ['Ortopedik matras', 'Prujinali matras', 'Prujinasiz matras', 'Bolalar matrasi', 'Topper'],
 };
 
+// Material → ranglari (Sozlamalar → Ro'yxatlar → «Materiallar va ranglari» da o'zgartiriladi)
+const LAMINAT_COLORS = ['Dub beliy', 'Belaya korona', 'Oq gladkiy', 'Dub sonoma', 'Dub votan', 'Dub kraft', 'Venge', "Yong'oq", 'Antratsit', 'Kapuchino'];
+const DEFAULT_MATERIAL_COLORS = {
+  Laminat: LAMINAT_COLORS,
+  LDSP: LAMINAT_COLORS,
+  MDF: ['Kraska oq', 'Kraska qora', 'Kraska kulrang', 'Kraska bej', 'LMDF dub', 'LMDF oq', 'LMDF venge'],
+  Akril: ['Oq glyanes', 'Qora glyanes', 'Bej glyanes', 'Kulrang glyanes'],
+  DSP: ['Oq', 'Dub sonoma', 'Venge', 'Yong\'oq'],
+  Faner: ['Tabiiy', 'Lak bilan', 'Oq', "Yong'oq"],
+  "Massiv (yog'och)": ['Tabiiy', "Yong'oq", 'Venge', 'Oq', 'Qora'],
+  Temir: ['Tilla', 'Qora', 'Nikel', 'Bronza', 'Shampan', 'Xrom', 'Oq'],
+  Metall: ['Tilla', 'Qora', 'Nikel', 'Bronza', 'Shampan', 'Xrom', 'Oq'],
+  Plastik: ['Oq', 'Sariq', 'Yashil', "Ko'k", 'Qizil', 'Jigarrang', 'Kapuchino', 'Qora', 'Kulrang'],
+  Shisha: ['Shaffof', 'Qora', 'Bronza', 'Matoviy'],
+  Oyna: ['Oddiy', 'Bronza', 'Grafit'],
+  Mato: ['Kulrang', 'Bej', 'Qora', "To'q ko'k", 'Yashil', 'Kapuchino'],
+  Velyur: ['Kulrang', 'Bej', 'Yashil', "To'q ko'k", 'Pushti'],
+  Ekokoja: ['Qora', 'Oq', 'Jigarrang', 'Bej', 'Kapuchino'],
+  Charm: ['Qora', 'Jigarrang', 'Konyak', 'Bej', 'Oq'],
+  Rattan: ['Tabiiy', 'Qora', 'Oq'],
+};
+
 const DEFAULT_COLORS = ['Dub beliy', 'Belaya korona', 'Oq gladkiy', 'Dub votan', 'Dub sonoma', 'Dub kraft', "Yong'oq", 'Venge', 'Kulrang', 'Antratsit', 'Qora', 'Bej', 'Kapuchino', 'Oltin'];
 
 // Yetkazish manzillari: viloyat → shahar/tuman → mahalla/joy. Asosiy savdo hududi — Farg'ona
@@ -155,6 +177,7 @@ function emptyDb() {
     categories: DEFAULT_CATEGORIES.slice(),
     categoryTypes: JSON.parse(JSON.stringify(DEFAULT_CATEGORY_TYPES)),
     materials: DEFAULT_MATERIALS.slice(),
+    materialColors: JSON.parse(JSON.stringify(DEFAULT_MATERIAL_COLORS)),
     colors: DEFAULT_COLORS.slice(),
     featureSets: JSON.parse(JSON.stringify(DEFAULT_FEATURE_SETS)),
     categoryIcons: {},
@@ -1430,8 +1453,27 @@ function chipOne(name, options, value, ctl = false) {
 
 // Rang va qo'shimcha maydonlar: kategoriya/tur o'zgarganda o'zi almashadi
 // Ranglar ro'yxati: material (yoki boshqa bog'langan maydon) tanlangan bo'lsa — o'sha materialniki
-function colorsFor(set, attrs = {}) {
-  if (!set) return db.colors;
+// Hamma materiallar: ro'yxatdagi + ranglari berilganlar
+const allMaterials = () => uniqNames([...(db.materials || []), ...Object.keys(db.materialColors || {})]);
+// Shu tur (yoki tur yo'q bo'lsa — kategoriya) mahsulotlarida ishlatilgan materiallar — keyingi safar asosiysi shular
+function usedMaterials(cat, type) {
+  if (!cat) return [];
+  const list = db.products.filter((p) => p.category === cat && (type ? nameKey(p.type) === nameKey(type) : true) && !isKit(p));
+  return uniqNames(list.flatMap((p) => splitList(p.material)));
+}
+// Tanlangan materiallarning ranglari (ro'yxatdagi + shu materialli mahsulotlarda ishlatilganlar)
+function materialColors(mats, cat) {
+  if (!mats.length) return [];
+  const keyOf = (m) => Object.keys(db.materialColors || {}).find((k) => nameKey(k) === nameKey(m));
+  const fromList = mats.flatMap((m) => (db.materialColors || {})[keyOf(m)] || []);
+  const fromProducts = db.products.filter((p) => splitList(p.material).length === 1 && mats.some((m) => nameKey(m) === nameKey(p.material))).flatMap((p) => splitList(p.color));
+  const out = uniqNames([...fromList, ...fromProducts]);
+  return out.length ? out : (db.categoryColors?.[cat]?.length ? db.categoryColors[cat] : db.colors);
+}
+let matShowAll = false; // «Boshqa materiallar» bosilgan
+
+function colorsFor(set, attrs = {}, cat = '', material = '') {
+  if (!set) return materialColors(splitList(material), cat);
   const v = set.colorField ? attrs[set.colorField] : '';
   return (v && set.colorsBy?.[v]) || set.colors || [];
 }
@@ -1442,8 +1484,20 @@ function featureBlock(cat, type, p = {}) {
     ${note ? `<div class="muted small feat-note">${note}</div>` : chipPicker('colorChips', colors, p.color, '+ Yangi rang')}
     <input type="hidden" name="color" value="${esc(p.color || '')}"></div>`;
   if (!set) {
-    const own = db.categoryColors?.[cat] || [];
-    return `<div class="form-grid">${colorBox(own.length ? own : db.colors, 'Rangi')}</div>`;
+    // Avval material (bir nechta bo'lishi mumkin), keyin shu materiallarning ranglari
+    const chosen = splitList(p.material);
+    const used = usedMaterials(cat, type);
+    const shown = used.length && !matShowAll ? uniqNames([...used, ...chosen]) : uniqNames([...allMaterials(), ...chosen]);
+    const hiddenCount = allMaterials().filter((m) => !shown.some((x) => nameKey(x) === nameKey(m))).length;
+    const matBox = `<div class="field full"><span class="field-label">Material${used.length && !matShowAll ? ` <span class="muted small">— ${esc(type || cat)} uchun odatdagilari</span>` : ''}</span>
+      <div class="chips chips-pick" id="matChips">${shown.map((m) => `<button type="button" class="chip ${chosen.some((c) => nameKey(c) === nameKey(m)) ? 'on' : ''}" data-act="chipToggle" data-v="${esc(m)}">${esc(m)}</button>`).join('')}
+        ${canAddProducts() ? '<input class="chip-add" placeholder="+ Yangi material" enterkeyhint="done">' : ''}</div>
+      ${hiddenCount ? `<button type="button" class="small mat-more" data-act="matMore">${icon('plus')}Boshqa materiallar (${hiddenCount})</button>` : ''}
+      <input type="hidden" name="material" value="${esc(chosen.join(', '))}"></div>`;
+    const color = chosen.length
+      ? colorBox(materialColors(chosen, cat), `Rangi — ${esc(chosen.join(', '))}`)
+      : colorBox([], 'Rangi', 'Avval materialni tanlang — ranglar shunga qarab chiqadi.');
+    return `<div class="form-grid">${matBox}${color}</div>`;
   }
   const fields = set.fields || [];
   const ctl = fields.find((f) => f.name === set.colorField);
@@ -1467,7 +1521,7 @@ function refreshFeatures() {
   const cat = $('#catSel').value;
   const type = $('#typeSel').value;
   const draft = readFeatureDraft();
-  const list = colorsFor(featureSetFor(cat, type), draft.attrs);
+  const list = colorsFor(featureSetFor(cat, type), draft.attrs, cat, draft.material);
   draft.color = splitList(draft.color).filter((c) => list.includes(c)).join(', ');
   box.innerHTML = featureBlock(cat, type, draft);
 }
@@ -1477,7 +1531,7 @@ function readFeatureDraft() {
   const f = Object.fromEntries(new FormData($('#modalForm')).entries());
   const attrs = {};
   Object.entries(f).forEach(([k, v]) => { if (k.startsWith('attr:') && v) attrs[k.slice(5)] = v; });
-  return { color: f.color, attrs };
+  return { color: f.color, material: f.material, attrs };
 }
 
 // Turi — tanlangan kategoriyaning o'z turlari
@@ -1544,6 +1598,7 @@ function syncChips(box) {
 }
 
 function bindProductForm(p, readonly = false) {
+  matShowAll = false;
   photoEdit = { items: (p.photos || []).slice(), removed: [] };
   renderPhotoList(readonly);
   if (readonly) return;
@@ -1720,7 +1775,20 @@ function readProduct(d, p) {
   // Yangi ranglar va xususiyat qiymatlari keyingi safar ro'yxatda tursin
   const set = featureSetFor(d.category, type);
   const ctlVal = set?.colorField ? (d['attr:' + set.colorField] || '').trim() : '';
-  const colorList = !set ? db.colors
+  const mats = splitList(d.material);
+  // Material katalogi: yangi material va uning yangi ranglari keyingi safar ro'yxatda tursin
+  if (!set) {
+    db.materialColors = db.materialColors || {};
+    mats.forEach((m) => {
+      if (!allMaterials().some((x) => nameKey(x) === nameKey(m))) db.materials = [...(db.materials || []), m];
+      if (mats.length === 1) {
+        const k = Object.keys(db.materialColors).find((x) => nameKey(x) === nameKey(m)) || m;
+        const list = (db.materialColors[k] = db.materialColors[k] || []);
+        splitList(d.color).forEach((c) => { if (!list.some((x) => nameKey(x) === nameKey(c))) list.push(c); });
+      }
+    });
+  }
+  const colorList = !set ? (mats.length ? [] : db.colors)
     : ctlVal ? ((set.colorsBy = set.colorsBy || {})[ctlVal] = set.colorsBy[ctlVal] || [])
     : (set.colors = set.colors || []);
   splitList(d.color).forEach((c) => { if (!colorList.includes(c)) colorList.push(c); });
@@ -1755,6 +1823,7 @@ function readProduct(d, p) {
     type,
     size: d.size.trim(),
     color: d.color.trim(),
+    material: d.material !== undefined ? splitList(d.material).join(', ') : p.material || '',
     attrs,
     origin: p.origin || '', // maydon olib tashlangan — eski qiymat o'zgarmaydi
     supplierId: supplierId || '',
@@ -4998,7 +5067,7 @@ function viewProducts() {
     return `<tr>
       ${thumbCell(p)}
       <td class="click" data-act="editProduct" data-id="${p.id}"><b>${esc(p.name)}</b><div class="muted small prod-path">${icon(productIcon(p))}${esc([p.code, p.category, p.type].filter(Boolean).join(' · '))}</div>
-        ${p.size || p.color || productAttrs(p).length ? `<div class="prod-meta">${p.size ? `<span class="dt">${esc(p.size)} sm</span>` : ''}${p.color ? `<span>${esc(p.color)}</span>` : ''}${productAttrs(p).map(([k, v]) => `<span title="${esc(k)}">${esc(v)}</span>`).join('')}</div>` : ''}
+        ${p.size || p.color || p.material || productAttrs(p).length ? `<div class="prod-meta">${p.size ? `<span class="dt">${esc(p.size)} sm</span>` : ''}${p.material ? `<span>${esc(p.material)}</span>` : ''}${p.color ? `<span>${esc(p.color)}</span>` : ''}${productAttrs(p).map(([k, v]) => `<span title="${esc(k)}">${esc(v)}</span>`).join('')}</div>` : ''}
         ${p.maker ? `<div class="muted small prod-origin">${icon('warehouse')}${esc(p.maker)}</div>` : ''}</td>
       ${showCost ? `<td class="num">${money(ctx.cost[p.id])}</td>` : ''}
       ${showPrice ? `<td class="num">${priceLabel(p)}${p.priceCurrency === 'USD' ? `<div class="muted small">${fmtUsd(p.salePrice)}</div>` : ''}${p.minPrice ? `<div class="muted small">eng kami: ${priceLabel(p, 'minPrice')}</div>` : ''}</td>` : ''}
@@ -5729,8 +5798,16 @@ function viewCategories() {
       <div id="catRows">${categoriesAll().map((c) => catRow(c, typesOf(c))).join('')}</div>
       <button type="button" data-act="catAdd">${icon('plus')}Kategoriya qo'shish</button>
     </div>
+    <div class="card narrow"><h3>${icon('tag')}Materiallar va ularning ranglari</h3>
+      <p class="muted">Mahsulot kartochkasida avval material tanlanadi, keyin shu materialning ranglari chiqadi (masalan, Temir — tilla, qora, nikel; Laminat — Dub beliy, Belaya korona). Har bir tur uchun oldin tanlangan materiallar keyingi safar birinchi chiqadi.</p>
+      <div id="matRows">${allMaterials().map((m) => `<div class="cat-row mat-row" data-orig="${esc(m)}">
+        <div class="cat-head"><input class="cat-name mat-name" value="${esc(m)}" placeholder="Material nomi">
+          <button type="button" class="small danger icon-only" data-act="matDel" title="Materialni olib tashlash">${icon('trash')}</button></div>
+        ${chipEditor((db.materialColors || {})[m] || [], "+ Rang qo'shish (Enter)")}</div>`).join('')}</div>
+      <button type="button" data-act="matAdd">${icon('plus')}Material qo'shish</button>
+    </div>
     <div class="card narrow"><h3>${icon('tag')}Umumiy ranglar</h3>
-      <p class="muted">O'z ranglari berilmagan kategoriyalarda mahsulot kartochkasida shu ranglar chiqadi (masalan, Dub beliy, Belaya korona, Oq gladkiy).</p>
+      <p class="muted">Material ranglari berilmagan bo'lsa, mahsulot kartochkasida shu ranglar chiqadi (masalan, Dub beliy, Belaya korona, Oq gladkiy).</p>
       <div id="colorEditor">${chipEditor(db.colors, "+ Rang qo'shish (Enter)")}</div>
     </div>
     <div class="card narrow"><h3>${icon('sofa')}Turga xos xususiyatlar</h3>
@@ -5815,6 +5892,17 @@ function saveLists(quiet = false) {
     });
   });
   db.colors = $$('#colorEditor .chip').map((c) => c.dataset.v);
+  // Materiallar va ranglari
+  const mc = {};
+  $$('#matRows .mat-row').forEach((row) => {
+    const name = capFirst($('.mat-name', row).value);
+    if (!name || Object.keys(mc).some((k) => nameKey(k) === nameKey(name))) return;
+    mc[name] = $$('.chip', row).map((c) => c.dataset.v);
+    if (row.dataset.orig && row.dataset.orig !== name) db.products.forEach((p) => { const l = splitList(p.material); if (l.includes(row.dataset.orig)) p.material = l.map((x) => (x === row.dataset.orig ? name : x)).join(', '); });
+    row.dataset.orig = name;
+  });
+  db.materialColors = mc;
+  db.materials = Object.keys(mc);
   db.customerTypes = $$('#ctypeEditor .chip').map((c) => c.dataset.v);
   // Viloyatlar: mavjud shahar/tumanlarning mahallalari saqlanib qoladi
   const oldRegions = db.regions;
@@ -6530,7 +6618,8 @@ const ACTIONS = {
     if (f.endsWith('.cat')) filters[f.replace('.cat', '.type')] = '';
     render();
   },
-  chipToggle: (ds, el) => { el.classList.toggle('on'); syncChips(el.closest('.chips')); },
+  chipToggle: (ds, el) => { el.classList.toggle('on'); syncChips(el.closest('.chips')); if (el.closest('#matChips')) refreshFeatures(); },
+  matMore: () => { matShowAll = true; refreshFeatures(); },
   chipOne: (ds, el) => {
     const box = el.closest('.chips');
     const on = !el.classList.contains('on');
@@ -6552,6 +6641,18 @@ const ACTIONS = {
     $('#regionRows .reg-row:last-child .cat-name').focus();
   },
   regDel: (ds, el) => el.closest('.reg-row').remove(),
+  matAdd: () => {
+    $('#matRows').insertAdjacentHTML('beforeend', `<div class="cat-row mat-row" data-orig=""><div class="cat-head"><input class="cat-name mat-name" placeholder="Material nomi">
+      <button type="button" class="small danger icon-only" data-act="matDel" title="Olib tashlash">${icon('trash')}</button></div>${chipEditor([], "+ Rang qo'shish (Enter)")}</div>`);
+    $('#matRows .mat-row:last-child .mat-name').focus();
+  },
+  matDel: (ds, el) => {
+    const row = el.closest('.mat-row');
+    const n = db.products.filter((p) => splitList(p.material).includes(row.dataset.orig)).length;
+    if (!confirm(`«${row.dataset.orig || 'Material'}» ro'yxatdan olib tashlansinmi?${n ? ` (${n} ta mahsulotda yozilgan — ularda qoladi)` : ''}`)) return;
+    row.remove();
+    scheduleListsSave();
+  },
   fsAdd: () => {
     $('#fsRows').insertAdjacentHTML('beforeend', fsRow());
     $('#fsRows .fs-row:last-child .fs-name').focus();
@@ -7144,7 +7245,8 @@ document.addEventListener('keydown', (e) => {
     input.insertAdjacentHTML('beforebegin', `<button type="button" class="chip on" data-act="chipOne" data-v="${esc(v)}">${esc(v)}</button>`);
     if (box.dataset.ctl) { syncChips(box); refreshFeatures(); return; }
   } else if (box.classList.contains('chips-pick')) {
-    input.insertAdjacentHTML('beforebegin', `<button type="button" class="chip on" data-act="chipToggle" data-v="${esc(v)}">${esc(v)}</button>`);
+    input.insertAdjacentHTML('beforebegin', `<button type="button" class="chip on" data-act="chipToggle" data-v="${esc(capFirst(v))}">${esc(capFirst(v))}</button>`);
+    if (box.id === 'matChips') { syncChips(box); refreshFeatures(); return; }
   } else {
     input.insertAdjacentHTML('beforebegin', editChip(v));
   }
