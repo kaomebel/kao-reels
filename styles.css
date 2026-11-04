@@ -1378,3 +1378,9 @@ html.modal-open, html.modal-open body { overflow: hidden; overscroll-behavior: n
 .sup-cat .chips { gap: 6px; }
 .sup-line { color: var(--accent-dark); margin-top: 2px; }
 .sup-line svg { width: 14px; height: 14px; vertical-align: -2px; }
+
+/* Qabul qilishda yo'l kira */
+.freight-block { padding: 12px; border: 1px dashed var(--border-strong, var(--border)); border-radius: 12px; }
+.freight-block .fr-mode { margin: 6px 0 10px; flex-wrap: wrap; }
+.freight-block .form-grid { margin-bottom: 6px; }
+.for-doc { color: var(--accent-dark); margin-top: 2px; }

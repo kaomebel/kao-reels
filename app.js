@@ -2324,6 +2324,7 @@ function docForm(type, d) {
     foot += selectField("To'lov usuli", 'payMethod', Object.entries(PAY_METHODS), 'cash');
     if (t.pay === 'in' && !d.id) foot += `<div class="full receipt-line" id="receiptLine" hidden></div>`;
   }
+  if (type === 'receipt') foot += freightBlock(d);
   if (type === 'sale') {
     // Qarzga sotuv: to'langan summa jamidan kam bo'lsa — qolgan summa, qaytarish sanasi va mas'ul
     const sellers = db.users.filter((u) => u.active !== false).map((u) => [u.name, u.name]);
@@ -3251,7 +3252,9 @@ async function saveDoc(type, existing, preset, data, stock) {
         }
       }
     }
+    if (type === 'receipt' && !readFreight(data, d)) return false;
     db.docs.push(d);
+    if (type === 'receipt' && d.freight && canBookFreight()) await bookFreight(d);
     if (pay > 0) {
       db.payments.push({
         id: uid(), no: await nextNo(t.pay === 'in' ? 'payIn' : 'payOut'), dir: t.pay, date: d.date, counterpartyId, docId: d.id,
@@ -3648,6 +3651,7 @@ function newExpense(catName, sub = '') {
         ${field('Sana', 'date', today(), 'type="date" required')}
         ${selectField("To'lov usuli", 'method', Object.entries(PAY_METHODS), 'cash')}
         <label class="full" id="subLbl" ${subOpts(cat, sub) ? '' : 'hidden'}>Nima uchun<select name="sub">${subOpts(cat, sub)}</select></label>
+        <label class="full" id="forDocLbl" ${FARE_RE.test(cat) || FUEL_RE.test(cat) ? '' : 'hidden'}>Qaysi qabul (tovar) uchun — ixtiyoriy<select name="forDocId"><option value="">—</option>${freightDocOptions().map(([v, t]) => `<option value="${esc(v)}">${esc(t)}</option>`).join('')}</select></label>
         <div class="full salary-box" id="salaryBox" ${isSalaryCat(cat) ? '' : 'hidden'}>
           <div class="form-grid">
             ${staff.length ? `<label>Xodim<select name="employeeSel"><option value="">— ro'yxatdan tanlang —</option>${staff.map((n) => `<option ${n === sub && isSalaryCat(cat) ? 'selected' : ''}>${esc(n)}</option>`).join('')}<option value="__new">+ Yangi xodim...</option></select></label>` : ''}
@@ -3664,6 +3668,7 @@ function newExpense(catName, sub = '') {
         const o = subOpts(sel.value, '');
         $('#modalBody [name=sub]').innerHTML = o;
         $('#subLbl').hidden = !o;
+        $('#forDocLbl').hidden = !(FARE_RE.test(sel.value) || FUEL_RE.test(sel.value));
       });
       $('#modalBody [name=employeeSel]')?.addEventListener('change', (e) => {
         $('#empNewLbl').hidden = e.target.value !== '__new';
@@ -3682,6 +3687,7 @@ function newExpense(catName, sub = '') {
         purpose: d.purpose, counterpartyId: null, docId: null, note: d.note.trim(), userId: me?.id,
         employee: salary ? d.employee.trim() : undefined, forMonth: salary ? d.forMonth : undefined,
         sub: !salary && d.sub ? d.sub : undefined,
+        forDocId: d.forDocId && (FARE_RE.test(d.purpose) || FUEL_RE.test(d.purpose)) ? d.forDocId : undefined,
       });
       // Yangi xodim ismi oylik moddasining tugmalariga yoziladi (administrator) — keyingi safar tanlanadi
       const sc = salaryCat();
@@ -3717,12 +3723,12 @@ function viewExpenses() {
       <span class="exp-bar"><i style="width:${Math.round((sum / max) * 100)}%"></i></span></button>`).join('');
   const rows = list.map((p) => `<tr>
       <td>${fmtDate(p.date)}<div class="muted small">${esc(p.no || '')}</div></td>
-      <td>${expenseEmoji(p.purpose)} ${esc(p.purpose)}${p.sub ? ` › <b>${esc(p.sub)}</b>` : ''}${p.employee ? `<div class="small"><b>${esc(p.employee)}</b>${p.forMonth ? ` · ${esc(p.forMonth)} oy uchun` : ''}</div>` : ''}</td>
+      <td>${expenseEmoji(p.purpose)} ${esc(p.purpose)}${p.sub ? ` › <b>${esc(p.sub)}</b>` : ''}${p.forDocId && doc(p.forDocId) ? `<div class="small for-doc">📦 ${esc(doc(p.forDocId).no)} · ${esc(party(doc(p.forDocId).counterpartyId)?.name || '')} · ${esc(docItemsText(doc(p.forDocId)))}</div>` : ''}${p.employee ? `<div class="small"><b>${esc(p.employee)}</b>${p.forMonth ? ` · ${esc(p.forMonth)} oy uchun` : ''}</div>` : ''}</td>
       <td>${esc(p.note || '')}<div class="muted small">${esc(userName(p.userId))}</div></td>
       <td>${esc(PAY_METHODS[p.method] || '')}</td>
       <td class="num"><b>${money(p.amount)}</b></td>
       <td class="actions">${admin ? `<button class="small danger icon-only" data-act="deletePayment" data-id="${p.id}" title="O'chirish">${icon('trash')}</button>` : ''}</td></tr>`).join('');
-  return `<p class="muted small exp-hint">Xarajat turini tanlang — summani kiriting:</p>${quick}`
+  return unbookedFreightCard() + `<p class="muted small exp-hint">Xarajat turini tanlang — summani kiriting:</p>${quick}`
     + toolbar('expenses', { extra: periodInputs('expenses'), buttons: `<button class="primary" data-act="newExpense">${icon('plus')}Xarajat</button>` })
     + `<div class="stats"><div class="stat"><div class="label">Davr bo'yicha jami xarajat</div><div class="value">${money(total)}</div></div>
         <div class="stat"><div class="label">Xarajatlar soni</div><div class="value">${all.length}</div></div></div>`
@@ -4541,6 +4547,115 @@ function inPeriod(view, date) {
 }
 
 // --- Bosh sahifa ---
+
+// ---------- Yo'l kira (qabul qilishda tovarni olib kelish) ----------
+// «Begona mashina» — yo'l kira summasi; «O'z mashinamiz» — yoqilg'i va boshqa xarajatlar.
+// Ular Xarajatlar bo'limiga o'zi tushadi (forDocId — qaysi qabul uchun), ma'lumot hujjatning o'zida ham saqlanadi.
+const FARE_RE = /yo.?l ?kira|yetkaz|transport|yuk tash/i;
+const FUEL_RE = /yoqilg/i;
+const fareCat = () => expenseCatsList().find((c) => /yo.?l ?kira/i.test(c.name))?.name || "Yo'l kira";
+const fuelCat = () => expenseCatsList().find((c) => FUEL_RE.test(c.name))?.name || "Avtomashina yoqilg'isi";
+const canBookFreight = () => can('money') || can('expenses');
+const freightOf = (docId) => db.payments.filter((p) => p.forDocId === docId);
+const freightTotal = (d) => (d.freight ? (d.freight.mode === 'hired' ? d.freight.amount : (d.freight.fuel || 0) + (d.freight.other || 0)) : 0);
+
+function freightSummary(d) {
+  const f = d.freight;
+  if (!f) return '';
+  return f.mode === 'hired'
+    ? `Begona mashina${f.who ? ` (${f.who})` : ''}: ${money(f.amount)}`
+    : `O'z mashinamiz${f.car ? ` (${f.car})` : ''}: ${[f.fuel ? `yoqilg'i ${money(f.fuel)}` : '', f.other ? `boshqa ${money(f.other)}` : ''].filter(Boolean).join(', ') || '—'}${f.note ? ` · ${f.note}` : ''}`;
+}
+
+function freightBlock(d) {
+  if (d.id) {
+    const list = freightOf(d.id);
+    if (!d.freight && !list.length) return '';
+    return `<div class="field full freight-block"><span class="field-label">🚚 Yo'l kira</span>
+      <div>${esc(freightSummary(d))}</div>
+      ${list.length ? `<div class="muted small">Xarajatlarda: ${list.map((p) => `${esc(p.no)} — ${money(p.amount)}`).join(', ')}</div>` : d.freight ? '<div class="muted small">Xarajatlarga hali o\'tkazilmagan (Xarajatlar bo\'limida administrator o\'tkazadi).</div>' : ''}</div>`;
+  }
+  const cars = (db.drivers || []).map((x) => [x.name, x.car].filter(Boolean).join(' — '));
+  const methods = Object.entries(PAY_METHODS);
+  return `<div class="field full freight-block" id="freightBlock">
+    <span class="field-label">🚚 Yo'l kira — tovar qanday olib kelindi?</span>
+    <div class="seg seg-sm fr-mode" role="radiogroup">
+      <label><input type="radio" name="frMode" value="none" checked><span>Yo'l kira yo'q</span></label>
+      <label><input type="radio" name="frMode" value="hired"><span>Begona mashina</span></label>
+      <label><input type="radio" name="frMode" value="own"><span>O'z mashinamiz</span></label>
+    </div>
+    <div class="form-grid fr-hired" hidden>
+      ${moneyField("Yo'l kira summasi *", 'frAmount', '', 'UZS', 'placeholder="0"')}
+      ${field('Kim olib keldi (shofyor / mashina)', 'frWho', '', 'placeholder="Masalan: Akmal, Damas 01 A 123"')}
+      ${selectField("To'lov usuli", 'frMethod', methods, 'cash')}
+    </div>
+    <div class="form-grid fr-own" hidden>
+      <label>Mashina<input name="frCar" list="frCars" autocomplete="off" placeholder="Masalan: Labo, Damas"><datalist id="frCars">${cars.map((c) => `<option value="${esc(c)}">`).join('')}</datalist></label>
+      ${moneyField("Yoqilg'i", 'frFuel', '', 'UZS', 'placeholder="0"')}
+      ${moneyField("Boshqa xarajat (yo'l haqi, ovqat...)", 'frOther', '', 'UZS', 'placeholder="0"')}
+      ${field('Nimalarga sarflandi (izoh)', 'frNote', '', 'placeholder="Masalan: benzin 20 l, yo\'l puli"')}
+      ${selectField("To'lov usuli", 'frMethodOwn', methods, 'cash')}
+    </div>
+    <p class="muted small">Summa Xarajatlar bo'limiga o'zi tushadi — qaysi qabul va qaysi tovarlar uchun ekani yozib qo'yiladi.</p>
+  </div>`;
+}
+
+document.addEventListener('change', (e) => {
+  if (e.target.name !== 'frMode') return;
+  const box = e.target.closest('#freightBlock');
+  $('.fr-hired', box).hidden = e.target.value !== 'hired';
+  $('.fr-own', box).hidden = e.target.value !== 'own';
+});
+
+// Formadagi yo'l kira — hujjatga (d.freight). Noto'g'ri bo'lsa false
+function readFreight(data, d) {
+  const mode = data.frMode || 'none';
+  if (mode === 'hired') {
+    const amount = num(data.frAmount);
+    if (!(amount > 0)) { alert("Yo'l kira summasini kiriting (yoki «Yo'l kira yo'q» ni tanlang)."); $('#modalBody [name=frAmount]')?.focus(); return false; }
+    d.freight = { mode, amount, who: (data.frWho || '').trim(), method: data.frMethod || 'cash' };
+  } else if (mode === 'own') {
+    const fuel = num(data.frFuel);
+    const other = num(data.frOther);
+    if (!(fuel > 0 || other > 0)) { alert("O'z mashinamiz xarajatini kiriting: yoqilg'i yoki boshqa xarajat."); $('#modalBody [name=frFuel]')?.focus(); return false; }
+    d.freight = { mode, car: (data.frCar || '').trim(), fuel, other, note: (data.frNote || '').trim(), method: data.frMethodOwn || 'cash' };
+  }
+  return true;
+}
+
+// Hujjatdagi yo'l kirani Xarajatlarga yozadi (bir marta)
+async function bookFreight(d) {
+  const f = d.freight;
+  if (!f || f.booked) return;
+  const base = { dir: 'out', expense: true, date: d.date, counterpartyId: null, docId: null, forDocId: d.id, userId: me?.id, method: f.method || 'cash' };
+  const add = async (amount, purpose, sub, note) => {
+    if (!(amount > 0)) return;
+    db.payments.push({ ...base, id: uid(), no: await nextNo('payOut'), amount, purpose, sub, note });
+  };
+  // Qaysi qabul va tovar uchun ekani xarajatlar ro'yxatida alohida (forDocId) ko'rinadi
+  if (f.mode === 'hired') await add(f.amount, fareCat(), 'Olib kelish', `Begona mashina${f.who ? `: ${f.who}` : ''}`);
+  else {
+    await add(f.fuel, fuelCat(), undefined, `O'z mashinamiz${f.car ? `: ${f.car}` : ''}${f.note ? ` (${f.note})` : ''}`);
+    await add(f.other, fareCat(), 'Olib kelish', `O'z mashinamiz${f.car ? `: ${f.car}` : ''}${f.note ? ` — ${f.note}` : ''}`);
+  }
+  f.booked = true;
+}
+
+// Xodim kiritgan (xarajat ruxsati yo'q) yo'l kiralar — administrator bir tugma bilan Xarajatlarga o'tkazadi
+function unbookedFreightCard() {
+  if (!canBookFreight()) return '';
+  const list = db.docs.filter((d) => d.type === 'receipt' && d.freight && !d.freight.booked);
+  if (!list.length) return '';
+  return `<div class="card warn-card"><h3>🚚 Yo'l kiralar xarajatga o'tkazilmagan</h3>
+    ${list.map((d) => `<div class="sc-row"><span><b>${esc(d.no)}</b> · ${esc(party(d.counterpartyId)?.name || '')}<div class="muted small">${esc(freightSummary(d))}</div></span>
+      <b class="sc-sum">${money(freightTotal(d))}</b><button class="small primary" data-act="bookFreight" data-id="${d.id}">${icon('check')}O'tkazish</button></div>`).join('')}</div>`;
+}
+
+// Qo'lda kiritilgan yo'l kira / yoqilg'i: qaysi qabul (tovar) uchun
+function freightDocOptions() {
+  return db.docs.filter((d) => d.type === 'receipt').sort((a, b) => (b.date + b.no).localeCompare(a.date + a.no)).slice(0, 40)
+    .map((d) => [d.id, `${d.no} · ${fmtDate(d.date)} · ${party(d.counterpartyId)?.name || ''} · ${docItemsText(d)}`.slice(0, 120)]);
+}
 
 // ---------- Xodimlardagi naqd pul (kechqurun administratorga topshiriladi) ----------
 // Xodim olgan naqd pul uning «qo'lida» turadi, administrator «Qabul qildim» bosguncha.
@@ -6271,6 +6386,7 @@ document.addEventListener('change', (e) => {
 const ACTIONS = {
   newDoc: (ds) => openDoc(ds.type),
   moneyMenu: (ds) => openMoneyMenu(ds.dir),
+  bookFreight: async (ds) => { const d = doc(ds.id); if (d && canBookFreight()) { await bookFreight(d); save(); } },
   collectCash: (ds) => { if (isAdmin()) collectCash(ds.id); },
   openDoc: (ds) => { const d = doc(ds.id); if (d) openDoc(d.type, d); },
   exportDocs: (ds) => exportDocs(ds.type),
