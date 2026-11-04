@@ -1369,3 +1369,12 @@ html.modal-open, html.modal-open body { overflow: hidden; overscroll-behavior: n
 .cash-table { width: 100%; font-size: 14px; }
 .cash-table td, .cash-table th { padding: 8px 6px; vertical-align: top; }
 @media (max-width: 700px) { .cash-table td.small { white-space: nowrap; } }
+
+/* Ta'minotchi: nimalar yetkazib beradi */
+.sup-block #supBox { display: flex; flex-direction: column; gap: 10px; margin-top: 6px; }
+.sup-cat { padding: 8px 10px; border: 1px solid var(--border); border-radius: 12px; }
+.sup-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.sup-head > svg { width: 20px; height: 20px; color: var(--accent-dark); flex: none; }
+.sup-cat .chips { gap: 6px; }
+.sup-line { color: var(--accent-dark); margin-top: 2px; }
+.sup-line svg { width: 14px; height: 14px; vertical-align: -2px; }

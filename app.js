@@ -2023,8 +2023,42 @@ function partyForm(c = {}) {
     ${customerTypeField(c.ctype, 'Mijoz turi')}
     ${field('STIR (INN)', 'inn', c.inn)}
     ${field('Manzil', 'address', c.address, '', 'full')}
+    ${suppliesField(c)}
     ${textArea('Izoh', 'note', c.note)}
   </div>`;
+}
+
+// Ta'minotchi nimalar yetkazib beradi: «Kategoriya» yoki «Kategoriya › Tur» (yoki erkin yozilgan nom).
+// Qo'lda belgilanganlar + undan qilingan xaridlar va mahsulotlardan o'zi yig'iladi.
+function autoSupplies(cid) {
+  if (!cid) return [];
+  const ids = new Set();
+  db.docs.forEach((d) => { if (d.counterpartyId === cid && ['receipt', 'purchaseOrder'].includes(d.type)) d.items.forEach((it) => ids.add(it.productId)); });
+  db.products.forEach((p) => { if (p.supplierId === cid) ids.add(p.id); });
+  return uniqNames([...ids].map(product).filter((p) => p && p.category && !isKit(p)).map((p) => (p.type ? `${p.category} › ${p.type}` : p.category)));
+}
+const suppliesOf = (c) => uniqNames([...(c?.supplies || []), ...autoSupplies(c?.id)]);
+// Ro'yxatda qisqa: turlar nomi, turi yo'q bo'lsa kategoriya
+const suppliesText = (c) => uniqNames(suppliesOf(c).map((v) => v.split(' › ').pop())).join(', ');
+
+function suppliesField(c) {
+  const on = new Set(suppliesOf(c).map(nameKey));
+  const chip = (v, label) => `<button type="button" class="chip ${on.has(nameKey(v)) ? 'on' : ''}" data-act="chipToggle" data-v="${esc(v)}">${esc(label)}</button>`;
+  const cats = categoriesAll().filter((x) => x !== KIT_CATEGORY);
+  const known = new Set(cats.flatMap((cat) => [cat, ...typesOf(cat).map((t) => `${cat} › ${t}`)]).map(nameKey));
+  const other = suppliesOf(c).filter((v) => !known.has(nameKey(v)));
+  return `<div class="field full sup-block" id="supBlock" ${c.kind === 'customer' ? 'hidden' : ''}>
+    <span class="field-label">${icon('truck')} Nimalar yetkazib beradi</span>
+    <p class="muted small">Kerakli kategoriya yoki turlarni belgilang (masalan: Ofis kreslo, Stul, Shkaf). Bu ta'minotchidan qilingan xaridlar ham o'zi qo'shiladi.</p>
+    <div id="supBox">${cats.map((cat) => `<div class="sup-cat"><div class="sup-head">${icon(categoryIcon(cat))}<div class="chips">${chip(cat, `${cat} — hammasi`)}</div></div>
+      ${typesOf(cat).length ? `<div class="chips chips-pick">${typesOf(cat).map((t) => chip(`${cat} › ${t}`, t)).join('')}</div>` : ''}</div>`).join('')}
+      <div class="sup-cat"><div class="sup-head">${icon('plus')}<b>Boshqa</b></div><div class="chips chips-pick">${other.map((v) => chip(v, v)).join('')}<input class="chip-add" placeholder="+ Yozing va Enter (masalan: Oyna, Furnitura)" enterkeyhint="done"></div></div>
+    </div></div>`;
+}
+
+function bindPartyForm() {
+  const kind = $('#modalBody [name=kind]');
+  kind?.addEventListener('change', () => { $('#supBlock').hidden = kind.value === 'customer'; });
 }
 
 // Qidiruvda raqam "90 111", "901112233" yoki "+998..." ko'rinishida yozilsa ham topiladi
@@ -2039,13 +2073,15 @@ function phoneTaken(phone, exceptId) {
 function readParty(d, c) {
   if (fieldPhoneDigits(d.phone).length === 9) d.phone = fmtPhone(fieldPhoneDigits(d.phone));
   else if (phoneDigits(d.phone) === '998') d.phone = '';
-  return Object.assign(c, { name: d.name.trim(), kind: d.kind, ctype: d.kind === 'supplier' ? '' : readCustomerType(d), phone: d.phone.trim(), inn: d.inn.trim(), address: d.address.trim(), note: d.note.trim() });
+  const supplies = $('#supBox') && d.kind !== 'customer' ? uniqNames($$('#supBox .chip.on').map((x) => x.dataset.v)) : c.supplies;
+  return Object.assign(c, { name: d.name.trim(), kind: d.kind, ctype: d.kind === 'supplier' ? '' : readCustomerType(d), phone: d.phone.trim(), inn: d.inn.trim(), address: d.address.trim(), note: d.note.trim(), supplies: supplies?.length ? supplies : undefined });
 }
 
 function newParty(kind) {
   openModal({
     title: 'Yangi kontragent',
     body: partyForm({ kind }),
+    onOpen: bindPartyForm,
     onSubmit: (d) => {
       const dup = phoneTaken(d.phone);
       if (dup && !confirm(`Bu raqam bilan kontragent allaqachon bor: ${dup.name}. Baribir yangisini qo'shilsinmi?`)) return false;
@@ -2072,6 +2108,7 @@ function editParty(id) {
   openModal({
     title: 'Kontragent',
     body: partyForm(c),
+    onOpen: bindPartyForm,
     extra: [{ label: "O'zaro hisob-kitob", onClick: () => partyStatement(id) }],
     onSubmit: (d) => {
       readParty(d, c);
@@ -4891,12 +4928,13 @@ function viewParties(fixed = '') {
   const list = db.counterparties
     .filter((c) => !kind || c.kind === kind || c.kind === 'both')
     .filter((c) => !ctype || c.ctype === ctype)
-    .filter((c) => !q || [c.name, c.phone, c.address, c.inn].join(' ').toLowerCase().includes(q) || phoneMatch(c.phone, q));
+    .filter((c) => !q || [c.name, c.phone, c.address, c.inn, c.kind !== 'customer' ? suppliesOf(c).join(' ') : ''].join(' ').toLowerCase().includes(q) || phoneMatch(c.phone, q));
   const rows = list.map((c) => {
     const b = partyBalance(c.id);
     const full = seesParties();
     const money_ = can('money');
-    return `<tr class="click" data-act="editParty" data-id="${c.id}"><td><b>${esc(c.name)}</b>${c.note && full ? `<div class="muted small">${esc(c.note)}</div>` : ''}</td><td>${esc(KINDS[c.kind])}${c.ctype && full ? `<div class="muted small">${esc(c.ctype)}</div>` : ''}</td>
+    const sup = c.kind !== 'customer' ? suppliesText(c) : '';
+    return `<tr class="click" data-act="editParty" data-id="${c.id}"><td><b>${esc(c.name)}</b>${sup ? `<div class="small sup-line">${icon('truck')} ${esc(sup)}</div>` : ''}${c.note && full ? `<div class="muted small">${esc(c.note)}</div>` : ''}</td><td>${esc(KINDS[c.kind])}${c.ctype && full ? `<div class="muted small">${esc(c.ctype)}</div>` : ''}</td>
       <td class="dt">${esc(full ? c.phone : maskPhone(c.phone))}</td><td>${full ? esc(c.address) : '—'}</td><td class="num ${b > 0 ? 'debt' : b < 0 ? 'warn' : ''}">${b && (full || money_) ? money(b) : '—'}</td>
       <td class="actions">${full || money_ ? `<button class="small" data-act="statement" data-id="${c.id}">${icon('receipt')}Hisob-kitob</button>` : ''}${isAdmin() ? `<button class="small danger icon-only" data-act="deleteParty" data-id="${c.id}" title="O'chirish">${icon('trash')}</button>` : ''}</td></tr>`;
   }).join('');
