@@ -317,12 +317,48 @@ function scheduleRender() {
   }, 300);
 }
 
+const subscribeLive = () => backend.subscribe(db, (table) => { if (table === 'profiles') checkMyAccess(); scheduleRender(); });
+
+// Telefon uxlab qolsa yoki dastur fonda tursa jonli aloqa uziladi va o'zgarishlar kelmay qoladi.
+// Dastur qayta ochilganda (va har 5 daqiqada) ma'lumotlar serverdan jimgina yangilanadi.
+let lastFresh = Date.now();
+let refreshing = false;
+async function quietRefresh(force = false) {
+  if (refreshing || !me || backend?.kind !== 'supabase' || syncState.offline || backend.loadedOffline) return;
+  if (!force && Date.now() - lastFresh < 30e3) return;
+  if ($('#modal').open || $('#subModal')?.open || !navigator.onLine) return; // oyna ochiq — yozilayotgan narsa buzilmasin
+  if (document.activeElement?.closest?.('#view') && /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) return;
+  refreshing = true;
+  try {
+    await commitQueue; // yuborilayotganlar avval tugasin
+    const fresh = normalizeDb(await backend.load(emptyDb()));
+    if ($('#modal').open || $('#subModal')?.open) return;
+    db = fresh;
+    lastFresh = Date.now();
+    await refreshServerStock();
+    subscribeLive();
+    if (backend.loadedOffline) setSyncState(true); // server javob bermadi — telefondagi nusxa
+    render();
+  } catch (e) {
+    console.warn('Yangilash:', e);
+  } finally {
+    refreshing = false;
+  }
+}
+let hiddenAt = 0;
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) { hiddenAt = Date.now(); return; }
+  if (hiddenAt && Date.now() - hiddenAt > 20e3) quietRefresh(true);
+});
+setInterval(() => { if (!document.hidden && Date.now() - lastFresh > 5 * 60e3) quietRefresh(true); }, 60e3);
+
 async function loadData() {
   showLoading(true);
   try {
     db = normalizeDb(await backend.load(emptyDb()));
+    lastFresh = Date.now();
     await refreshServerStock();
-    backend.subscribe(db, (table) => { if (table === 'profiles') checkMyAccess(); scheduleRender(); });
+    subscribeLive();
     if (isAdmin()) refreshStorageUsage();
     refreshRate();
   } finally {
