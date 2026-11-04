@@ -843,7 +843,7 @@ function openModal({ title, body, onSubmit, onOpen, extra = [], wide = false, su
   $('#modalSubmit').textContent = submitText;
   $('#modalSubmit').hidden = !onSubmit;
   $('#modalExtra').innerHTML = extra.map((b, i) => `<button type="button" class="${b.cls || ''}" data-extra="${i}">${esc(b.label)}</button>`).join('');
-  modalState = { onSubmit, extra };
+  modalState = { onSubmit, extra, dirty: false };
   if (!$('#modal').open) { window.modalScrollY = window.scrollY; $('#modal').showModal(); }
   document.documentElement.classList.add('modal-open');
   window.trackViewportSettle?.();
@@ -888,12 +888,18 @@ function openSubModal({ title, body, onSubmit, onOpen, submitText = 'Saqlash' })
   $('#subTitle').textContent = title;
   $('#subBody').innerHTML = body;
   $('#subSubmit').textContent = submitText;
-  subState = { onSubmit };
+  subState = { onSubmit, dirty: false };
   if (!$('#subModal').open) $('#subModal').showModal();
   if (onOpen) onOpen();
   if (isTouch()) $('#subTitle').focus({ preventScroll: true });
 }
-$('#subCancel').addEventListener('click', () => $('#subModal').close());
+// Yozilgan ma'lumot bo'lsa — yopishdan oldin so'raladi (adashib bosilganda yo'qolmasin)
+const askClose = (st) => !st?.onSubmit || !st.dirty || confirm("Kiritilgan ma'lumotlar saqlanmaydi. Oynani yopasizmi?");
+const closeSub = () => { if (askClose(subState)) $('#subModal').close(); };
+$('#subCancel').addEventListener('click', closeSub);
+$('#subX').addEventListener('click', closeSub);
+$('#subBody').addEventListener('input', () => { if (subState) subState.dirty = true; });
+$('#subModal').addEventListener('cancel', (e) => { if (!askClose(subState)) e.preventDefault(); });
 $('#subForm').addEventListener('submit', async (e) => {
   e.preventDefault();
   const bad = $$('[required]', e.target).find((el) => !el.value.trim());
@@ -1108,7 +1114,11 @@ $('#modalForm').addEventListener('submit', async (e) => {
   }
   if (result !== false) closeModal();
 });
-$('#modalCancel').addEventListener('click', closeModal);
+const closeModalAsk = () => { if (askClose(modalState)) closeModal(); };
+$('#modalCancel').addEventListener('click', closeModalAsk);
+$('#modalX').addEventListener('click', closeModalAsk);
+$('#modalBody').addEventListener('input', (e) => { if (modalState && !e.target.closest('.it-search')) modalState.dirty = true; });
+$('#modalBody').addEventListener('change', (e) => { if (modalState && e.isTrusted) modalState.dirty = true; });
 $('#modalExtra').addEventListener('click', (e) => {
   const b = e.target.closest('[data-extra]');
   if (b) modalState.extra[b.dataset.extra].onClick();
@@ -2800,7 +2810,8 @@ document.addEventListener('focusout', (e) => {
 $('#modal').addEventListener('close', () => { closePicker(); docFormCtx = null; });
 $('#modal').addEventListener('cancel', (e) => {
   const panel = $('#pickPanel');
-  if (panel && !panel.hidden) { e.preventDefault(); closePicker(); }
+  if (panel && !panel.hidden) { e.preventDefault(); closePicker(); return; }
+  if (!askClose(modalState)) e.preventDefault(); // Esc — yozilganlar bo'lsa so'raladi
 });
 
 function bindDocForm(type, editingId) {
@@ -4031,6 +4042,27 @@ async function telegramPostProducts(ids, manual = false) {
 function telegramOnStockIn(d) {
   telegramPostProducts(d.items.map((it) => it.productId), true);
 }
+
+// ---------- Sichqoncha g'ildiragi / touchpad: faqat kursor turgan ro'yxat suriladi ----------
+// Oyna yoki tanlash ro'yxati ochiq bo'lsa, ichidagi ro'yxat oxiriga yetganda ham orqadagi oyna/sahifa siljimaydi.
+(() => {
+  const canScroll = (el, dy) => {
+    const st = getComputedStyle(el);
+    if (!/(auto|scroll)/.test(st.overflowY) || el.scrollHeight <= el.clientHeight + 1) return false;
+    return dy < 0 ? el.scrollTop > 0 : el.scrollTop + el.clientHeight < el.scrollHeight - 1;
+  };
+  document.addEventListener('wheel', (e) => {
+    if (Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return; // gorizontal surish — tegmaymiz
+    const layer = e.target.closest?.('dialog[open], #pickPanel, .ctx-menu');
+    if (!layer && !document.querySelector('dialog[open]')) return; // oddiy sahifa — odatdagidek
+    if (!layer) { e.preventDefault(); return; } // oyna ochiq, kursor tashqarida
+    for (let el = e.target; el && el !== document.documentElement; el = el.parentElement) {
+      if (el.nodeType === 1 && canScroll(el, e.deltaY)) return; // shu ro'yxat suriladi
+      if (el === layer) break;
+    }
+    e.preventDefault(); // surilmaydigan joy yoki ro'yxat oxiri — tashqi oyna qimirlamaydi
+  }, { passive: false });
+})();
 
 // ---------- Telefonda tanlash ro'yxatlari (select) — butun ekranda ----------
 // Android/iPhone'ning o'z tanlash oynasi ba'zan juda kichik ochiladi (2-3 qator ko'rinadi).

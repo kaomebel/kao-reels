@@ -1384,3 +1384,20 @@ html.modal-open, html.modal-open body { overflow: hidden; overscroll-behavior: n
 .freight-block .fr-mode { margin: 6px 0 10px; flex-wrap: wrap; }
 .freight-block .form-grid { margin-bottom: 6px; }
 .for-doc { color: var(--accent-dark); margin-top: 2px; }
+
+/* Oyna sarlavhasi: o'ng burchakda «×»; pastda «Yopish» chapda kichik, «Saqlash» o'ngda */
+.modal-head { display: flex; align-items: center; gap: 8px; border-bottom: 1px solid var(--border); }
+.modal-head h3 { flex: 1; border-bottom: none !important; min-width: 0; }
+.modal-x { flex: none; width: 40px; height: 40px; min-height: 0; padding: 0; margin-right: 12px; border-radius: 50%; font-size: 24px; line-height: 1; color: var(--muted); background: transparent; border-color: transparent; box-shadow: none; }
+@media (hover: hover) { .modal-x:hover { background: var(--accent-soft); color: var(--text); } }
+.modal-actions .ma-main { flex: 1 1 auto; justify-content: space-between; align-items: center; }
+.modal-actions .ma-cancel { order: -1; min-height: 34px; padding: 4px 12px; font-size: 13px; color: var(--muted); background: transparent; box-shadow: none; }
+.modal-actions .ma-main #modalSubmit, .modal-actions .ma-main #subSubmit { margin-left: auto; }
+#modalExtra { flex-basis: 100%; }
+#modalExtra:empty { display: none; }
+@media (max-width: 700px) {
+  .modal-head { padding-top: env(safe-area-inset-top); }
+  .modal-head h3 { padding-top: 14px !important; }
+  .modal-actions .ma-main button.ma-cancel { flex: 0 0 auto; min-height: 38px; }
+  .modal-actions .ma-main #modalSubmit, .modal-actions .ma-main #subSubmit { flex: 1 1 auto; max-width: 70%; }
+}

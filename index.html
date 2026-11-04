@@ -57,12 +57,12 @@
 
   <dialog id="modal">
     <form id="modalForm" novalidate>
-      <h3 id="modalTitle" tabindex="-1"></h3>
+      <div class="modal-head"><h3 id="modalTitle" tabindex="-1"></h3><button type="button" class="modal-x" id="modalX" aria-label="Yopish" title="Yopish">×</button></div>
       <div id="modalBody"></div>
       <div class="modal-actions">
         <div id="modalExtra"></div>
-        <div>
-          <button type="button" id="modalCancel">Yopish</button>
+        <div class="ma-main">
+          <button type="button" class="small ma-cancel" id="modalCancel">Yopish</button>
           <button type="submit" class="primary" id="modalSubmit">Saqlash</button>
         </div>
       </div>
@@ -72,12 +72,11 @@
   <!-- Ichki oyna: asosiy oyna ustidan ochiladi (masalan, sotuv paytida tezkor kirim) -->
   <dialog id="subModal">
     <form id="subForm" novalidate>
-      <h3 id="subTitle" tabindex="-1"></h3>
+      <div class="modal-head"><h3 id="subTitle" tabindex="-1"></h3><button type="button" class="modal-x" id="subX" aria-label="Yopish" title="Yopish">×</button></div>
       <div id="subBody"></div>
       <div class="modal-actions">
-        <div></div>
-        <div>
-          <button type="button" id="subCancel">Bekor qilish</button>
+        <div class="ma-main">
+          <button type="button" class="small ma-cancel" id="subCancel">Bekor qilish</button>
           <button type="submit" class="primary" id="subSubmit">Saqlash</button>
         </div>
       </div>
