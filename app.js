@@ -2101,7 +2101,7 @@ function maskPhone(ph) {
 function editParty(id) {
   const c = party(id);
   if (!seesParties()) {
-    openModal({ title: 'Kontragent', body: `<p><b>${esc(c.name)}</b></p><p class="muted">${esc(KINDS[c.kind] || '')}${c.phone ? ' · ' + maskPhone(c.phone) : ''}</p>
+    openModal({ title: 'Kontragent', body: `<p><b>${esc(c.name)}</b></p><p class="muted">${esc(KINDS[c.kind] || '')}</p>
       <p class="muted small">To'liq ma'lumotlarni faqat administrator ko'radi.</p>` });
     return;
   }
@@ -2164,7 +2164,15 @@ function balanceText(b) {
 
 function partyOptions(kind) {
   const list = db.counterparties.filter((c) => !kind || c.kind === kind || c.kind === 'both');
-  return [['', '— tanlang —'], ...list.map((c) => [c.id, c.name + (c.phone ? ` (${c.phone})` : '')])];
+  // Kontragent telefoni hech qayerda ko'rsatilmaydi (faqat Kontragentlar bo'limida, administratorga);
+  // bir xil ismlilar bo'lsa — raqamning oxirgi 2 xonasi bilan ajratiladi
+  return [['', '— tanlang —'], ...list.map((c) => [c.id, partyLabel(c, list)])];
+}
+
+function partyLabel(c, list = db.counterparties) {
+  const twin = list.some((x) => x !== c && nameKey(x.name) === nameKey(c.name));
+  const tail = phoneKey(c.phone).slice(-2);
+  return c.name + (twin && tail ? ` (…${tail})` : '');
 }
 
 const productLabel = (p) => (p ? p.name + (p.code ? ' · ' + p.code : '') : '');
@@ -2250,7 +2258,7 @@ function docForm(type, d) {
     const cur = party(d.counterpartyId);
     const known = cur && cur.id !== 'retail' ? cur : null;
     const draft = d.draftParty || {};
-    head += phoneField('Telefon raqami', 'partyPhone', known ? known.phone : draft.phone && phoneDigits(draft.phone) !== '998' ? draft.phone : '', 'id="partyPhone"');
+    head += phoneField('Telefon raqami', 'partyPhone', !known && draft.phone && phoneDigits(draft.phone) !== '998' ? draft.phone : '', 'id="partyPhone"');
     head += `<label class="party-name">Mijoz ismi
         <input name="partyName" id="partyName" autocomplete="off" placeholder="Ism familiya" value="${esc(known ? known.name : draft.name || '')}">
         <div class="party-suggest" id="partySuggest" hidden></div>
@@ -2263,7 +2271,7 @@ function docForm(type, d) {
     // Telefon yozilsa — saqlangan mijoz avtomatik topiladi; topilmasa, yangi mijoz ismi so'raladi
     const who = t.party === 'supplier' ? "ta'minotchi" : 'mijoz';
     const cur = party(d.counterpartyId);
-    head += phoneField('Telefon raqami', 'partyPhone', cur && cur.id !== 'retail' ? cur.phone : '', 'id="partyPhone"');
+    head += phoneField('Telefon raqami', 'partyPhone', '', 'id="partyPhone"');
     head += selectField(t.party === 'supplier' ? "Ta'minotchi *" : 'Mijoz *', 'counterpartyId', [...partyOptions(t.party), ...(t.party === 'customer' || canAddParty() ? [['__new', `+ Yangi ${who}...`]] : [])], d.counterpartyId || (t.party === 'customer' ? 'retail' : ''), '', 'id="partySel"');
     head += `<label class="new-party" hidden>Yangi ${who} ismi *<input name="newPartyName" id="newPartyName" placeholder="Ism familiya" autocomplete="off"></label>`;
     head += `<div class="full party-hint" id="partyHint"></div>`;
@@ -2379,12 +2387,12 @@ function bindPartyLookup(kind) {
   const nameField = $('#newPartyName').closest('label');
   const hint = $('#partyHint');
   const list = () => db.counterparties.filter((c) => c.id !== 'retail' && (c.kind === kind || c.kind === 'both'));
-  const pick = (c) => {
+  const pick = (c, typed = false) => {
     sel.value = c.id;
-    phone.value = c.phone || '';
-    if (c.phone) formatPhoneInput(phone);
+    // Saqlangan raqam ko'rsatilmaydi — faqat o'zi yozgan raqam qoladi
+    if (!typed) phone.value = '';
     nameField.hidden = true;
-    hint.innerHTML = `<span class="ok">${icon('check')} Topildi: <b>${esc(c.name)}</b>${c.address ? ` · ${esc(c.address)}` : ''}</span>`;
+    hint.innerHTML = `<span class="ok">${icon('check')} Tanlandi: <b>${esc(c.name)}</b></span>`;
   };
   const lookup = () => {
     const key = fieldPhoneDigits(phone.value);
@@ -2393,7 +2401,7 @@ function bindPartyLookup(kind) {
     const found = list().filter((c) => phoneKey(c.phone).includes(key));
     if (key.length === 9) {
       const exact = found.find((c) => phoneKey(c.phone) === key);
-      if (exact) return pick(exact);
+      if (exact) return pick(exact, true);
       // Yangi raqam — yangi mijoz (ta'minotchi qo'shishga ruxsat bo'lmasa — faqat xabar)
       if (![...sel.options].some((o) => o.value === '__new')) { hint.innerHTML = `<span class="muted">Bu raqam bilan ${kind === 'supplier' ? "ta'minotchi" : 'mijoz'} topilmadi.</span>`; return; }
       sel.value = '__new';
@@ -2402,13 +2410,13 @@ function bindPartyLookup(kind) {
       return;
     }
     hint.innerHTML = found.length
-      ? found.slice(0, 6).map((c) => `<button type="button" class="chip party-pick" data-id="${c.id}">${esc(c.name)} · ${esc(c.phone)}</button>`).join('')
+      ? found.slice(0, 6).map((c) => `<button type="button" class="chip party-pick" data-id="${c.id}">${esc(partyLabel(c, found))}</button>`).join('')
       : '<span class="muted">Mos keladigan raqam yo\'q</span>';
   };
   phone.addEventListener('input', lookup);
   hint.addEventListener('click', (e) => {
     const b = e.target.closest('.party-pick');
-    if (b) pick(party(b.dataset.id));
+    if (b) pick(party(b.dataset.id), true);
   });
   sel.addEventListener('change', () => {
     const c = party(sel.value);
@@ -2551,11 +2559,7 @@ function bindCustomerLookup() {
   const pick = (c) => {
     idInput.value = c.id;
     name.value = c.name;
-    // Xodimga saqlangan mijozning telefoni ko'rsatilmaydi (o'zi yozgan raqam qoladi)
-    if (seesParties()) {
-      phone.value = c.phone || '';
-      if (c.phone) formatPhoneInput(phone);
-    }
+    // Saqlangan mijozning telefoni ko'rsatilmaydi (o'zi yozgan raqam qoladi)
     if (c.ctype && typeSel) {
       if (![...typeSel.options].some((o) => o.value === c.ctype)) typeSel.insertAdjacentHTML('afterbegin', `<option>${esc(c.ctype)}</option>`);
       typeSel.value = c.ctype;
@@ -2573,7 +2577,7 @@ function bindCustomerLookup() {
     const list = customers().filter((c) => (!digits || phoneKey(c.phone).startsWith(digits)) && (!q || c.name.toLowerCase().includes(q)));
     box.innerHTML = list.length
       ? list.slice(0, 8).map((c) => `<button type="button" class="suggest-row" data-id="${c.id}"><b>${esc(c.name)}</b>
-          <span>${esc(seesParties() ? c.phone || '—' : maskPhone(c.phone) || '—')}${c.ctype && seesParties() ? ` · ${esc(c.ctype)}` : ''}</span></button>`).join('')
+          <span>${esc(partyLabel(c, list) === c.name ? '' : partyLabel(c, list).slice(c.name.length).trim())}${c.ctype && seesParties() ? ` · ${esc(c.ctype)}` : ''}</span></button>`).join('')
         + (list.length > 8 ? `<div class="suggest-more muted small">yana ${list.length - 8} ta — raqamni davom ettiring</div>` : '')
       : '<div class="suggest-more muted small">Mos mijoz yo\'q — yangi mijoz sifatida saqlanadi</div>';
     box.hidden = false;
@@ -3241,7 +3245,7 @@ async function saveDoc(type, existing, preset, data, stock) {
       } else {
         try {
           const who = party(counterpartyId);
-          receipts = await sendReceipts(`🧾 Chek · ${t.one} ${d.no}\n💰 ${money(pay)} · ${PAY_METHODS[data.payMethod]}\n👥 Mijoz: ${who?.name || ''}${who?.phone ? ' ' + who.phone : ''}\n📅 ${fmtDate(d.date)}`);
+          receipts = await sendReceipts(`🧾 Chek · ${t.one} ${d.no}\n💰 ${money(pay)} · ${PAY_METHODS[data.payMethod]}\n👥 Mijoz: ${who?.name || ''}\n📅 ${fmtDate(d.date)}`);
         } catch (e) {
           if (!confirm(`Chek Telegramga yuborilmadi: ${e.message}\n\nChek suratisiz saqlansinmi? («Bekor» — qayta urinish uchun)`)) return false;
         }
@@ -3319,7 +3323,7 @@ function printDoc(id) {
     </head><body>
     <div><b>${esc(db.company.name)}</b> ${esc(db.company.phone)} ${esc(db.company.address)}</div>
     <h2>${esc(t.one)} № ${esc(d.no)} — ${fmtDate(d.date)}</h2>
-    ${t.party ? `<div>${t.party === 'supplier' ? "Ta'minotchi" : 'Mijoz'}: <b>${esc(c.name)}</b> ${esc(c.phone)}</div>` : ''}
+    ${t.party ? `<div>${t.party === 'supplier' ? "Ta'minotchi" : 'Mijoz'}: <b>${esc(c.name)}</b></div>` : ''}
     <div>Ombor: ${esc(warehouse(d.warehouseId)?.name)}${t.move ? ' → ' + esc(warehouse(d.toWarehouseId)?.name) : ''}</div>
     ${d.address ? `<div>Yetkazish: ${esc(d.address)} ${esc(d.deliveryDate || '')}</div>` : ''}
     <table><tr><th>№</th><th>Mahsulot</th><th>Soni</th><th>Narxi</th><th>Summa</th></tr>${rows}</table>
@@ -4773,7 +4777,7 @@ function viewDocs(type) {
   const list = db.docs.filter((d) => d.type === type)
     .filter((d) => inPeriod(type, d.date))
     .filter((d) => !st || d.status === st)
-    .filter((d) => !q || [d.no, party(d.counterpartyId)?.name, party(d.counterpartyId)?.phone, d.note, ...d.items.map(itemName)].join(' ').toLowerCase().includes(q) || phoneMatch(party(d.counterpartyId)?.phone, q))
+    .filter((d) => !q || [d.no, party(d.counterpartyId)?.name, d.note, ...d.items.map(itemName)].join(' ').toLowerCase().includes(q) || (isAdmin() && phoneMatch(party(d.counterpartyId)?.phone, q)))
     .sort((a, b) => b.date.localeCompare(a.date) || b.no.localeCompare(a.no));
 
   const statusFilter = t.statuses
@@ -4928,14 +4932,14 @@ function viewParties(fixed = '') {
   const list = db.counterparties
     .filter((c) => !kind || c.kind === kind || c.kind === 'both')
     .filter((c) => !ctype || c.ctype === ctype)
-    .filter((c) => !q || [c.name, c.phone, c.address, c.inn, c.kind !== 'customer' ? suppliesOf(c).join(' ') : ''].join(' ').toLowerCase().includes(q) || phoneMatch(c.phone, q));
+    .filter((c) => !q || [c.name, isAdmin() ? c.phone : '', isAdmin() ? c.address : '', isAdmin() ? c.inn : '', c.kind !== 'customer' ? suppliesOf(c).join(' ') : ''].join(' ').toLowerCase().includes(q) || (isAdmin() && phoneMatch(c.phone, q)));
   const rows = list.map((c) => {
     const b = partyBalance(c.id);
     const full = seesParties();
     const money_ = can('money');
     const sup = c.kind !== 'customer' ? suppliesText(c) : '';
     return `<tr class="click" data-act="editParty" data-id="${c.id}"><td><b>${esc(c.name)}</b>${sup ? `<div class="small sup-line">${icon('truck')} ${esc(sup)}</div>` : ''}${c.note && full ? `<div class="muted small">${esc(c.note)}</div>` : ''}</td><td>${esc(KINDS[c.kind])}${c.ctype && full ? `<div class="muted small">${esc(c.ctype)}</div>` : ''}</td>
-      <td class="dt">${esc(full ? c.phone : maskPhone(c.phone))}</td><td>${full ? esc(c.address) : '—'}</td><td class="num ${b > 0 ? 'debt' : b < 0 ? 'warn' : ''}">${b && (full || money_) ? money(b) : '—'}</td>
+      <td class="dt">${full ? esc(c.phone) : '—'}</td><td>${full ? esc(c.address) : '—'}</td><td class="num ${b > 0 ? 'debt' : b < 0 ? 'warn' : ''}">${b && (full || money_) ? money(b) : '—'}</td>
       <td class="actions">${full || money_ ? `<button class="small" data-act="statement" data-id="${c.id}">${icon('receipt')}Hisob-kitob</button>` : ''}${isAdmin() ? `<button class="small danger icon-only" data-act="deleteParty" data-id="${c.id}" title="O'chirish">${icon('trash')}</button>` : ''}</td></tr>`;
   }).join('');
   return toolbar('parties', {
@@ -4961,7 +4965,7 @@ function debtRows(list, withPay = true) {
     const c = party(d.counterpartyId) || {};
     const late = d.debtDue && d.debtDue < t;
     return `<tr class="click" data-act="openDoc" data-id="${d.id}">
-      <td><b>${esc(c.name)}</b><div class="muted small dt">${esc(c.phone || '')}</div></td>
+      <td><b>${esc(c.name)}</b>${isAdmin() && c.phone ? `<div class="muted small dt">${esc(c.phone)}</div>` : ''}</td>
       <td>${esc(d.no)}<div class="muted small">${fmtDate(d.date)}</div></td>
       <td class="num debt">${money(rest)}</td>
       <td class="${late ? 'debt' : ''}">${d.debtDue ? fmtDate(d.debtDue) + (late ? '<div class="small">muddati o\'tgan</div>' : '') : '<span class="muted">—</span>'}</td>
@@ -4975,7 +4979,7 @@ function viewDebts() {
   const rows = db.counterparties.map((c) => ({ c, b: partyBalance(c.id) })).filter((x) => x.b);
   const recv = rows.filter((x) => x.b > 0).sort((a, b) => b.b - a.b);
   const pay = rows.filter((x) => x.b < 0).sort((a, b) => a.b - b.b);
-  const table = (list, cls) => list.length ? list.map(({ c, b }) => `<tr class="click" data-act="statement" data-id="${c.id}"><td>${esc(c.name)}</td><td>${esc(c.phone)}</td><td class="num ${cls}">${money(Math.abs(b))}</td></tr>`).join('') : emptyRow(3, "Qarz yo'q");
+  const table = (list, cls) => list.length ? list.map(({ c, b }) => `<tr class="click" data-act="statement" data-id="${c.id}"><td>${esc(c.name)}</td><td>${isAdmin() ? esc(c.phone) : '—'}</td><td class="num ${cls}">${money(Math.abs(b))}</td></tr>`).join('') : emptyRow(3, "Qarz yo'q");
   const sum = (list) => list.reduce((s, x) => s + Math.abs(x.b), 0);
   const sales = saleDebts();
   return `<div class="card"><h3>${icon('clock')}Qarzga sotuvlar — qaytarish muddati bilan</h3>
