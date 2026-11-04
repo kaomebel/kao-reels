@@ -1405,3 +1405,8 @@ html.modal-open, html.modal-open body { overflow: hidden; overscroll-behavior: n
 /* Mahsulot kartochkasida material */
 .mat-more { margin-top: 6px; }
 #matChips .chip-add { min-width: 140px; }
+
+/* Xarid: mahsulotlar soni; ta'minotchilarga nasiya */
+.doc-qty { margin-right: 4px; }
+.nasiya-card .nasiya-total { margin: 4px 0 6px; font-size: 16px; }
+.nasiya-card .sc-row { display: grid; grid-template-columns: 1fr auto auto; gap: 10px; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--border); }
