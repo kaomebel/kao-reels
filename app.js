@@ -35,7 +35,7 @@ const PAY_METHODS = { cash: 'Naqd (kassa)', card: "Karta (o'tkazma)", terminal: 
 // Naqd bo'lmagan to'lovda chek surati so'raladi va Telegramga saqlanadi
 const NEEDS_RECEIPT = ['card', 'terminal', 'bank'];
 const cashTotal = (b) => Object.keys(PAY_METHODS).reduce((s, k) => s + (b[k] || 0), 0);
-const PAY_PURPOSES_IN = ["Mijozdan to'lov", "Ta'minotchidan qaytim", 'Boshqa kirim'];
+const PAY_PURPOSES_IN = ["Mijozdan to'lov", "Ta'minotchidan qaytim", 'Investitsiya', 'Boshqa kirim'];
 const PAY_PURPOSES_OUT = ["Ta'minotchiga to'lov", 'Mijozga qaytarish', 'Ijara', 'Ish haqi', 'Kommunal', 'Transport / yetkazish', 'Soliq', 'Reklama', 'Boshqa xarajat'];
 // Kontragentga bog'liq bo'lmagan chiqimlar foyda hisobotida xarajat sifatida olinadi
 const EXPENSE_PURPOSES = PAY_PURPOSES_OUT.slice(2);
@@ -824,7 +824,7 @@ const isTouch = () => window.matchMedia('(pointer: coarse), (max-width: 700px)')
 // Telefonda jadval qatorlari kartochkaga aylanadi: har bir katakka ustun nomi yoziladi (CSS ko'rsatadi)
 function cardTables(root) {
   $$('table', root).forEach((table) => {
-    if (['items-table', 'kit-table', 'exp-cats'].some((c) => table.classList.contains(c))) return;
+    if (['items-table', 'kit-table', 'exp-cats', 'cash-table'].some((c) => table.classList.contains(c))) return;
     const heads = $$('thead th', table).map((th) => th.textContent.trim());
     table.classList.add('m-cards');
     $$('tbody tr, tfoot tr', table).forEach((tr) => {
@@ -3422,7 +3422,7 @@ function newPayment(dir, preset = {}) {
   const purposes = dir === 'in' ? PAY_PURPOSES_IN : PAY_PURPOSES_OUT;
   const linked = preset.docId && doc(preset.docId);
   const rest = linked ? Math.max(0, docTotal(linked) - docPaid(linked)) : '';
-  let purpose = purposes[0];
+  let purpose = preset.purpose && purposes.includes(preset.purpose) ? preset.purpose : purposes[0];
   if (linked?.type === 'salesReturn') purpose = 'Mijozga qaytarish';
   if (linked?.type === 'purchaseReturn') purpose = "Ta'minotchidan qaytim";
   openModal({
@@ -4465,6 +4465,125 @@ function inPeriod(view, date) {
 
 // --- Bosh sahifa ---
 
+// ---------- Xodimlardagi naqd pul (kechqurun administratorga topshiriladi) ----------
+// Xodim olgan naqd pul uning «qo'lida» turadi, administrator «Qabul qildim» bosguncha.
+// Shofyor olgan pul — uni qabul qilgan xodimda. Shu kundan oldingi to'lovlar hisobga olinmaydi.
+const CASH_START = '2026-11-04';
+const cashHolder = (p) => (p.handover ? (p.handover.status === 'pending' ? null : p.handover.receivedBy || p.handover.to) : p.userId);
+function staffCash(userId) {
+  const list = db.payments
+    .filter((p) => p.method === 'cash' && !p.collected && (p.date || '') >= CASH_START && cashHolder(p) === userId)
+    .sort((a, b) => (a.date + (a.no || '')).localeCompare(b.date + (b.no || '')));
+  return { list, total: list.reduce((s, p) => s + (p.dir === 'in' ? p.amount : -p.amount), 0) };
+}
+const cashStaff = () => db.users.filter((u) => u.role !== 'admin' && u.active !== false)
+  .map((u) => ({ u, ...staffCash(u.id) })).filter((x) => x.list.length);
+
+// To'lov nima uchun: «Sotuv S-00012 · Divan ×1» yoki «Xarajat: Ovqat»
+function cashLine(p) {
+  const d = p.docId && doc(p.docId);
+  const who = party(p.counterpartyId)?.name;
+  if (d) return `${DOC_TYPES[d.type]?.one || ''} ${d.no}${who && p.counterpartyId !== 'retail' ? ` · ${who}` : ''}<div class="muted small">${esc(docItemsText(d))}</div>`;
+  if (p.dir === 'out') return `${expenseEmoji(p.purpose)} ${esc(p.purpose)}${p.sub ? ` › ${esc(p.sub)}` : ''}${p.employee ? ` · ${esc(p.employee)}` : ''}`;
+  return `${esc(p.purpose || "To'lov")}${who ? ` · ${esc(who)}` : ''}`;
+}
+
+function cashRows(list, pick = false) {
+  return list.map((p) => `<tr>
+    ${pick ? `<td><input type="checkbox" class="cc-pick" data-id="${p.id}" checked></td>` : ''}
+    <td class="small">${fmtDate(p.date)}<div class="muted small">${esc(p.no || '')}</div></td>
+    <td>${cashLine(p)}</td>
+    <td class="num ${p.dir === 'out' ? 'debt' : ''}"><b>${p.dir === 'out' ? '−' : ''}${money(p.amount)}</b></td></tr>`).join('');
+}
+
+// Xodimning o'z oynasida: bugun sotganlari va topshirishi kerak bo'lgan naqd pul
+function myCashCard() {
+  if (!me || isAdmin()) return '';
+  const t = today();
+  const sold = db.docs.filter((d) => d.type === 'sale' && d.date === t && d.userId === me.id);
+  const { list, total } = staffCash(me.id);
+  if (!sold.length && !list.length) return '';
+  return `<div class="card my-cash"><h3>${icon('cash')}Bugungi kassam</h3>
+    ${sold.length ? `<p class="muted small">Bugun sotganlaringiz: <b>${sold.length} ta</b> · jami ${money(sold.reduce((s, d) => s + docTotal(d), 0))}</p>
+      <ul class="mc-sold">${sold.map((d) => `<li><b>${esc(d.no)}</b> — ${esc(docItemsText(d))} · ${money(docTotal(d))}</li>`).join('')}</ul>` : ''}
+    ${list.length ? `<div class="table-wrap"><table class="cash-table"><thead><tr><th>Sana</th><th>Nima uchun</th><th class="num">Naqd</th></tr></thead><tbody>${cashRows(list)}</tbody></table></div>` : ''}
+    <div class="mc-total ${total > 0 ? '' : 'ok'}">${total > 0 ? `Administratorga topshirishingiz kerak: <b>${money(total)}</b>` : `${icon('check')} Topshiriladigan naqd pul yo'q`}</div>
+    <p class="muted small">Karta, terminal va hisob raqamiga tushgan pullar bu yerga kirmaydi — ular to'g'ridan-to'g'ri hisobga tushadi.</p></div>`;
+}
+
+// Administratorda: har bir xodimda qancha naqd pul turibdi
+function staffCashCard() {
+  if (!isAdmin()) return '';
+  const rows = cashStaff();
+  if (!rows.length) return '';
+  return `<div class="card staff-cash"><h3>${icon('cash')}Xodimlardagi naqd pul — topshirilishi kerak</h3>
+    ${rows.map(({ u, list, total }) => `<div class="sc-row"><span><b>${esc(u.name)}</b> <span class="muted small">· ${list.length} ta to'lov</span></span>
+      <b class="sc-sum">${money(total)}</b><button class="small primary" data-act="collectCash" data-id="${u.id}">${icon('check')}Qabul qilish</button></div>`).join('')}
+    <div class="sc-row sc-all"><span>Jami</span><b class="sc-sum">${money(rows.reduce((s, x) => s + x.total, 0))}</b><span></span></div></div>`;
+}
+
+function collectCash(uid) {
+  const u = db.users.find((x) => x.id === uid);
+  const { list } = staffCash(uid);
+  if (!u || !list.length) return alert("Bu xodimda topshiriladigan naqd pul yo'q.");
+  openModal({
+    title: `${u.name} — kassa topshirish`,
+    submitText: 'Qabul qildim',
+    body: `<p class="muted small">Xodim olgan naqd pullar. Qabul qilinmaganini belgidan oling — u xodimda qoladi.</p>
+      <div class="table-wrap"><table class="cash-table"><thead><tr><th></th><th>Sana</th><th>Nima uchun</th><th class="num">Naqd</th></tr></thead><tbody>${cashRows(list, true)}</tbody></table></div>
+      <div class="mc-total" id="ccTotal"></div>`,
+    onOpen: () => {
+      const upd = () => {
+        const sum = list.filter((p) => $(`#modalBody .cc-pick[data-id="${p.id}"]`).checked).reduce((s, p) => s + (p.dir === 'in' ? p.amount : -p.amount), 0);
+        $('#ccTotal').innerHTML = `${esc(u.name)} sizga topshiradi: <b>${money(sum)}</b>`;
+      };
+      $('#modalBody').addEventListener('change', upd);
+      upd();
+    },
+    onSubmit: async () => {
+      const picked = list.filter((p) => $(`#modalBody .cc-pick[data-id="${p.id}"]`).checked);
+      if (!picked.length) { alert('Hech narsa belgilanmagan.'); return false; }
+      const at = new Date().toISOString();
+      picked.forEach((p) => { p.collected = { at, by: me.id }; });
+      await save();
+    },
+  });
+}
+
+// Asosiy oynadagi «+ Kirim» va «− Chiqim»: hamma kirim va chiqim turlari bitta joyda
+function openMoneyMenu(dir) {
+  const tile = (act, label, emoji, extra = '') => `<button type="button" class="exp-tile" data-mm="${act}" ${extra}><span class="exp-emoji">${emoji}</span><span>${label}</span></button>`;
+  let body;
+  if (dir === 'in') {
+    const staff = cashStaff();
+    body = (staff.length ? `<p class="muted small">Xodimlardan kassa qabul qilish:</p><div class="exp-quick">${staff.map(({ u, total }) => tile('collect', `${esc(u.name)}<br><b>${money(total)}</b>`, '👤', `data-id="${u.id}"`)).join('')}</div>` : '')
+      + `<p class="muted small">Boshqa kirimlar:</p><div class="exp-quick">
+        ${tile('sale', 'Sotuv', '🛒')}${tile('payIn', "Mijozdan to'lov", '💵')}${tile('invest', 'Investitsiya', '📈')}
+        ${tile('enter', 'Tovar kirimi (omborga)', '📦')}${tile('receipt', "Ta'minotchidan qabul", '🚚')}${tile('otherIn', 'Boshqa kirim', '➕')}</div>`;
+  } else {
+    body = `<p class="muted small">Xarajat:</p><div class="exp-quick">${expenseCatsList().map((c) => tile('exp', `${esc(c.name)}${hasSubs(c) ? ' ›' : ''}`, c.emoji || '📦', `data-cat="${esc(c.name)}"`)).join('')}</div>
+      <p class="muted small">Boshqa chiqimlar:</p><div class="exp-quick">
+        ${tile('payOut', "Ta'minotchiga to'lov", '🏭')}${tile('salesReturn', 'Mijozga qaytarish', '↩️')}${tile('writeoff', 'Hisobdan chiqarish (tovar)', '📉')}${tile('otherOut', 'Boshqa chiqim', '➖')}</div>`;
+  }
+  openModal({
+    title: dir === 'in' ? '➕ Kirim' : '➖ Chiqim',
+    body: `<div class="money-menu">${body}</div>`,
+    onOpen: () => $('#modalBody .money-menu').addEventListener('click', (e) => {
+      const b = e.target.closest('[data-mm]');
+      if (!b) return;
+      const a = b.dataset.mm;
+      if (a === 'collect') return collectCash(b.dataset.id);
+      if (a === 'exp') return openExpenseSubs(b.dataset.cat);
+      if (['sale', 'enter', 'receipt', 'salesReturn', 'writeoff'].includes(a)) { closeModal(); return openDoc(a); }
+      if (a === 'payIn') return newPayment('in');
+      if (a === 'invest') return newPayment('in', { purpose: 'Investitsiya' });
+      if (a === 'otherIn') return newPayment('in', { purpose: 'Boshqa kirim' });
+      if (a === 'payOut') return newPayment('out');
+      if (a === 'otherOut') return newPayment('out', { purpose: 'Boshqa xarajat' });
+    }),
+  });
+}
+
 function viewDashboard() {
   const t = today();
   const month = t.slice(0, 7);
@@ -4543,7 +4662,8 @@ function viewDashboard() {
   const backupWarn = isAdmin() && age > 2
     ? `<div class="card warn-card backup-warn">${icon('alert')}<span>${age === Infinity ? "Hali birorta ham zaxira nusxa olinmagan." : `Oxirgi zaxira nusxa ${Math.floor(age)} kun oldin olingan.`} Ma'lumot yo'qolmasligi uchun zaxira oling${db.telegram.backupChatId ? '' : ' yoki har kungi avtomatik zaxirani yoqing'}.</span>
         <button class="small primary" data-act="backup">${icon('download')}Zaxira olish</button><a href="#settings/backup">Sozlash</a></div>` : '';
-  return installCard + backupWarn + usageWarn + handoverCard() + openSalesCard() + `<div class="stats">${cards.map(([l, v, h, cls]) => `<div class="stat">
+  const moneyBtns = isAdmin() ? `<div class="money-btns"><button class="mb-in" data-act="moneyMenu" data-dir="in"><span>＋</span>Kirim</button><button class="mb-out" data-act="moneyMenu" data-dir="out"><span>−</span>Chiqim</button></div>` : '';
+  return moneyBtns + installCard + backupWarn + usageWarn + staffCashCard() + myCashCard() + handoverCard() + openSalesCard() + `<div class="stats">${cards.map(([l, v, h, cls]) => `<div class="stat">
       <div class="stat-ic ${cls || ''}">${icon(cardIcon[l] || 'chart')}</div>
       <div class="label">${l}</div><div class="value ${cls || ''}">${v}</div><div class="muted small">${h}</div></div>`).join('')}</div>
     <div class="quick">${quick}</div>
@@ -6072,6 +6192,8 @@ document.addEventListener('change', (e) => {
 
 const ACTIONS = {
   newDoc: (ds) => openDoc(ds.type),
+  moneyMenu: (ds) => openMoneyMenu(ds.dir),
+  collectCash: (ds) => { if (isAdmin()) collectCash(ds.id); },
   openDoc: (ds) => { const d = doc(ds.id); if (d) openDoc(d.type, d); },
   exportDocs: (ds) => exportDocs(ds.type),
   newProduct: () => newProduct(),
