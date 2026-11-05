@@ -1274,10 +1274,9 @@ function productForm(p = {}, readonly = false) {
   return `<div class="product-form">
     <div class="photo-box">
       <div class="photo-list" id="photoList"></div>
-      ${readonly ? '' : `<div class="photo-btns"><label class="filebtn">${icon('camera')}Suratga olish<input type="file" id="photoCam" accept="image/*" capture="environment" hidden></label>
-      <label class="filebtn">${icon('plus')}Galereyadan<input type="file" id="photoInput" accept="image/*" multiple hidden></label></div>
+      ${readonly ? '' : `<input type="file" id="photoInput" accept="image/*" multiple hidden>
       <input type="file" id="photoReplace" accept="image/*" hidden>
-      <div class="muted small">${MAX_PHOTOS} tagacha. Birinchisi — asosiy (Telegram va ro'yxatda). Rasm ustiga bosilsa — to'liq ekranda ochiladi; «🔄 Almashtirish» — boshqa rasmga almashtiradi; «★ Asosiy qilish» — asosiy rasm qiladi.</div>`}
+      <div class="muted small">${MAX_PHOTOS} tagacha. Birinchisi — asosiy (Telegram va ro'yxatda). Rasm ustiga bosilsa — to'liq ekranda ochiladi.</div>`}
     </div>
     <div class="form-grid">
       ${field('Mahsulot *', 'name', p.name, 'required', 'full')}
@@ -1527,7 +1526,16 @@ function renderPhotoList(readonly) {
       <img ${ph.file ? `src="${ph.url}"` : `data-photo="${esc(i === 0 ? ph.path : ph.thumb)}"`} data-i="${i}" alt="" title="Kattalashtirish">
       ${i === 0 ? '<span class="ph-main">Asosiy</span>' : readonly ? '' : `<button type="button" class="ph-star" data-i="${i}" title="Asosiy rasm qilish">★ Asosiy qilish</button>`}
       ${readonly ? '' : `<button type="button" class="ph-edit" data-i="${i}" title="Kesish, kattalashtirish, burish">✂️ Moslash</button><button type="button" class="ph-rep" data-i="${i}" title="Boshqa rasmga almashtirish">🔄 Almashtirish</button><button type="button" class="ph-del" data-i="${i}" title="O'chirish">×</button>`}
-    </div>`).join('') : `<div class="photo-empty">${icon('camera')}<span>Rasm yo'q</span></div>`;
+    </div>`).join('') : '';
+  // Rasm qo'shish joyining o'zi tugma: bosilganda telefon kamera yoki galereyani taklif qiladi
+  const canAdd = !!$('#photoInput');
+  if (!photoEdit.items.length) {
+    box.innerHTML = canAdd
+      ? `<label class="photo-empty photo-add" for="photoInput">${icon('plus')}<b>Rasm qo'shish</b><span class="small">kamera yoki galereya</span></label>`
+      : `<div class="photo-empty">${icon('camera')}<span>Rasm yo'q</span></div>`;
+  } else if (canAdd && photoEdit.items.length < MAX_PHOTOS) {
+    box.insertAdjacentHTML('beforeend', `<label class="ph-add" for="photoInput">${icon('plus')}<span>Rasm qo'shish</span></label>`);
+  }
   hydratePhotos(box);
 }
 
