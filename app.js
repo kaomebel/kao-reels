@@ -1501,38 +1501,6 @@ async function editFiles(files) {
   return out;
 }
 
-// Telefonda rasm tanlash: ekran pastidan katta tugmalar (tizim menyusi tepada ochilib qolmasin).
-// Fayl maydonining o'zi shu oynaga ko'chiriladi — tanlangan rasm odatdagidek uning «change» ishlovchisiga boradi.
-function pickPhotos(input) {
-  if (!input) return;
-  if (!isTouch()) { input.removeAttribute('capture'); input.click(); return; }
-  let dlg = $('#photoSheet');
-  if (!dlg) {
-    dlg = document.createElement('dialog');
-    dlg.id = 'photoSheet';
-    dlg.className = 'sel-sheet photo-sheet';
-    dlg.innerHTML = `<div class="ss-head"><b class="ss-title">Rasm qo'shish</b><button type="button" class="ss-close" aria-label="Yopish">×</button></div>
-      <div class="ps-btns">
-        <label class="ps-btn" data-mode="cam"><span class="ps-ic">📷</span><span><b>Kamera bilan suratga olish</b><small>Hozir rasmga olish</small></span></label>
-        <label class="ps-btn" data-mode="gal"><span class="ps-ic">🖼️</span><span><b>Galereyadan tanlash</b><small>Telefondagi rasmlar</small></span></label>
-      </div><div class="ps-inputs"></div>`;
-    document.body.appendChild(dlg);
-    $('.ss-close', dlg).onclick = () => dlg.close();
-    dlg.onclick = (e) => { if (e.target === dlg) dlg.close(); };
-  }
-  const box = $('.ps-inputs', dlg);
-  [...box.children].forEach((x) => { if (x !== input) x.remove(); }); // eski oynalardan qolganlari
-  if (!input.id) input.id = 'pickIn' + Date.now();
-  box.appendChild(input);
-  $$('.ps-btn', dlg).forEach((l) => {
-    l.htmlFor = input.id;
-    // Bosilishidan oldin: kamera — to'g'ridan-to'g'ri suratga olish, galereya — rasmlar ro'yxati
-    l.onpointerdown = () => { if (l.dataset.mode === 'cam') input.setAttribute('capture', 'environment'); else input.removeAttribute('capture'); };
-  });
-  input.addEventListener('change', () => dlg.close(), { once: true });
-  if (!dlg.open) dlg.showModal();
-}
-
 // Joylangan (yoki yangi) rasmni qayta moslash — natija o'sha o'ringa qo'yiladi
 async function editExistingPhoto(i) {
   const ph = photoEdit.items[i];
@@ -1562,13 +1530,13 @@ function renderPhotoList(readonly) {
       ${readonly ? '' : `<button type="button" class="ph-edit" data-i="${i}" title="Kesish, kattalashtirish, burish">✂️ Moslash</button><button type="button" class="ph-rep" data-i="${i}" title="Boshqa rasmga almashtirish">🔄 Almashtirish</button><button type="button" class="ph-del" data-i="${i}" title="O'chirish">×</button>`}
     </div>`).join('') : '';
   // Rasm qo'shish joyining o'zi tugma: bosilganda telefon kamera yoki galereyani taklif qiladi
-  const canAdd = !!photoEdit.addInput;
+  const canAdd = !!$('#photoInput');
   if (!photoEdit.items.length) {
     box.innerHTML = canAdd
-      ? `<button type="button" class="photo-empty photo-add" data-photo-add>${icon('plus')}<b>Rasm qo'shish</b><span class="small">kamera yoki galereya</span></button>`
+      ? `<label class="photo-empty photo-add" for="photoInput">${icon('plus')}<b>Rasm qo'shish</b><span class="small">kamera yoki galereya</span></label>`
       : `<div class="photo-empty">${icon('camera')}<span>Rasm yo'q</span></div>`;
   } else if (canAdd && photoEdit.items.length < MAX_PHOTOS) {
-    box.insertAdjacentHTML('beforeend', `<button type="button" class="ph-add" data-photo-add>${icon('plus')}<span>Rasm qo'shish</span></button>`);
+    box.insertAdjacentHTML('beforeend', `<label class="ph-add" for="photoInput">${icon('plus')}<span>Rasm qo'shish</span></label>`);
   }
   hydratePhotos(box);
 }
@@ -1854,7 +1822,7 @@ function syncChips(box) {
 
 function bindProductForm(p, readonly = false) {
   matShowAll = false;
-  photoEdit = { items: (p.photos || []).slice(), removed: [], addInput: readonly ? null : $('#modalBody #photoInput'), replaceInput: readonly ? null : $('#modalBody #photoReplace') };
+  photoEdit = { items: (p.photos || []).slice(), removed: [] };
   renderPhotoList(readonly);
   if (readonly) return;
   bindSizeField();
@@ -1878,11 +1846,11 @@ function bindProductForm(p, readonly = false) {
     (await editFiles(files)).forEach((file) => photoEdit.items.push({ file, url: URL.createObjectURL(file) }));
     renderPhotoList();
   };
-  photoEdit.addInput.addEventListener('change', addFiles); // telefonda pastki oynaga ko'chirilsa ham shu maydon
+  $('#photoInput').addEventListener('change', addFiles);
   $('#photoCam')?.addEventListener('change', addFiles);
   // Bitta rasmni boshqasiga almashtirish (o'rni va «Asosiy» belgisi saqlanadi)
   let replaceAt = -1;
-  photoEdit.replaceInput?.addEventListener('change', async (e) => {
+  $('#photoReplace')?.addEventListener('change', async (e) => {
     const picked = e.target.files[0];
     e.target.value = '';
     const old = photoEdit.items[replaceAt];
@@ -1898,8 +1866,7 @@ function bindProductForm(p, readonly = false) {
     const del = e.target.closest('.ph-del');
     const star = e.target.closest('.ph-star');
     const rep = e.target.closest('.ph-rep');
-    if (rep) { replaceAt = +rep.dataset.i; pickPhotos(photoEdit.replaceInput); return; }
-    if (e.target.closest('[data-photo-add]')) { pickPhotos(photoEdit.addInput); return; }
+    if (rep) { replaceAt = +rep.dataset.i; $('#photoReplace').click(); return; }
     const ed = e.target.closest('.ph-edit');
     if (ed) { editExistingPhoto(+ed.dataset.i); return; }
     const img = e.target.closest('img[data-i]');
@@ -6887,7 +6854,7 @@ const ACTIONS = {
   ecSave: async () => { db.expenseCats = readExpenseCats(); await save(); alert('Saqlandi.'); },
   editProduct: (ds) => editProduct(ds.id),
   // Rasmsiz mahsulot: kartochka ochiladi va darhol rasm tanlash oynasi chiqadi
-  addPhoto: (ds) => { editProduct(ds.id); pickPhotos(photoEdit.addInput); },
+  addPhoto: (ds) => { editProduct(ds.id); $('#photoInput')?.click(); },
   deleteProduct: (ds) => deleteProduct(ds.id),
   unarchive: (ds) => { product(ds.id).archived = false; save(); },
   productHistory: (ds) => productHistory(ds.id),
