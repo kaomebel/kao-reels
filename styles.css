@@ -1410,3 +1410,28 @@ html.modal-open, html.modal-open body { overflow: hidden; overscroll-behavior: n
 .doc-qty { margin-right: 4px; }
 .nasiya-card .nasiya-total { margin: 4px 0 6px; font-size: 16px; }
 .nasiya-card .sc-row { display: grid; grid-template-columns: 1fr auto auto; gap: 10px; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--border); }
+
+/* Rasmni moslash oynasi */
+.img-editor { position: fixed; inset: 0; width: 100vw; height: 100vh; height: 100dvh; max-width: none; max-height: none; margin: 0; padding: 0; border: none; border-radius: 0; background: #14100d; color: #fff; display: none; flex-direction: column; }
+.img-editor[open] { display: flex; }
+.img-editor::backdrop { background: #14100d; }
+.ie-top { display: flex; align-items: center; gap: 12px; padding: max(10px, env(safe-area-inset-top)) 14px 10px; }
+.ie-top b { font-size: 17px; }
+.ie-hint { flex: 1; font-size: 12px; color: rgba(255, 255, 255, .6); }
+.ie-x { width: 42px; height: 42px; min-height: 0; padding: 0; border-radius: 50%; font-size: 24px; background: rgba(255, 255, 255, .12); color: #fff; border: none; }
+.ie-stage { position: relative; flex: 1; min-height: 0; overflow: hidden; touch-action: none; cursor: grab; }
+.ie-stage canvas { position: absolute; inset: 0; }
+.ie-frame { position: absolute; border: 2px solid #fff; box-shadow: 0 0 0 9999px rgba(0, 0, 0, .55); pointer-events: none; border-radius: 4px;
+  background-image: linear-gradient(rgba(255,255,255,.25) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.25) 1px, transparent 1px); background-size: 33.33% 33.33%; background-position: -1px -1px; }
+.ie-tools { padding: 10px 14px 4px; display: flex; flex-direction: column; gap: 10px; }
+.ie-aspects { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; }
+.ie-aspects button, .ie-row button { min-height: 36px; padding: 4px 14px; background: rgba(255, 255, 255, .1); color: #fff; border: 1px solid rgba(255, 255, 255, .2); box-shadow: none; }
+.ie-aspects button.on { background: #fff; color: #14100d; }
+.ie-row { display: flex; align-items: center; gap: 10px; }
+.ie-zoom { flex: 1; accent-color: #e3b07f; }
+.ie-actions { display: flex; gap: 10px; align-items: center; padding: 10px 14px max(12px, env(safe-area-inset-bottom)); }
+.ie-actions .ie-cancel { background: transparent; color: rgba(255, 255, 255, .7); border-color: rgba(255, 255, 255, .25); box-shadow: none; }
+.ie-actions .ie-orig { margin-left: auto; background: rgba(255, 255, 255, .1); color: #fff; border-color: rgba(255, 255, 255, .25); box-shadow: none; }
+.ie-actions .ie-ok { min-width: 120px; }
+.photo-list .ph-edit { position: absolute; right: 6px; bottom: 40px; min-height: 0; padding: 3px 8px; border-radius: 6px; font-size: 11px; background: rgba(58, 41, 29, .85); color: #fff6ea; border: none; }
+@media (max-width: 700px) { .photo-list .ph-edit { padding: 6px 9px; font-size: 12px; bottom: 46px; } }

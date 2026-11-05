@@ -983,9 +983,10 @@ function openReceiptPicker() {
       <div class="rc-list" id="rcList"></div>`,
     onOpen: () => {
       draw();
-      const add = (e) => {
-        [...e.target.files].slice(0, 10 - receiptFiles.length).forEach((file) => receiptFiles.push({ file, url: URL.createObjectURL(file) }));
+      const add = async (e) => {
+        const picked = [...e.target.files].slice(0, 10 - receiptFiles.length);
         e.target.value = '';
+        (await editFiles(picked)).forEach((file) => receiptFiles.push({ file, url: URL.createObjectURL(file) }));
         draw();
       };
       $('#rcCam').addEventListener('change', add);
@@ -1341,13 +1342,191 @@ function bindPriceBlock() {
 // Kartochkadagi rasmlar: saqlanganlari ({path, thumb}) va hali yuklanmagan yangilari ({file, url})
 let photoEdit = null;
 
+// ---------- Rasmni moslash: kesish, kattalashtirish, surish, burish ----------
+// Rasm joylanishidan oldin ochiladi. Natija — yangi File (JPEG); «Bekor» — rasm qo'shilmaydi.
+const IE_ASPECTS = [['orig', 'Asl'], ['1', '1:1'], ['0.75', '3:4'], ['1.3333', '4:3'], ['1.7778', '16:9']];
+
+function editImage(file) {
+  return new Promise(async (resolve) => {
+    let src;
+    try {
+      src = await createImageBitmap(file, { imageOrientation: 'from-image' });
+    } catch (e) {
+      src = await new Promise((res) => { const im = new Image(); im.onload = () => res(im); im.onerror = () => res(null); im.src = URL.createObjectURL(file); });
+    }
+    if (!src) return resolve(file); // ochib bo'lmadi — o'zgarishsiz
+    let dlg = $('#imgEditor');
+    if (!dlg) {
+      dlg = document.createElement('dialog');
+      dlg.id = 'imgEditor';
+      dlg.className = 'img-editor';
+      dlg.innerHTML = `<div class="ie-top"><b>Rasmni moslash</b><span class="ie-hint">Suring · chimdib yoki g'ildirak bilan kattalashtiring</span><button type="button" class="ie-x" aria-label="Bekor">×</button></div>
+        <div class="ie-stage"><canvas></canvas><div class="ie-frame"></div></div>
+        <div class="ie-tools">
+          <div class="ie-aspects">${IE_ASPECTS.map(([v, t]) => `<button type="button" data-a="${v}">${t}</button>`).join('')}</div>
+          <div class="ie-row"><button type="button" class="ie-rot" title="Burish">↻ Burish</button>
+            <input type="range" class="ie-zoom" min="0" max="100" value="0" aria-label="Kattalashtirish"><button type="button" class="ie-reset">Qaytarish</button></div>
+        </div>
+        <div class="ie-actions"><button type="button" class="small ie-cancel">Bekor</button><button type="button" class="ie-orig">O'zgarishsiz</button><button type="button" class="primary ie-ok">${icon('check')}Tayyor</button></div>`;
+      document.body.appendChild(dlg);
+    }
+    const stage = $('.ie-stage', dlg);
+    const canvas = $('canvas', stage);
+    const frameEl = $('.ie-frame', stage);
+    const zoom = $('.ie-zoom', dlg);
+    const st = { rot: 0, aspect: 'orig', s: 1, cx: 0, cy: 0, frame: { x: 0, y: 0, w: 0, h: 0 } };
+    const dims = () => (st.rot % 180 ? [src.height, src.width] : [src.width, src.height]);
+    const minScale = () => { const [w, h] = dims(); return Math.max(st.frame.w / w, st.frame.h / h); };
+    const layout = () => {
+      const W = stage.clientWidth;
+      const H = stage.clientHeight;
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width = W * dpr; canvas.height = H * dpr;
+      canvas.style.width = W + 'px'; canvas.style.height = H + 'px';
+      const [iw, ih] = dims();
+      const a = st.aspect === 'orig' ? iw / ih : +st.aspect;
+      const pad = 18;
+      let fw = W - pad * 2;
+      let fh = fw / a;
+      if (fh > H - pad * 2) { fh = H - pad * 2; fw = fh * a; }
+      st.frame = { x: (W - fw) / 2, y: (H - fh) / 2, w: fw, h: fh };
+      Object.assign(frameEl.style, { left: st.frame.x + 'px', top: st.frame.y + 'px', width: fw + 'px', height: fh + 'px' });
+    };
+    const clamp = () => {
+      const m = minScale();
+      st.s = Math.min(Math.max(st.s, m), m * 6);
+      const [iw, ih] = dims();
+      const hw = (iw * st.s) / 2;
+      const hh = (ih * st.s) / 2;
+      const f = st.frame;
+      st.cx = Math.min(Math.max(st.cx, f.x + f.w - hw), f.x + hw);
+      st.cy = Math.min(Math.max(st.cy, f.y + f.h - hh), f.y + hh);
+      zoom.value = Math.round((Math.log(st.s / m) / Math.log(6)) * 100);
+    };
+    const drawOn = (ctx) => {
+      ctx.save();
+      ctx.translate(st.cx, st.cy);
+      ctx.rotate((st.rot * Math.PI) / 180);
+      ctx.scale(st.s, st.s);
+      ctx.drawImage(src, -src.width / 2, -src.height / 2);
+      ctx.restore();
+    };
+    const draw = () => {
+      const ctx = canvas.getContext('2d');
+      const dpr = window.devicePixelRatio || 1;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.imageSmoothingQuality = 'high';
+      drawOn(ctx);
+    };
+    const reset = () => {
+      layout();
+      st.s = minScale();
+      st.cx = st.frame.x + st.frame.w / 2;
+      st.cy = st.frame.y + st.frame.h / 2;
+      clamp(); draw();
+    };
+    const setAspect = (a) => {
+      st.aspect = a;
+      $$('.ie-aspects button', dlg).forEach((b) => b.classList.toggle('on', b.dataset.a === a));
+      reset();
+    };
+    const zoomAt = (factor, px, py) => {
+      const old = st.s;
+      st.s = st.s * factor;
+      clamp();
+      const k = st.s / old;
+      st.cx = px - (px - st.cx) * k;
+      st.cy = py - (py - st.cy) * k;
+      clamp(); draw();
+    };
+    // Surish va chimdish (sichqoncha va barmoq)
+    const ptrs = new Map();
+    let last = null;
+    stage.onpointerdown = (e) => { stage.setPointerCapture(e.pointerId); ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY }); last = null; };
+    stage.onpointermove = (e) => {
+      if (!ptrs.has(e.pointerId)) return;
+      const prev = ptrs.get(e.pointerId);
+      ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      const r = stage.getBoundingClientRect();
+      if (ptrs.size === 1) {
+        st.cx += e.clientX - prev.x; st.cy += e.clientY - prev.y; clamp(); draw();
+      } else if (ptrs.size === 2) {
+        const [a, b] = [...ptrs.values()];
+        const d = Math.hypot(a.x - b.x, a.y - b.y);
+        const mid = { x: (a.x + b.x) / 2 - r.left, y: (a.y + b.y) / 2 - r.top };
+        if (last) { zoomAt(d / last.d, mid.x, mid.y); st.cx += mid.x - last.mid.x; st.cy += mid.y - last.mid.y; clamp(); draw(); }
+        last = { d, mid };
+      }
+    };
+    stage.onpointerup = stage.onpointercancel = (e) => { ptrs.delete(e.pointerId); last = null; };
+    stage.onwheel = (e) => { e.preventDefault(); const r = stage.getBoundingClientRect(); zoomAt(Math.exp(-e.deltaY / 400), e.clientX - r.left, e.clientY - r.top); };
+    zoom.oninput = () => { const m = minScale(); const target = m * Math.pow(6, zoom.value / 100); zoomAt(target / st.s, st.frame.x + st.frame.w / 2, st.frame.y + st.frame.h / 2); };
+    $('.ie-aspects', dlg).onclick = (e) => { const b = e.target.closest('button'); if (b) setAspect(b.dataset.a); };
+    $('.ie-rot', dlg).onclick = () => { st.rot = (st.rot + 90) % 360; reset(); };
+    $('.ie-reset', dlg).onclick = () => { st.rot = 0; setAspect('orig'); };
+    const finish = (result) => { window.removeEventListener('resize', onResize); dlg.close(); resolve(result); };
+    const onResize = () => { const c = { x: st.cx - st.frame.x, y: st.cy - st.frame.y, fw: st.frame.w }; layout(); const k = st.frame.w / c.fw; st.s *= k; st.cx = st.frame.x + c.x * k; st.cy = st.frame.y + c.y * k; clamp(); draw(); };
+    window.addEventListener('resize', onResize);
+    $('.ie-x', dlg).onclick = $('.ie-cancel', dlg).onclick = () => finish(null);
+    dlg.oncancel = (e) => { e.preventDefault(); finish(null); };
+    $('.ie-orig', dlg).onclick = () => finish(file);
+    $('.ie-ok', dlg).onclick = () => {
+      // Ramka ichidagi qism — asl sifatda (eng uzun tomoni 2000 px gacha)
+      const f = st.frame;
+      const k = Math.min(1 / st.s, 2000 / Math.max(f.w, f.h));
+      const out = document.createElement('canvas');
+      out.width = Math.max(1, Math.round(f.w * k)); out.height = Math.max(1, Math.round(f.h * k));
+      const ctx = out.getContext('2d');
+      ctx.imageSmoothingQuality = 'high';
+      ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, out.width, out.height);
+      ctx.scale(k, k); ctx.translate(-f.x, -f.y);
+      drawOn(ctx);
+      out.toBlob((blob) => finish(blob ? new File([blob], (file.name || 'rasm').replace(/\.\w+$/, '') + '.jpg', { type: 'image/jpeg' }) : file), 'image/jpeg', 0.9);
+    };
+    if (!dlg.open) dlg.showModal();
+    requestAnimationFrame(() => setAspect('orig'));
+  });
+}
+
+// Bir nechta rasm — har biri navbat bilan moslanadi (bekor qilingani qo'shilmaydi)
+async function editFiles(files) {
+  const out = [];
+  for (const f of files) {
+    if (!/^image\//.test(f.type || 'image/')) { out.push(f); continue; }
+    const r = await editImage(f);
+    if (r) out.push(r);
+  }
+  return out;
+}
+
+// Joylangan (yoki yangi) rasmni qayta moslash — natija o'sha o'ringa qo'yiladi
+async function editExistingPhoto(i) {
+  const ph = photoEdit.items[i];
+  if (!ph) return;
+  let blob = ph.file;
+  if (!blob) {
+    try {
+      const res = await fetch(await backend.photoUrl(ph.path));
+      if (!res.ok) throw new Error(res.status);
+      blob = await res.blob();
+    } catch (e) { return alert("Rasmni ochib bo'lmadi (internetni tekshiring)."); }
+  }
+  const file = await editImage(new File([blob], 'rasm.jpg', { type: blob.type || 'image/jpeg' }));
+  if (!file || photoEdit.items[i] !== ph) return;
+  if (ph.file) URL.revokeObjectURL(ph.url);
+  else photoEdit.removed.push(ph.path, ph.thumb);
+  photoEdit.items[i] = { file, url: URL.createObjectURL(file) };
+  renderPhotoList();
+}
+
 function renderPhotoList(readonly) {
   const box = $('#photoList');
   if (!box) return;
   box.innerHTML = photoEdit.items.length ? photoEdit.items.map((ph, i) => `<div class="ph ${i === 0 ? 'main' : ''}">
       <img ${ph.file ? `src="${ph.url}"` : `data-photo="${esc(i === 0 ? ph.path : ph.thumb)}"`} data-i="${i}" alt="" title="Kattalashtirish">
       ${i === 0 ? '<span class="ph-main">Asosiy</span>' : readonly ? '' : `<button type="button" class="ph-star" data-i="${i}" title="Asosiy rasm qilish">★ Asosiy qilish</button>`}
-      ${readonly ? '' : `<button type="button" class="ph-rep" data-i="${i}" title="Boshqa rasmga almashtirish">🔄 Almashtirish</button><button type="button" class="ph-del" data-i="${i}" title="O'chirish">×</button>`}
+      ${readonly ? '' : `<button type="button" class="ph-edit" data-i="${i}" title="Kesish, kattalashtirish, burish">✂️ Moslash</button><button type="button" class="ph-rep" data-i="${i}" title="Boshqa rasmga almashtirish">🔄 Almashtirish</button><button type="button" class="ph-del" data-i="${i}" title="O'chirish">×</button>`}
     </div>`).join('') : `<div class="photo-empty">${icon('camera')}<span>Rasm yo'q</span></div>`;
   hydratePhotos(box);
 }
@@ -1611,22 +1790,26 @@ function bindProductForm(p, readonly = false) {
     $('#makerNew').hidden = maker.value !== '__new';
     if (maker.value === '__new') $('#makerNew').focus();
   });
-  const addFiles = (e) => {
-    const files = Array.from(e.target.files).slice(0, MAX_PHOTOS - photoEdit.items.length);
-    if (e.target.files.length > files.length) alert(`Ko'pi bilan ${MAX_PHOTOS} ta rasm. Keraksizini o'chiring yoki «Almashtirish» ni bosing.`);
-    files.forEach((file) => photoEdit.items.push({ file, url: URL.createObjectURL(file) }));
+  const addFiles = async (e) => {
+    const picked = Array.from(e.target.files);
     e.target.value = '';
+    const files = picked.slice(0, MAX_PHOTOS - photoEdit.items.length);
+    if (picked.length > files.length) alert(`Ko'pi bilan ${MAX_PHOTOS} ta rasm. Keraksizini o'chiring yoki «Almashtirish» ni bosing.`);
+    // Har bir rasm avval moslanadi (kesish, kattalashtirish, burish)
+    (await editFiles(files)).forEach((file) => photoEdit.items.push({ file, url: URL.createObjectURL(file) }));
     renderPhotoList();
   };
   $('#photoInput').addEventListener('change', addFiles);
   $('#photoCam')?.addEventListener('change', addFiles);
   // Bitta rasmni boshqasiga almashtirish (o'rni va «Asosiy» belgisi saqlanadi)
   let replaceAt = -1;
-  $('#photoReplace')?.addEventListener('change', (e) => {
-    const file = e.target.files[0];
+  $('#photoReplace')?.addEventListener('change', async (e) => {
+    const picked = e.target.files[0];
     e.target.value = '';
     const old = photoEdit.items[replaceAt];
-    if (!file || !old) return;
+    if (!picked || !old) return;
+    const file = await editImage(picked);
+    if (!file) return;
     if (old.file) URL.revokeObjectURL(old.url);
     else photoEdit.removed.push(old.path, old.thumb);
     photoEdit.items[replaceAt] = { file, url: URL.createObjectURL(file) };
@@ -1637,6 +1820,8 @@ function bindProductForm(p, readonly = false) {
     const star = e.target.closest('.ph-star');
     const rep = e.target.closest('.ph-rep');
     if (rep) { replaceAt = +rep.dataset.i; $('#photoReplace').click(); return; }
+    const ed = e.target.closest('.ph-edit');
+    if (ed) { editExistingPhoto(+ed.dataset.i); return; }
     const img = e.target.closest('img[data-i]');
     if (del) {
       if (!confirm("Rasm o'chirilsinmi?\n\n(Kartochka saqlangandan keyin o'chadi — «Yopish» bosilsa, rasm joyida qoladi.)")) return;
