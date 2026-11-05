@@ -1452,3 +1452,13 @@ html.modal-open, html.modal-open body { overflow: hidden; overscroll-behavior: n
 .sec-tg.on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-dark) !important; font-weight: 600; }
 .sec-size, .sec-mat, .sec-color { display: contents; }
 .product-form.no-size .sec-size, .product-form.no-mat .sec-mat, .product-form.no-color .sec-color { display: none; }
+
+/* Telefonda rasm tanlash — pastdan */
+.photo-sheet .ps-btns { display: flex; flex-direction: column; gap: 10px; padding: 12px 14px max(18px, env(safe-area-inset-bottom)); }
+.ps-btn { display: flex; align-items: center; gap: 14px; min-height: 64px; padding: 12px 16px; border: 1px solid var(--border); border-radius: 14px; background: var(--card-2); cursor: pointer; }
+.ps-btn:active { background: var(--accent-soft); }
+.ps-btn .ps-ic { font-size: 28px; }
+.ps-btn b { display: block; font-size: 16px; color: var(--text); }
+.ps-btn small { color: var(--muted); font-size: 13px; }
+.ps-inputs { display: none; }
+button.photo-empty, button.ph-add { width: 100%; font: inherit; }
