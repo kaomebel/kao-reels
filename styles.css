@@ -1463,3 +1463,17 @@ html.modal-open, html.modal-open body { overflow: hidden; overscroll-behavior: n
 .label-due .ld-row { display: flex; gap: 10px; align-items: center; justify-content: space-between; flex-wrap: wrap; padding: 10px 0; border-bottom: 1px solid var(--border); }
 .label-due .ld-btns { display: flex; gap: 6px; }
 .ld-badge { display: inline-block; margin-left: 6px; padding: 1px 7px; border-radius: 999px; font-size: 11px; font-weight: 600; background: var(--warn-soft, #f6ecd2); color: var(--warn, #8a6100); vertical-align: 2px; }
+
+/* Oynani yig'ish: pastda kichik panel */
+.modal-min { margin-right: 0; font-size: 20px; }
+.modal-min .mm-up { display: none; font-size: 18px; }
+#modal.minimized { position: fixed; inset: auto 16px calc(16px + env(safe-area-inset-bottom)) auto; width: min(380px, calc(100vw - 32px)) !important; max-width: none; height: auto !important; max-height: none; margin: 0; padding: 0; border-radius: 14px !important; border: 1px solid var(--accent); box-shadow: 0 10px 30px rgba(0, 0, 0, .3); z-index: 900; overflow: hidden; }
+#modal.minimized form { height: auto !important; max-height: none !important; }
+#modal.minimized #modalBody, #modal.minimized .modal-actions { display: none !important; }
+#modal.minimized .modal-head { cursor: pointer; background: var(--accent-soft); border-bottom: none; padding-top: 0 !important; }
+#modal.minimized .modal-head h3 { padding: 12px 14px !important; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#modal.minimized .modal-head h3::before { content: "✏️ "; }
+#modal.minimized .modal-min .mm-down { display: none; }
+#modal.minimized .modal-min .mm-up { display: inline; }
+#modal.minimized .modal-x { width: 36px; height: 36px; margin-right: 6px; }
+@media (max-width: 700px) { #modal.minimized { left: 12px; right: 12px; width: auto !important; bottom: calc(12px + env(safe-area-inset-bottom)); } }

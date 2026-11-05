@@ -842,7 +842,7 @@ function refreshCtx() {
       root.removeProperty('--vvt');
       // iPhone klaviatura yopilgach sahifani surilgan holda qoldiradi — oyna ekran o'rtasiga «tushib» qolardi
       const base = window.modalScrollY ?? 0;
-      if (document.querySelector('dialog[open]') && (Math.abs(window.scrollY - base) > 2 || vv.offsetTop)) window.scrollTo(0, base);
+      if (document.querySelector('dialog[open]:not(.minimized)') && (Math.abs(window.scrollY - base) > 2 || vv.offsetTop)) window.scrollTo(0, base);
     }
   };
   // Klaviatura yopilish animatsiyasi tugaguncha bir necha marta qayta tekshiramiz
@@ -861,6 +861,11 @@ function refreshCtx() {
 let modalState = null;
 
 function openModal({ title, body, onSubmit, onOpen, extra = [], wide = false, submitText = 'Saqlash' }) {
+  // Yig'ib qo'yilgan oyna bor — uning ustidan yozib yubormaymiz
+  if ($('#modal').classList.contains('minimized')) {
+    if (confirm(`«${$('#modalTitle').textContent}» oynasi yig'ilib turibdi (yozganlaringiz saqlanmagan).\n\nAvval uni tugating yoki yoping. Hozir o'shani ochaymi?`)) restoreModal();
+    return;
+  }
   $('#modalTitle').textContent = title;
   $('#modalBody').innerHTML = body;
   $('#modal').classList.toggle('wide', wide);
@@ -898,11 +903,43 @@ function cardTables(root) {
 }
 
 function closeModal() {
+  $('#modal').classList.remove('minimized');
   $('#modal').close();
+}
+
+// Oynani yig'ish: yopilmaydi ham, saqlanmaydi ham — pastda kichik panel bo'lib turadi,
+// shu orada dasturning boshqa joylarini ko'rish mumkin (masalan, boshqa tovar narxini)
+let modalSwitching = false;
+// Yig'ish/ochishda dialog qayta ochiladi — «yopildi» hodisasi boshqa ishlovchilarga bormasin
+window.addEventListener('close', (e) => { if (modalSwitching && e.target.id === 'modal') e.stopImmediatePropagation(); }, true);
+function minimizeModal() {
+  const m = $('#modal');
+  if (!m.open || m.classList.contains('minimized')) return;
+  closePicker();
+  document.activeElement?.blur?.(); // klaviatura yopilsin
+  modalSwitching = true;
+  m.close();
+  m.classList.add('minimized');
+  m.show(); // oyna emas — panel: orqadagi sahifa ishlaydi
+  modalSwitching = false;
+  document.documentElement.classList.remove('modal-open');
+  window.scrollTo(0, window.modalScrollY || 0);
+}
+function restoreModal() {
+  const m = $('#modal');
+  if (!m.classList.contains('minimized')) return;
+  modalSwitching = true;
+  m.close();
+  m.classList.remove('minimized');
+  window.modalScrollY = window.scrollY;
+  m.showModal();
+  modalSwitching = false;
+  document.documentElement.classList.add('modal-open');
+  window.trackViewportSettle?.();
 }
 // Oyna ochiq paytda orqadagi sahifa surilmaydi (iPhone'da oyna joyidan siljimasin)
 document.addEventListener('close', () => {
-  if (!document.querySelector('dialog[open]')) document.documentElement.classList.remove('modal-open');
+  if (!document.querySelector('dialog[open]:not(.minimized)')) document.documentElement.classList.remove('modal-open');
   window.trackViewportSettle?.();
 }, true);
 
@@ -1142,6 +1179,11 @@ $('#modalForm').addEventListener('submit', async (e) => {
 const closeModalAsk = () => { if (askClose(modalState)) closeModal(); };
 $('#modalCancel').addEventListener('click', closeModalAsk);
 $('#modalX').addEventListener('click', closeModalAsk);
+$('#modalMin').addEventListener('click', (e) => { e.stopPropagation(); if ($('#modal').classList.contains('minimized')) restoreModal(); else minimizeModal(); });
+// Yig'ilgan panelning sarlavhasiga bosilsa — oyna qayta ochiladi
+$('#modal .modal-head').addEventListener('click', (e) => {
+  if ($('#modal').classList.contains('minimized') && !e.target.closest('#modalX, #modalMin')) restoreModal();
+});
 $('#modalBody').addEventListener('input', (e) => { if (modalState && !e.target.closest('.it-search')) modalState.dirty = true; });
 $('#modalBody').addEventListener('change', (e) => { if (modalState && e.isTrusted) modalState.dirty = true; });
 $('#modalExtra').addEventListener('click', (e) => {
@@ -4406,8 +4448,8 @@ function telegramOnStockIn(d) {
   };
   document.addEventListener('wheel', (e) => {
     if (Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return; // gorizontal surish — tegmaymiz
-    const layer = e.target.closest?.('dialog[open], #pickPanel, .ctx-menu');
-    if (!layer && !document.querySelector('dialog[open]')) return; // oddiy sahifa — odatdagidek
+    const layer = e.target.closest?.('dialog[open]:not(.minimized), #pickPanel, .ctx-menu');
+    if (!layer && !document.querySelector('dialog[open]:not(.minimized)')) return; // oddiy sahifa — odatdagidek
     if (!layer) { e.preventDefault(); return; } // oyna ochiq, kursor tashqarida
     for (let el = e.target; el && el !== document.documentElement; el = el.parentElement) {
       if (el.nodeType === 1 && canScroll(el, e.deltaY)) return; // shu ro'yxat suriladi
