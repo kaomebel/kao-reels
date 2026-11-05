@@ -1477,3 +1477,10 @@ html.modal-open, html.modal-open body { overflow: hidden; overscroll-behavior: n
 #modal.minimized .modal-min .mm-up { display: inline; }
 #modal.minimized .modal-x { width: 36px; height: 36px; margin-right: 6px; }
 @media (max-width: 700px) { #modal.minimized { left: 12px; right: 12px; width: auto !important; bottom: calc(12px + env(safe-area-inset-bottom)); } }
+
+/* Qabul qilish: qatordagi ta'minotchi; Moliya */
+.it-supl { display: flex; align-items: center; gap: 8px; margin-top: 6px; font-size: 12px; color: var(--muted); }
+.it-supl select { flex: 1; min-width: 0; min-height: 36px; font-size: 14px; }
+.sup-acc .sa-due { min-width: 150px; }
+.unp-table .up-price { min-width: 130px; }
+.unp-table select { min-width: 140px; }

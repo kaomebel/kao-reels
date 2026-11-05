@@ -793,11 +793,25 @@ function computeCost() {
 }
 
 // Musbat — kontragent bizga qarzdor, manfiy — biz qarzdormiz
+// Qabul qilishda har bir tovar o'z ta'minotchisidan bo'lishi mumkin (it.supplierId) — kontragent ulushi
+const multiSup = (d) => (d.items || []).some((it) => it.supplierId);
+function docPartyShare(d, id) {
+  if (!multiSup(d)) return d.counterpartyId === id ? docTotal(d) : 0;
+  const sum = d.items.filter((it) => (it.supplierId || d.counterpartyId) === id).reduce((s, it) => s + it.qty * it.price, 0);
+  return d.currency === 'USD' ? sum * (d.rate || 0) : sum;
+}
+const docHasParty = (d, id) => d.counterpartyId === id || (d.items || []).some((it) => it.supplierId === id);
+// Hujjat kontragenti nomi (bir nechta ta'minotchi bo'lsa — hammasi)
+function docPartyName(d) {
+  if (d.counterpartyId) return party(d.counterpartyId)?.name || '';
+  return uniqNames((d.items || []).map((it) => party(it.supplierId)?.name).filter(Boolean)).join(', ');
+}
+
 function partyBalance(id) {
   let b = 0;
   db.docs.forEach((d) => {
     const t = DOC_TYPES[d.type];
-    if (d.counterpartyId === id && t.money) b += t.money * docTotal(d);
+    if (t.money && docHasParty(d, id)) b += t.money * docPartyShare(d, id);
   });
   db.payments.forEach((p) => {
     if (p.counterpartyId === id) b += p.dir === 'in' ? -p.amount : p.amount;
@@ -2403,7 +2417,7 @@ function partyForm(c = {}) {
 function autoSupplies(cid) {
   if (!cid) return [];
   const ids = new Set();
-  db.docs.forEach((d) => { if (d.counterpartyId === cid && ['receipt', 'purchaseOrder'].includes(d.type)) d.items.forEach((it) => ids.add(it.productId)); });
+  db.docs.forEach((d) => { if (['receipt', 'purchaseOrder'].includes(d.type)) d.items.forEach((it) => { if ((it.supplierId || d.counterpartyId) === cid) ids.add(it.productId); }); });
   db.products.forEach((p) => { if (p.supplierId === cid) ids.add(p.id); });
   return uniqNames([...ids].map(product).filter((p) => p && p.category && !isKit(p)).map((p) => (p.type ? `${p.category} › ${p.type}` : p.category)));
 }
@@ -2502,7 +2516,7 @@ function partyStatement(id) {
   const rows = [];
   db.docs.forEach((d) => {
     const t = DOC_TYPES[d.type];
-    if (d.counterpartyId === id && t.money) rows.push({ date: d.date, title: `${t.one} ${d.no}`, delta: t.money * docTotal(d) });
+    if (t.money && docHasParty(d, id)) rows.push({ date: d.date, title: `${t.one} ${d.no}${multiSup(d) ? ` (${d.items.filter((it) => it.supplierId === id).map(itemName).join(', ')})` : ''}`, delta: t.money * docPartyShare(d, id) });
   });
   db.payments.forEach((p) => {
     if (p.counterpartyId === id) rows.push({ date: p.date, title: `${p.dir === 'in' ? "Kirim to'lovi" : "Chiqim to'lovi"} ${p.no} (${PAY_METHODS[p.method]})`, delta: p.dir === 'in' ? -p.amount : p.amount });
@@ -2566,6 +2580,11 @@ document.addEventListener('click', (e) => {
 // Sotuv va buyurtmada har bir qatorda «Chegirma (1 dona)» — sotish narxi = narx − chegirma
 const rowDiscDoc = (t) => t === DOC_TYPES.sale || t === DOC_TYPES.order;
 
+function supplierSelect(value) {
+  const list = db.counterparties.filter((c) => c.kind !== 'customer');
+  return `<label class="it-supl"><span>Ta'minotchi</span><select class="it-sup"><option value="">— tanlang —</option>${list.map((c) => `<option value="${esc(c.id)}" ${c.id === value ? 'selected' : ''}>${esc(partyLabel(c, list))}</option>`).join('')}${canAddParty() ? '<option value="__new">+ Yangi ta\'minotchi...</option>' : ''}</select></label>`;
+}
+
 function itemRowHtml(t, it = {}, cur = 'UZS') {
   const p = product(it.productId);
   const rd = rowDiscDoc(t);
@@ -2574,7 +2593,8 @@ function itemRowHtml(t, it = {}, cur = 'UZS') {
   return `<tr${kit}>
     <td class="it-pick"><input type="hidden" class="it-product" value="${esc(p ? p.id : '')}">
       <div class="it-sw">${rowThumbHtml(p)}<input class="it-search" autocomplete="off" placeholder="Artikul yoki nomi — yoki tanlang" value="${esc(productLabel(p))}"><button type="button" class="it-scan" title="Shtrix-kod / QR skaner" aria-label="Skaner">${icon('scan')}</button></div>
-      <div class="it-path muted small">${p ? esc(productPath(p)) : ''}${it.kitName ? ` · <b>Komplekt: ${esc(it.kitName)}</b>` : ''}</div></td>
+      <div class="it-path muted small">${p ? esc(productPath(p)) : ''}${it.kitName ? ` · <b>Komplekt: ${esc(it.kitName)}</b>` : ''}</div>
+      ${t === DOC_TYPES.receipt ? supplierSelect(it.supplierId || p?.supplierId || '') : ''}</td>
     <td class="it-avail muted num"></td>
     <td>${qtyStepper('it-qty', it.qty || 1)}</td>
     <td><span class="money-wrap"><input class="it-price money" data-cur="${cur}" inputmode="decimal" value="${esc(fmtIn(listPrice ?? '', cur))}"><span class="cur">${CUR_SIGN[cur]}</span></span>
@@ -2600,7 +2620,7 @@ const discountOf = (data) => num(data.discount) * (num(data.discountK) || 1);
 
 // Kirim / hisobdan chiqarish / ko'chirishda narx — kelish narxi; tannarx ruxsati yo'q xodimga ko'rsatilmaydi
 // (narxsiz qator tannarx hisobiga ta'sir qilmaydi)
-const hidesCost = (t) => t.price === 'buy' && !t.money && !can('costs');
+const hidesCost = (t) => (t.price === 'buy' && !t.money && !can('costs')) || (t === DOC_TYPES.receipt && !can('money'));
 
 function docForm(type, d) {
   const t = DOC_TYPES[type];
@@ -2637,6 +2657,9 @@ function docForm(type, d) {
     // Mijoz turi faqat administratorga ko'rinadi — sotuvchi oynasida yo'q (saqlangan turi o'zgarmaydi)
     if (isAdmin()) head += customerTypeField(known ? known.ctype : draft.ctype || '');
     head += `<div class="full party-hint" id="partyHint"></div>`;
+  } else if (type === 'receipt') {
+    // Qabul qilish: bitta mashinada har xil ta'minotchilardan — ta'minotchi har bir tovar qatorida
+    head += `<p class="muted small full">Ta'minotchi har bir tovar qatorida tanlanadi (bitta mashinada bir nechta ta'minotchidan kelishi mumkin).${can('money') ? '' : ' Narx va to\'lovlarni administrator Moliya bo\'limida kiritadi.'}</p>`;
   } else if (t.party) {
     // Telefon yozilsa — saqlangan mijoz avtomatik topiladi; topilmasa, yangi mijoz ismi so'raladi
     const who = t.party === 'supplier' ? "ta'minotchi" : 'mijoz';
@@ -2655,7 +2678,7 @@ function docForm(type, d) {
     if (late) after += st; else head += st;
   }
   const cur = t.fx && d.currency === 'USD' ? 'USD' : 'UZS';
-  if (t.fx) {
+  if (t.fx && !(type === 'receipt' && !can('money'))) {
     head += `<div class="field"><span class="field-label">Valyuta</span><div class="seg seg-sm" role="radiogroup">
         <label><input type="radio" name="currency" value="UZS" ${cur === 'UZS' ? 'checked' : ''}><span>So'm</span></label>
         <label><input type="radio" name="currency" value="USD" ${cur === 'USD' ? 'checked' : ''}><span>Dollar ($)</span></label></div></div>
@@ -2677,7 +2700,7 @@ function docForm(type, d) {
   }
 
   let foot = '';
-  if (t.money || type === 'order' || type === 'purchaseOrder') {
+  if ((t.money || type === 'order' || type === 'purchaseOrder') && type !== 'receipt') {
     if (t.fx) foot += moneyField('Chegirma', 'discount', d.discount || '', cur, 'placeholder="0"');
     // Savdoda chegirma 1 dona uchun yoziladi: jami chegirma = chegirma × hamma mahsulotlar soni
     else {
@@ -2689,14 +2712,14 @@ function docForm(type, d) {
         <input type="hidden" name="discountK" value="${q0}"><span class="muted small disc-hint" id="discHint"></span></label>`;
     }
   }
-  if (!d.id && t.pay) {
+  if (!d.id && t.pay && type !== 'receipt') {
     foot += moneyField(isOrder ? "Oldindan to'lov (zaklad)" : t.pay === 'in' ? "Hozir to'landi" : "Hozir to'ladik", 'payNow', d.payNow ?? '', 'UZS', 'placeholder="0"');
     foot += selectField("To'lov usuli", 'payMethod', Object.entries(PAY_METHODS), 'cash');
     if (t.pay === 'in' && !d.id) foot += `<div class="full receipt-line" id="receiptLine" hidden></div>`;
   }
   if (type === 'receipt') foot += freightBlock(d);
-  // Xarid puli to'liq to'lanmasa — ta'minotchiga nasiya: qachon to'lanishi majburiy
-  if (type === 'receipt' && !d.id) {
+  // (Avval: to'lanmagan qismi — nasiya sanasi. Endi nasiyalar Moliya bo'limida)
+  if (false) {
     foot += `<div class="field full debt-block" id="supDebtBlock" hidden>
       <div class="debt-title">${icon('alert')} <span><b id="supDebtAmount"></b> to'lanmayapti — ta'minotchidan <b>nasiya</b> bo'lib yoziladi</span></div>
       <div class="form-grid">${field("Qachon to'lanadi *", 'payDue', d.payDue, 'type="date"')}</div>
@@ -2718,7 +2741,8 @@ function docForm(type, d) {
   let noteHtml = textArea('Izoh', 'note', d.note);
   if (!d.id && t.tgAsk) noteHtml += tgQuestion();
 
-  const stdItems = custom ? [] : d.items || [];
+  // Qabul qilish (buyurtma asosida ham): qatordagi ta'minotchi — hujjatnikidan
+  const stdItems = custom ? [] : (d.items || []).map((it) => (type === 'receipt' && d.counterpartyId ? { supplierId: d.counterpartyId, ...it } : it));
   const items = (stdItems.length ? stdItems : [{}]).map((it) => itemRowHtml(t, it, cur)).join('');
   // Individual buyurtma — katalogda yo'q mebel: tavsifi, o'lchami, rangi va narxi yoziladi
   const ci = (custom && d.items && d.items[0]) || {};
@@ -3193,7 +3217,7 @@ function bindDocForm(type, editingId) {
   const quick = (type === 'sale' || type === 'order') && can('enter');
   bindAddressBlock();
   if (t.party === 'customer') bindCustomerLookup();
-  else if (t.party) bindPartyLookup(t.party);
+  else if (t.party && type !== 'receipt') bindPartyLookup(t.party);
   const stock = computeStock(editingId);
   const body = $('#itemRows');
   const whSel = $('#modalForm [name=warehouseId]');
@@ -3310,6 +3334,17 @@ function bindDocForm(type, editingId) {
       const p = product(e.target.value);
       const price = $('.it-price', e.target.closest('tr'));
       if (p) { price.value = defaultPrice(p); formatMoneyInput(price); }
+      // Qabul qilishda: mahsulotning odatdagi ta'minotchisi o'zi tanlanadi
+      const sup = $('.it-sup', e.target.closest('tr'));
+      if (p && sup && !sup.value && p.supplierId && party(p.supplierId)) sup.value = p.supplierId;
+    }
+    if (e.target.classList.contains('it-sup') && e.target.value === '__new') {
+      const name = (prompt("Yangi ta'minotchi nomi:") || '').trim();
+      if (!name) { e.target.value = ''; return; }
+      const c = { id: uid(), name, kind: 'supplier', phone: '', address: '', inn: '', note: '', created: today() };
+      db.counterparties.push(c);
+      $$('.it-sup', body).forEach((sel) => sel.insertAdjacentHTML('beforeend', `<option value="${esc(c.id)}">${esc(c.name)}</option>`));
+      e.target.value = c.id;
     }
     recalc();
   });
@@ -3433,6 +3468,8 @@ function readItems() {
     const productId = $('.it-product', tr).value;
     if (!productId) return;
     const it = { productId, qty: Math.max(1, num($('.it-qty', tr).value)), price: num($('.it-price', tr).value) };
+    const supSel = $('.it-sup', tr);
+    if (supSel && supSel.value && supSel.value !== '__new') it.supplierId = supSel.value;
     // Qatordagi chegirma: saqlanadigan narx — sotish narxi (narx − chegirma), etiketka narxi va chegirma ham yoziladi
     const dOne = Math.round(num($('.it-disc', tr)?.value) * 1000);
     if (dOne > 0) Object.assign(it, { listPrice: it.price, disc: dOne, price: it.price - dOne });
@@ -3504,7 +3541,7 @@ async function saveDoc(type, existing, preset, data, stock) {
   if (!existing && t.tgAsk && !tgAnswered(data)) return false;
   // Xarid nasiyaga: to'lash sanasi majburiy
   let supRest = 0;
-  if (type === 'receipt' && !existing) {
+  if (false) {
     const totalCur = Math.max(0, items.reduce((sum, it) => sum + it.qty * it.price, 0) - discountOf(data));
     supRest = Math.round((currency === 'USD' ? totalCur * num(data.rate) : totalCur) - num(data.payNow));
     if (supRest > 0 && !data.payDue) {
@@ -3592,6 +3629,15 @@ async function saveDoc(type, existing, preset, data, stock) {
       c = party('retail');
     }
     counterpartyId = c.id;
+  } else if (type === 'receipt') {
+    // Har bir tovar o'z ta'minotchisidan; hammasi bitta bo'lsa — hujjat ham o'shaniki
+    if (items.some((it) => !it.supplierId)) {
+      alert("Har bir tovar uchun ta'minotchini tanlang.");
+      $$('#itemRows .it-sup').find((x) => !x.value)?.focus();
+      return false;
+    }
+    const sups = [...new Set(items.map((it) => it.supplierId))];
+    counterpartyId = sups.length === 1 ? sups[0] : null;
   } else if (t.party) {
     const phone = fieldPhoneDigits(data.partyPhone).length === 9 ? fmtPhone(fieldPhoneDigits(data.partyPhone)) : '';
     if (!counterpartyId && data.newPartyName.trim()) {
@@ -4753,7 +4799,7 @@ function openSalesCard() {
       return `<tr class="click sale-${d.status} ${late ? 'sale-late' : ''}" data-act="openDoc" data-id="${d.id}">
         <td><b>${esc(d.no)}</b><div class="muted small">${fmtDate(d.date)} · ${esc(userName(d.userId))}</div>
           <div class="small os-items">${esc(docItemsText(d))}</div></td>
-        <td>${esc(party(d.counterpartyId)?.name || '')}<div class="muted small">${esc(d.address || '')}</div></td>
+        <td>${esc(docPartyName(d) || '')}<div class="muted small">${esc(d.address || '')}</div></td>
         <td>${badge(DELIVERY_STATUSES[d.status], d.status)}${late ? `<div class="debt small">⚠ ${d.deliveryDate ? `muddat ${fmtDate(d.deliveryDate)}` : `${daysSince(d.date)} kun`}</div>` : d.deliveryDate ? `<div class="muted small">${fmtDate(d.deliveryDate)}</div>` : ''}${d.driverId ? `<div class="muted small">🚚 ${esc(driver(d.driverId)?.name || '')}</div>` : ''}</td>
         <td class="num">${rest ? money(rest) : badge("To'langan", 'done')}</td>
         <td class="actions"><button class="small primary" data-act="closeSale" data-id="${d.id}">${icon('check')}Yetkazildi</button></td></tr>`;
@@ -4922,6 +4968,7 @@ const SECTIONS = [
   { id: 'sales', icon: 'bag', title: 'Savdo', views: [['order', '', 'sale'], ['sale', '', 'sale'], ['salesReturn', '', 'sale']] },
   { id: 'goods', icon: 'sofa', title: 'Tovarlar', views: [['products', 'Mahsulotlar'], ['kits', 'Komplektlar'], ['stock', 'Qoldiqlar'], ['enter', '', 'enter'], ['writeoff', '', 'stockOps'], ['move', '', 'stockOps'], ['inventory', '', 'stockOps'], ['warehouses', 'Omborlar', 'A'], ['labels', 'Etiketkalar'], ['labelDesign', 'Etiketka dizayni', 'A']] },
   { id: 'parties', icon: 'users', title: 'Kontragentlar', views: [['customers', 'Mijozlar', 'sale|money'], ['suppliers', "Ta'minotchilar", 'purchase|products|money'], ['debts', 'Qarzlar', 'money']] },
+  { id: 'finance', icon: 'chart', title: 'Moliya', views: [['supAcc', "Ta'minotchilar hisobi", 'money'], ['unpriced', 'Narxlanmagan kirimlar', 'money']] },
   { id: 'money', icon: 'wallet', title: 'Pul', views: [['payments', "To'lovlar", 'sale|money'], ['cash', 'Kassa va hisoblar', 'money']] },
   { id: 'expenses', icon: 'arrowOut', title: 'Xarajatlar', views: [['expenses', 'Xarajatlar', 'money|expenses'], ['expenseCats', 'Moddalar', 'A']] },
   { id: 'reports', icon: 'chart', title: 'Hisobotlar', views: [['profit', 'Foyda va zarar', 'reports'], ['top', 'Savdo tahlili', 'reports']] },
@@ -5082,15 +5129,94 @@ function unbookedFreightCard() {
   const list = db.docs.filter((d) => d.type === 'receipt' && d.freight && !d.freight.booked);
   if (!list.length) return '';
   return `<div class="card warn-card"><h3>🚚 Yo'l kiralar xarajatga o'tkazilmagan</h3>
-    ${list.map((d) => `<div class="sc-row"><span><b>${esc(d.no)}</b> · ${esc(party(d.counterpartyId)?.name || '')}<div class="muted small">${esc(freightSummary(d))}</div></span>
+    ${list.map((d) => `<div class="sc-row"><span><b>${esc(d.no)}</b> · ${esc(docPartyName(d) || '')}<div class="muted small">${esc(freightSummary(d))}</div></span>
       <b class="sc-sum">${money(freightTotal(d))}</b><button class="small primary" data-act="bookFreight" data-id="${d.id}">${icon('check')}O'tkazish</button></div>`).join('')}</div>`;
 }
 
 // Qo'lda kiritilgan yo'l kira / yoqilg'i: qaysi qabul (tovar) uchun
 function freightDocOptions() {
   return db.docs.filter((d) => d.type === 'receipt').sort((a, b) => (b.date + b.no).localeCompare(a.date + a.no)).slice(0, 40)
-    .map((d) => [d.id, `${d.no} · ${fmtDate(d.date)} · ${party(d.counterpartyId)?.name || ''} · ${docItemsText(d)}`.slice(0, 120)]);
+    .map((d) => [d.id, `${d.no} · ${fmtDate(d.date)} · ${docPartyName(d) || ''} · ${docItemsText(d)}`.slice(0, 120)]);
 }
+
+// ---------- Moliya: ta'minotchilar hisobi va narxlanmagan kirimlar ----------
+// Qabul qilishda xodim faqat tovar va sonini kiritadi; narx, qarz (nasiya) va to'lov — shu yerda.
+function unpricedLines() {
+  const out = [];
+  db.docs.filter((d) => d.type === 'receipt').forEach((d) => d.items.forEach((it, i) => {
+    if (!(num(it.price) > 0)) out.push({ d, it, i });
+  }));
+  return out.sort((a, b) => (b.d.date + b.d.no).localeCompare(a.d.date + a.d.no));
+}
+
+function viewSupAcc() {
+  const t = today();
+  const sups = db.counterparties.filter((c) => c.kind !== 'customer');
+  const unp = unpricedLines();
+  const rows = sups.map((c) => {
+    const owe = Math.round(-partyBalance(c.id));
+    const due = supplierDebts().find((x) => x.c.id === c.id)?.due || c.payDue || '';
+    const nUnp = unp.filter((x) => (x.it.supplierId || x.d.counterpartyId) === c.id).length;
+    const last = db.docs.filter((d) => d.type === 'receipt' && docHasParty(d, c.id)).map((d) => d.date).sort().pop() || '';
+    return { c, owe, due, nUnp, last };
+  }).filter((x) => x.owe !== 0 || x.nUnp || x.last)
+    .sort((a, b) => b.owe - a.owe);
+  const total = rows.reduce((s, x) => s + Math.max(0, x.owe), 0);
+  return `${unp.length ? `<div class="card warn-card">${icon('alert')}<span><b>${unp.length} ta</b> qabul qilingan tovarning narxi kiritilmagan — qarz to'liq hisoblanmaydi.</span><a href="#finance/unpriced">Narxlarni kiritish</a></div>` : ''}
+    <div class="stats"><div class="stat"><div class="label">Ta'minotchilarga jami qarz (nasiya)</div><div class="value warn">${money(total)}</div></div>
+      <div class="stat"><div class="label">Muddati o'tgan</div><div class="value debt">${rows.filter((x) => x.owe > 0 && x.due && x.due < t).length} ta</div></div></div>
+    <div class="card"><div class="table-wrap"><table class="sup-acc"><thead><tr><th>Ta'minotchi</th><th class="num">Qarzimiz</th><th>To'lash muddati</th><th></th></tr></thead><tbody>
+    ${rows.map(({ c, owe, due, nUnp, last }) => `<tr>
+      <td><b>${esc(c.name)}</b><div class="muted small">${last ? `oxirgi kirim: ${fmtDate(last)}` : ''}${nUnp ? ` · <span class="debt">${nUnp} ta narxsiz</span>` : ''}</div></td>
+      <td class="num ${owe > 0 ? 'warn' : ''}"><b>${owe > 0 ? money(owe) : owe < 0 ? `ortiqcha ${money(-owe)}` : '—'}</b></td>
+      <td><input type="date" class="sa-due" data-id="${c.id}" value="${esc(c.payDue || due || '')}">${due && due < t && owe > 0 ? '<div class="debt small">muddati o\'tgan</div>' : ''}</td>
+      <td class="actions">${owe > 0 ? `<button class="small primary" data-act="payNasiya" data-id="${c.id}">${icon('arrowOut')}To'lash</button>` : ''}<button class="small" data-act="statement" data-id="${c.id}">${icon('receipt')}Hisob-kitob</button></td></tr>`).join('') || emptyRow(4, "Hali kirim yo'q")}
+    </tbody></table></div>
+    <p class="muted small">Qarz — qabul qilingan tovarlar (narxi bo'yicha) minus to'lovlar. Muddatni shu yerda belgilang — Ko'rsatkichlarda eslatma bo'lib turadi.</p></div>`;
+}
+
+function viewUnpriced() {
+  const list = unpricedLines();
+  const sups = db.counterparties.filter((c) => c.kind !== 'customer');
+  return `<div class="card"><h3>${icon('receipt')}Narxi kiritilmagan kirimlar</h3>
+    <p class="muted small">Xodimlar qabul qilgan tovarlar. Kelish narxini (donasi) yozing va «Saqlash» ni bosing — ta'minotchi qarziga qo'shiladi.</p>
+    <div class="table-wrap"><table class="unp-table"><thead><tr><th>Sana / qabul</th><th>Tovar</th><th>Ta'minotchi</th><th class="num">Soni</th><th>Narxi (donasi)</th></tr></thead><tbody>
+    ${list.map(({ d, it, i }) => `<tr data-doc="${d.id}" data-i="${i}">
+      <td>${fmtDate(d.date)}<div class="muted small">${esc(d.no)} · ${esc(userName(d.userId))}</div></td>
+      <td><b>${esc(itemName(it))}</b></td>
+      <td><select class="up-sup"><option value="">—</option>${sups.map((c) => `<option value="${esc(c.id)}" ${c.id === (it.supplierId || d.counterpartyId) ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select></td>
+      <td class="num">${fmt(it.qty)}</td>
+      <td><span class="money-wrap"><input class="money up-price" data-cur="${d.currency === 'USD' ? 'USD' : 'UZS'}" inputmode="decimal" placeholder="0"><span class="cur">${CUR_SIGN[d.currency === 'USD' ? 'USD' : 'UZS']}</span></span></td></tr>`).join('') || emptyRow(5, "Hammasi narxlangan ✓")}
+    </tbody></table></div>
+    ${list.length ? `<div class="toolbar"><button class="primary" data-act="savePrices">${icon('check')}Saqlash</button></div>` : ''}</div>`;
+}
+
+function savePrices() {
+  let n = 0;
+  $$('.unp-table tbody tr[data-doc]').forEach((tr) => {
+    const d = doc(tr.dataset.doc);
+    const it = d?.items[+tr.dataset.i];
+    if (!it) return;
+    const price = num($('.up-price', tr).value);
+    const sup = $('.up-sup', tr).value;
+    if (sup) it.supplierId = sup;
+    if (price > 0) { it.price = price; n++; }
+    // Ta'minotchilar har xil bo'lsa — hujjat umumiy (qator bo'yicha hisob)
+    const sups = [...new Set(d.items.map((x) => x.supplierId).filter(Boolean))];
+    d.counterpartyId = sups.length === 1 ? sups[0] : d.items.some((x) => x.supplierId) ? null : d.counterpartyId;
+  });
+  if (!n) return alert('Hech bir narx yozilmagan.');
+  save();
+  alert(`${n} ta tovar narxi saqlandi.`);
+}
+
+document.addEventListener('change', (e) => {
+  if (!e.target.classList?.contains('sa-due')) return;
+  const c = party(e.target.dataset.id);
+  if (!c) return;
+  c.payDue = e.target.value || undefined;
+  save();
+});
 
 // ---------- Ta'minotchilarga nasiyalar (biz qarzdormiz) ----------
 // Summa — ta'minotchi bilan umumiy hisob (xaridlar − to'lovlar); muddat — to'lanmagan xaridlarning eng yaqin sanasi
@@ -5098,7 +5224,7 @@ function supplierDebts() {
   return db.counterparties.filter((c) => c.kind !== 'customer')
     .map((c) => {
       const owe = Math.round(-partyBalance(c.id));
-      const due = db.docs.filter((d) => d.type === 'receipt' && d.counterpartyId === c.id && d.payDue && docTotal(d) - docPaid(d) > 0.5)
+      const due = c.payDue || db.docs.filter((d) => d.type === 'receipt' && d.counterpartyId === c.id && d.payDue && docTotal(d) - docPaid(d) > 0.5)
         .map((d) => d.payDue).sort()[0] || '';
       return { c, owe, due };
     })
@@ -5114,12 +5240,15 @@ const dueText = (due) => {
 function supplierDebtsCard() {
   if (!can('money')) return '';
   const list = supplierDebts();
-  if (!list.length) return '';
+  const unp = unpricedLines().length;
+  const unpNote = unp ? `<div class="card warn-card">${icon('alert')}<span>Xodimlar qabul qilgan <b>${unp} ta</b> tovarning narxi kiritilmagan.</span><a href="#finance/unpriced">Narxlarni kiritish</a></div>` : '';
+  if (!list.length) return unpNote;
   const late = list.filter((x) => x.due && x.due < today()).length;
   return `<div class="card nasiya-card"><h3>${icon('truck')}Ta'minotchilarga nasiya — to'lanishi kerak</h3>
     <div class="nasiya-total">Jami: <b>${money(list.reduce((s, x) => s + x.owe, 0))}</b>${late ? ` · <span class="debt">${late} tasining muddati o'tgan</span>` : ''}</div>
     ${list.map(({ c, owe, due }) => `<div class="sc-row"><span><b>${esc(c.name)}</b><br>${dueText(due)}</span>
-      <b class="sc-sum">${money(owe)}</b><button class="small" data-act="payNasiya" data-id="${c.id}">${icon('arrowOut')}To'lash</button></div>`).join('')}</div>`;
+      <b class="sc-sum">${money(owe)}</b><button class="small" data-act="payNasiya" data-id="${c.id}">${icon('arrowOut')}To'lash</button></div>`).join('')}
+    <p class="small"><a href="#finance/supAcc">Moliya → Ta'minotchilar hisobi</a></p></div>` + unpNote;
 }
 
 function payNasiya(cid) {
@@ -5394,7 +5523,7 @@ function viewDashboard() {
     <div class="grid2">
       <div class="card"><h3>${icon('truck')}Yaqin yetkazishlar</h3><table><thead><tr><th>Sana</th><th>Hujjat</th><th>Mijoz</th><th>Manzil</th></tr></thead><tbody>
         ${deliveries.length ? deliveries.map((d) => `<tr class="click" data-act="openDoc" data-id="${d.id}"><td class="${d.deliveryDate < t ? 'debt' : ''}">${fmtDate(d.deliveryDate)}</td><td>${esc(d.no)}</td>
-          <td>${esc(party(d.counterpartyId)?.name)}</td><td>${esc(d.address)}</td></tr>`).join('') : emptyRow(4, "Rejalashtirilgan yetkazish yo'q")}
+          <td>${esc(docPartyName(d))}</td><td>${esc(d.address)}</td></tr>`).join('') : emptyRow(4, "Rejalashtirilgan yetkazish yo'q")}
       </tbody></table></div>
       <div class="card"><h3>${icon('alert')}Kam qolgan mahsulotlar</h3><table><thead><tr><th>Mahsulot</th><th class="num">Mavjud</th><th class="num">Min.</th></tr></thead><tbody>
         ${low.length ? low.map((p) => `<tr class="click" data-act="editProduct" data-id="${p.id}"><td>${esc(p.name)}</td><td class="num debt">${qtyIn(ctx.stock, p.id) - qtyIn(ctx.reserve, p.id)}</td><td class="num">${p.minQty}</td></tr>`).join('') : emptyRow(3, 'Hammasi yetarli')}
@@ -5411,7 +5540,7 @@ function viewDashboard() {
     })()}
     <div class="card"><h3>${icon('clock')}Oxirgi hujjatlar</h3><table><thead><tr><th>Sana</th><th>Hujjat</th><th>Kontragent</th><th class="num">Summa</th></tr></thead><tbody>
       ${recent.length ? recent.map((d) => `<tr class="click" data-act="openDoc" data-id="${d.id}"><td>${fmtDate(d.date)}</td><td>${esc(DOC_TYPES[d.type].one)} ${esc(d.no)}</td>
-        <td>${esc(party(d.counterpartyId)?.name || warehouse(d.warehouseId)?.name)}</td><td class="num">${d.type === 'inventory' ? '' : money(docTotal(d))}</td></tr>`).join('') : emptyRow(4, "Hali hujjat yo'q. Boshlash uchun mahsulot qo'shing.")}
+        <td>${esc(docPartyName(d) || warehouse(d.warehouseId)?.name)}</td><td class="num">${d.type === 'inventory' ? '' : money(docTotal(d))}</td></tr>`).join('') : emptyRow(4, "Hali hujjat yo'q. Boshlash uchun mahsulot qo'shing.")}
     </tbody></table></div>`;
 }
 
@@ -5424,7 +5553,7 @@ function viewDocs(type) {
   const list = db.docs.filter((d) => d.type === type)
     .filter((d) => inPeriod(type, d.date))
     .filter((d) => !st || d.status === st)
-    .filter((d) => !q || [d.no, party(d.counterpartyId)?.name, d.note, ...d.items.map(itemName)].join(' ').toLowerCase().includes(q) || (isAdmin() && phoneMatch(party(d.counterpartyId)?.phone, q)))
+    .filter((d) => !q || [d.no, docPartyName(d), d.note, ...d.items.map(itemName)].join(' ').toLowerCase().includes(q) || (isAdmin() && phoneMatch(party(d.counterpartyId)?.phone, q)))
     .sort((a, b) => b.date.localeCompare(a.date) || b.no.localeCompare(a.no));
 
   const statusFilter = t.statuses
@@ -5442,7 +5571,7 @@ function viewDocs(type) {
 
   const rows = list.map((d) => {
     const paid = t.pay ? docPaid(d) : 0;
-    const where = t.party ? esc(party(d.counterpartyId)?.name) : esc(warehouse(d.warehouseId)?.name) + (t.move ? ' → ' + esc(warehouse(d.toWarehouseId)?.name) : '');
+    const where = t.party ? esc(docPartyName(d)) : esc(warehouse(d.warehouseId)?.name) + (t.move ? ' → ' + esc(warehouse(d.toWarehouseId)?.name) : '');
     return `<tr class="click ${isOpenSale(d) ? `sale-${d.status}` : ''} ${isOverdueSale(d) ? 'sale-late' : ''}" data-act="openDoc" data-id="${d.id}">
       <td>${esc(d.no)}${isOverdueSale(d) ? '<div class="debt small">⚠ yopilmagan</div>' : ''}</td><td>${fmtDate(d.date)}${d.userId ? `<div class="muted small">${esc(userName(d.userId))}</div>` : ''}</td><td>${where}</td>
       <td class="items-cell">${d.items.slice(0, 3).map((it) => `${esc(itemName(it))} × ${it.qty}`).join('<br>')}${d.items.length > 3 ? `<br><span class="muted">yana ${d.items.length - 3} ta</span>` : ''}</td>
@@ -5469,7 +5598,7 @@ function exportDocs(type) {
   const t = DOC_TYPES[type];
   const rows = [['№', 'Sana', 'Kontragent', 'Ombor', 'Mahsulot', 'Soni', 'Narxi', 'Summa', 'Holati']];
   db.docs.filter((d) => d.type === type).forEach((d) => d.items.forEach((it) => rows.push([
-    d.no, d.date, party(d.counterpartyId)?.name, warehouse(d.warehouseId)?.name, itemName(it), it.qty, it.price, it.qty * it.price, t.statuses ? t.statuses[d.status] : '',
+    d.no, d.date, docPartyName(d), warehouse(d.warehouseId)?.name, itemName(it), it.qty, it.price, it.qty * it.price, t.statuses ? t.statuses[d.status] : '',
   ])));
   download(`${type}-${today()}.csv`, toCsv(rows), 'text/csv;charset=utf-8');
 }
@@ -6850,6 +6979,7 @@ async function loadDemo() {
 
 const VIEWS = {
   dashboard: viewDashboard, products: viewProducts, stock: viewStock, parties: () => viewParties(), customers: () => viewParties('customer'), suppliers: () => viewParties('supplier'), debts: viewDebts,
+  supAcc: viewSupAcc, unpriced: viewUnpriced,
   payments: viewPayments, cash: viewCash, profit: viewProfit, top: viewTop, users: viewUsers,
   telegram: viewTelegram, company: viewCompany, warehouses: viewWarehouses, categories: viewCategories, backup: viewBackup,
   server: viewServer, profile: viewProfile, layout: viewLayout, drivers: viewDrivers, kits: viewKits, expenses: viewExpenses, expenseCats: viewExpenseCats, currency: viewCurrency, install: viewInstall, labels: viewLabels, labelDesign: viewLabelDesign,
@@ -6938,6 +7068,7 @@ const ACTIONS = {
   newDoc: (ds) => openDoc(ds.type),
   moneyMenu: (ds) => openMoneyMenu(ds.dir),
   payNasiya: (ds) => payNasiya(ds.id),
+  savePrices: () => { if (can('money')) savePrices(); },
   bookFreight: async (ds) => { const d = doc(ds.id); if (d && canBookFreight()) { await bookFreight(d); save(); } },
   collectCash: (ds) => { if (isAdmin()) collectCash(ds.id); },
   closeShort: (ds) => {
