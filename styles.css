@@ -1444,3 +1444,11 @@ html.modal-open, html.modal-open body { overflow: hidden; overscroll-behavior: n
 @media (hover: hover) { .photo-add:hover { filter: brightness(.97); } }
 .ph-add { aspect-ratio: 1; display: flex; flex-direction: column; gap: 4px; align-items: center; justify-content: center; border: 1.5px dashed var(--accent); border-radius: 10px; color: var(--accent-dark); background: var(--accent-soft); cursor: pointer; font-size: 13px; }
 .ph-add .ic { width: 28px; height: 28px; }
+
+/* Mahsulot kartochkasi: kerakli bo'limlar (ptichka) */
+.sec-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.sec-tg { display: inline-flex !important; flex-direction: row !important; align-items: center; gap: 8px !important; padding: 8px 14px; border: 1px solid var(--border-strong, var(--border)); border-radius: 999px; cursor: pointer; color: var(--text) !important; font-size: 14px !important; background: var(--card); user-select: none; }
+.sec-tg input { width: 18px; height: 18px; margin: 0; accent-color: var(--accent); }
+.sec-tg.on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-dark) !important; font-weight: 600; }
+.sec-size, .sec-mat, .sec-color { display: contents; }
+.product-form.no-size .sec-size, .product-form.no-mat .sec-mat, .product-form.no-color .sec-color { display: none; }

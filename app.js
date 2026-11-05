@@ -1270,8 +1270,9 @@ const whOptions = () => db.warehouses.map((w) => [w.id, w.name]);
 const MAX_PHOTOS = 5;
 
 function productForm(p = {}, readonly = false) {
+  secState = secDefaults(p.category, p.type, p);
   const cats = [['', '—'], ...db.categories.map((c) => [c, c])];
-  return `<div class="product-form">
+  return `<div class="product-form ${secState.size ? '' : 'no-size'} ${secState.mat ? '' : 'no-mat'} ${secState.color ? '' : 'no-color'}">
     <div class="photo-box">
       <div class="photo-list" id="photoList"></div>
       ${readonly ? '' : `<input type="file" id="photoInput" accept="image/*" multiple hidden>
@@ -1281,12 +1282,13 @@ function productForm(p = {}, readonly = false) {
     <div class="form-grid">
       ${field('Mahsulot *', 'name', p.name, 'required', 'full')}
       <label class="full">Artikul<span class="it-sw"><input name="code" value="${esc(p.code || '')}" autocomplete="off"><button type="button" class="it-scan code-scan" title="Shtrix-kodni skanerlab yozish" aria-label="Skaner">${icon('scan')}</button></span></label>
-      ${sizeField(p.size, noSizeType(p.type))}
       ${selectField('Kategoriya', 'category', cats, p.category || '', '', 'id="catSel"')}
       <label>Turi<select name="type" id="typeSel">${typeOptions(p.category, p.type)}</select>
         <input name="typeNew" id="typeNew" placeholder="Yangi tur nomi" hidden></label>
       <label>Ishlab chiqaruvchi / ta'minotchi<select name="makerId" id="makerSel">${makerOptions(p)}</select>
         <input name="makerNew" id="makerNew" placeholder="Fabrika yoki ta'minotchi nomi" hidden></label>
+      ${secToggles()}
+      <div class="sec-size">${sizeField(p.size)}</div>
       <div class="field full feat-wrap" id="featBlock">${featureBlock(p.category, p.type, p)}</div>
       ${p.id ? '' : `<div class="field full"><span class="field-label">Boshlang'ich qoldiq — har bir omborda nechta bor</span>
         <div class="wh-qty">${db.warehouses.map((w) => `<label>${esc(w.name)}<input type="number" min="0" step="1" name="initQty_${esc(w.id)}" value="0" inputmode="numeric"></label>`).join('')}</div></div>`}
@@ -1665,6 +1667,39 @@ function colorsFor(set, attrs = {}, cat = '', material = '') {
   return (v && set.colorsBy?.[v]) || set.colors || [];
 }
 
+// Mahsulot kartochkasida qaysi bo'limlar kerak: o'lcham, material, rang — belgi (ptichka) bilan ochiladi.
+// Yangi mahsulotda shu turdagi oldingi mahsulotlarga qarab o'zi belgilanadi (masalan, stulda o'lcham yo'q).
+let secState = { size: true, mat: true, color: true };
+function secDefaults(cat, type, p = {}) {
+  if (p.id) return { size: !!p.size, mat: !!p.material || Object.keys(p.attrs || {}).length > 0, color: !!p.color };
+  const list = db.products.filter((x) => x.category === cat && (type ? nameKey(x.type) === nameKey(type) : true) && !isKit(x) && x.category);
+  if (!list.length) return { size: false, mat: false, color: false }; // birinchi marta — kerakligini o'zi belgilaydi
+  return {
+    size: list.some((x) => x.size),
+    mat: list.some((x) => x.material || Object.keys(x.attrs || {}).length),
+    color: list.some((x) => x.color),
+  };
+}
+function secToggles() {
+  const cb = (k, label) => `<label class="sec-tg ${secState[k] ? 'on' : ''}"><input type="checkbox" data-sec="${k}" ${secState[k] ? 'checked' : ''}><span>${label}</span></label>`;
+  return `<div class="field full sec-toggles"><span class="field-label">Kerakli ma'lumotlar <span class="muted small">— belgilanganlari ochiladi</span></span>
+    <div class="sec-row">${cb('size', "📏 O'lchami")}${cb('mat', '🪵 Material')}${cb('color', '🎨 Rangi')}</div></div>`;
+}
+function applySec(root = $('#modalBody .product-form')) {
+  if (!root) return;
+  root.classList.toggle('no-size', !secState.size);
+  root.classList.toggle('no-mat', !secState.mat);
+  root.classList.toggle('no-color', !secState.color);
+  $$('[data-sec]', root).forEach((c) => { c.checked = !!secState[c.dataset.sec]; c.closest('.sec-tg').classList.toggle('on', c.checked); });
+}
+document.addEventListener('change', (e) => {
+  const k = e.target.dataset?.sec;
+  if (!k || !e.target.closest('.product-form')) return;
+  secState[k] = e.target.checked;
+  applySec();
+  if (k === 'mat') refreshFeatures(); // material o'chsa — ranglar umumiy ro'yxatdan
+});
+
 function featureBlock(cat, type, p = {}) {
   const set = featureSetFor(cat, type);
   const colorBox = (colors, label, note = '') => `<div class="field full"><span class="field-label">${label}</span>
@@ -1683,8 +1718,9 @@ function featureBlock(cat, type, p = {}) {
       <input type="hidden" name="material" value="${esc(chosen.join(', '))}"></div>`;
     const color = chosen.length
       ? colorBox(materialColors(chosen, cat), `Rangi — ${esc(chosen.join(', '))}`)
+      : !secState.mat ? colorBox(db.categoryColors?.[cat]?.length ? db.categoryColors[cat] : db.colors, 'Rangi')
       : colorBox([], 'Rangi', 'Avval materialni tanlang — ranglar shunga qarab chiqadi.');
-    return `<div class="form-grid">${matBox}${color}</div>`;
+    return `<div class="form-grid"><div class="sec-mat">${matBox}</div><div class="sec-color">${color}</div></div>`;
   }
   const fields = set.fields || [];
   const ctl = fields.find((f) => f.name === set.colorField);
@@ -1695,9 +1731,9 @@ function featureBlock(cat, type, p = {}) {
     ? colorBox([], 'Rangi' + tag, `Avval «${esc(ctl.name)}» ni tanlang — ranglar shunga qarab chiqadi.`)
     : colorBox(colorsFor(set, p.attrs), (ctlVal ? `Rangi — ${esc(ctlVal)}` : 'Rangi') + tag);
   return `<div class="form-grid">
-    ${ctl ? chipOne(ctl.name, ctl.options || [], ctlVal, true) : ''}
-    ${color}
-    ${fields.filter((f) => f !== ctl).map((f) => chipOne(f.name, f.options || [], p.attrs?.[f.name] || '')).join('')}
+    <div class="sec-mat">${ctl ? chipOne(ctl.name, ctl.options || [], ctlVal, true) : ''}</div>
+    <div class="sec-color">${color}</div>
+    <div class="sec-mat">${fields.filter((f) => f !== ctl).map((f) => chipOne(f.name, f.options || [], p.attrs?.[f.name] || '')).join('')}</div>
   </div>`;
 }
 
@@ -1792,7 +1828,10 @@ function bindProductForm(p, readonly = false) {
   bindSizeField();
   bindTypeField();
   bindPriceBlock();
-  $('#typeSel')?.addEventListener('change', (e) => { const l = $('#sizeLbl'); if (l) l.hidden = noSizeType(e.target.value); });
+  // Yangi mahsulotda tur tanlanganda — shu turga odatdagi bo'limlar belgilanadi
+  const resec = () => { if (p.id) return; secState = secDefaults($('#catSel').value, $('#typeSel').value); applySec(); refreshFeatures(); };
+  $('#typeSel')?.addEventListener('change', resec);
+  $('#catSel')?.addEventListener('change', resec);
   const maker = $('#makerSel');
   maker.addEventListener('change', () => {
     $('#makerNew').hidden = maker.value !== '__new';
@@ -1957,6 +1996,12 @@ async function hydratePhotos(root = document) {
 }
 
 function readProduct(d, p) {
+  // Belgilanmagan bo'limlar saqlanmaydi (o'lcham, material, rang)
+  if ($('#modalBody .product-form [data-sec]')) {
+    if (!secState.size) d.size = '';
+    if (!secState.mat) { d.material = ''; Object.keys(d).forEach((k) => { if (k.startsWith('attr:')) d[k] = ''; }); }
+    if (!secState.color) d.color = '';
+  }
   let type = d.type === '__new' ? capFirst(d.typeNew) : d.type;
   // Bor tur boshqacha yozilgan bo'lsa (xontaxta / Xontaxta) — ro'yxatdagi yozilishi olinadi
   type = typesOf(d.category).find((t) => nameKey(t) === nameKey(type)) || type;
