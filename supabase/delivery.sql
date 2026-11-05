@@ -77,3 +77,15 @@ end $$;
 --   select net.http_post(url := '<PROJECT_URL>/functions/v1/tg-bot', headers := '{"Content-Type": "application/json"}'::jsonb,
 --     body := jsonb_build_object('action', 'remind', 'key', (select data->>'key' from public.bot_private where id = 'cron')), timeout_milliseconds := 60000);
 -- $cron$);
+
+-- Narxi o'zgargan mahsulotning etiketkasi almashtirildi — eslatmani olib tashlash (har qanday faol xodim)
+create or replace function public.mark_label_done(pid text) returns void
+language plpgsql security definer set search_path = public as $$
+begin
+  if not public.is_active() then
+    raise exception 'Ruxsat yo''q';
+  end if;
+  update public.products set data = data - 'labelDue' where id = pid;
+end;
+$$;
+grant execute on function public.mark_label_done(text) to authenticated;

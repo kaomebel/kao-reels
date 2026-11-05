@@ -849,6 +849,17 @@ class SupabaseBackend {
     return data;
   }
 
+  // Etiketka almashtirildi: xodimda mahsulotni o'zgartirish ruxsati bo'lmasa ham (server funksiyasi)
+  async markLabelDone(pid, db) {
+    const { error } = await this.sb.rpc('mark_label_done', { pid });
+    if (error) throw new Error(friendlyError(error));
+    const p = db.products.find((x) => x.id === pid);
+    if (!p) return;
+    delete p.labelDue;
+    const { buyPrice, ...rest } = p;
+    this.snap.products?.set(pid, stableJson(rest)); // serverdagi holat — qayta yuborilmasin
+  }
+
   async acceptHandover(pid) {
     const { error } = await this.sb.rpc('accept_handover', { pid });
     if (error) throw new Error(friendlyError(error));

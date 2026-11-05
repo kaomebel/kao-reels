@@ -1458,3 +1458,8 @@ html.modal-open, html.modal-open body { overflow: hidden; overscroll-behavior: n
 .short-note svg { flex: none; width: 18px; height: 18px; margin-top: 2px; }
 .sc-short { background: var(--danger-soft); border-radius: 10px; padding-left: 8px !important; padding-right: 8px !important; }
 .cc-other { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }
+
+/* Narxi o'zgargan — etiketka */
+.label-due .ld-row { display: flex; gap: 10px; align-items: center; justify-content: space-between; flex-wrap: wrap; padding: 10px 0; border-bottom: 1px solid var(--border); }
+.label-due .ld-btns { display: flex; gap: 6px; }
+.ld-badge { display: inline-block; margin-left: 6px; padding: 1px 7px; border-radius: 999px; font-size: 11px; font-weight: 600; background: var(--warn-soft, #f6ecd2); color: var(--warn, #8a6100); vertical-align: 2px; }

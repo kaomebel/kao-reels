@@ -2055,6 +2055,16 @@ function readProduct(d, p) {
   } else {
     maker = party(d.makerId)?.name || '';
   }
+  // Narx o'zgarsa — etiketkani almashtirish eslatmasi (birinchi eski narx saqlanadi)
+  const known = db.products.some((x) => x.id === p.id);
+  const oldSale = p.salePrice;
+  const oldCur = p.priceCurrency || 'UZS';
+  const newCur = d.priceCurrency === 'USD' ? 'USD' : 'UZS';
+  if (known && (num(d.salePrice) !== num(oldSale) || newCur !== oldCur)) {
+    p.labelDue = p.labelDue || { oldPrice: num(oldSale), oldCur };
+    Object.assign(p.labelDue, { at: new Date().toISOString(), by: me?.id });
+    if (p.labelDue.oldPrice === num(d.salePrice) && p.labelDue.oldCur === newCur) delete p.labelDue; // eski narxiga qaytarildi
+  }
   return Object.assign(p, {
     name: d.name.trim(),
     code: d.code.trim(),
@@ -4724,6 +4734,8 @@ function renderAlertBanner() {
   const parts = [];
   const ho = me ? myHandovers() : [];
   if (ho.length) parts.push(`💵 Shofyordan qabul qilinadigan pul: <b>${money(ho.reduce((s, p) => s + p.amount, 0))}</b>`);
+  const ld = me ? labelDueList().length : 0;
+  if (ld) parts.push(`🏷 Etiketkasini almashtirish kerak: <b>${ld} ta</b>`);
   // Kassa kam topshirilgan: xodimga — «to'liqlab bering», administratorga — «qolganini qabul qiling»
   const shorts = !me ? [] : isAdmin() ? (db.cashShorts || []).filter((x) => x.status !== 'closed') : staffShorts(me.id);
   if (shorts.length) {
@@ -5073,6 +5085,34 @@ function payNasiya(cid) {
   newPayment('out', { counterpartyId: cid, amount: x?.owe || '', purpose: "Ta'minotchiga to'lov" });
 }
 
+// ---------- Narxi o'zgargan mahsulotlar: etiketkani almashtirish ----------
+const labelDueList = () => db.products.filter((p) => p.labelDue && !p.archived).sort((a, b) => (b.labelDue.at || '').localeCompare(a.labelDue.at || ''));
+const oldPriceText = (p) => (p.labelDue.oldCur === 'USD' ? fmtUsd(p.labelDue.oldPrice) : money(p.labelDue.oldPrice));
+
+function labelsDueCard() {
+  const list = labelDueList();
+  if (!list.length) return '';
+  return `<div class="card label-due"><h3>🏷 Narxi o'zgardi — etiketkani almashtiring <span class="badge-count">${list.length}</span></h3>
+    <p class="muted small">Yangi etiketkani chop etib, eskisi o'rniga yopishtiring va «Almashtirildi» ni bosing.</p>
+    ${list.map((p) => `<div class="ld-row"><span><b>${esc(p.name)}</b>${p.code ? ` <span class="muted small">${esc(p.code)}</span>` : ''}
+        <div class="small"><s class="muted">${oldPriceText(p)}</s> → <b>${priceLabel(p)}</b> <span class="muted">· ${fmtDate((p.labelDue.at || '').slice(0, 10))}</span></div></span>
+      <span class="ld-btns"><button class="small" data-act="labelOne" data-id="${p.id}">${icon('tag')}Chop etish</button>
+        <button class="small primary" data-act="labelDone" data-id="${p.id}">${icon('check')}Almashtirildi</button></span></div>`).join('')}</div>`;
+}
+
+async function labelDone(id) {
+  const p = product(id);
+  if (!p?.labelDue) return;
+  if (!confirm(`«${p.name}» etiketkasi yangi narx bilan almashtirildimi?`)) return;
+  try {
+    if (backend.kind === 'supabase') await backend.markLabelDone(id, db);
+    else { delete p.labelDue; await save(); }
+    render();
+  } catch (e) {
+    alert('Xato: ' + e.message);
+  }
+}
+
 // ---------- Xodimlardagi naqd pul (kechqurun administratorga topshiriladi) ----------
 // Xodim olgan naqd pul uning «qo'lida» turadi, administrator «Qabul qildim» bosguncha.
 // Shofyor olgan pul — uni qabul qilgan xodimda. Shu kundan oldingi to'lovlar hisobga olinmaydi.
@@ -5305,7 +5345,7 @@ function viewDashboard() {
     ? `<div class="card warn-card backup-warn">${icon('alert')}<span>${age === Infinity ? "Hali birorta ham zaxira nusxa olinmagan." : `Oxirgi zaxira nusxa ${Math.floor(age)} kun oldin olingan.`} Ma'lumot yo'qolmasligi uchun zaxira oling${db.telegram.backupChatId ? '' : ' yoki har kungi avtomatik zaxirani yoqing'}.</span>
         <button class="small primary" data-act="backup">${icon('download')}Zaxira olish</button><a href="#settings/backup">Sozlash</a></div>` : '';
   const moneyBtns = isAdmin() ? `<div class="money-btns"><button class="mb-in" data-act="moneyMenu" data-dir="in"><span>＋</span>Kirim</button><button class="mb-out" data-act="moneyMenu" data-dir="out"><span>−</span>Chiqim</button></div>` : '';
-  return moneyBtns + installCard + backupWarn + usageWarn + staffCashCard() + supplierDebtsCard() + myCashCard() + handoverCard() + openSalesCard() + `<div class="stats">${cards.map(([l, v, h, cls]) => `<div class="stat">
+  return moneyBtns + installCard + backupWarn + usageWarn + staffCashCard() + supplierDebtsCard() + myCashCard() + labelsDueCard() + handoverCard() + openSalesCard() + `<div class="stats">${cards.map(([l, v, h, cls]) => `<div class="stat">
       <div class="stat-ic ${cls || ''}">${icon(cardIcon[l] || 'chart')}</div>
       <div class="label">${l}</div><div class="value ${cls || ''}">${v}</div><div class="muted small">${h}</div></div>`).join('')}</div>
     <div class="quick">${quick}</div>
@@ -5415,7 +5455,7 @@ function viewProducts() {
     const rs = qtyIn(ctx.reserve, p.id);
     return `<tr>
       ${thumbCell(p)}
-      <td class="click" data-act="editProduct" data-id="${p.id}"><b>${esc(p.name)}</b><div class="muted small prod-path">${icon(productIcon(p))}${esc([p.code, p.category, p.type].filter(Boolean).join(' · '))}</div>
+      <td class="click" data-act="editProduct" data-id="${p.id}"><b>${esc(p.name)}</b>${p.labelDue ? ' <span class="ld-badge">🏷 etiketka</span>' : ''}<div class="muted small prod-path">${icon(productIcon(p))}${esc([p.code, p.category, p.type].filter(Boolean).join(' · '))}</div>
         ${p.size || p.color || p.material || productAttrs(p).length ? `<div class="prod-meta">${p.size ? `<span class="dt">${esc(p.size)} sm</span>` : ''}${p.material ? `<span>${esc(p.material)}</span>` : ''}${p.color ? `<span>${esc(p.color)}</span>` : ''}${productAttrs(p).map(([k, v]) => `<span title="${esc(k)}">${esc(v)}</span>`).join('')}</div>` : ''}
         ${p.maker ? `<div class="muted small prod-origin">${icon('warehouse')}${esc(p.maker)}</div>` : ''}</td>
       ${showCost ? `<td class="num">${money(ctx.cost[p.id])}</td>` : ''}
@@ -7284,6 +7324,7 @@ document.addEventListener('change', (e) => {
 
 Object.assign(ACTIONS, {
   labelOne: ({ id }) => quickLabel(id),
+  labelDone: ({ id }) => labelDone(id),
   ldOpen: () => { location.hash = '#goods/labelDesign'; },
   lqStep: ({ id, d }) => {
     const n = Math.max(0, (labelQty[id] || 0) + Number(d));
