@@ -17,7 +17,7 @@ const ENTITY_TABLES = ['warehouses', 'counterparties', 'products', 'docs', 'paym
 const ROLE_PERMS = { seller: ['sale', 'enter'], purchaser: ['purchase', 'enter', 'products', 'costs'] };
 const permsOf = (u) => (Array.isArray(u?.perms) ? u.perms : ROLE_PERMS[u?.role] || []);
 
-const SETTINGS_KEYS = ['categories', 'categoryTypes', 'materials', 'colors', 'customerTypes', 'featureSets', 'categoryIcons', 'categoryColors', 'materialColors', 'expenseCats', 'uiOrder', 'drivers', 'staffNames', 'regions', 'currency', 'company', 'telegram', 'legacyUsers'];
+const SETTINGS_KEYS = ['categories', 'categoryTypes', 'materials', 'colors', 'customerTypes', 'featureSets', 'categoryIcons', 'categoryColors', 'materialColors', 'cashShorts', 'expenseCats', 'uiOrder', 'drivers', 'staffNames', 'regions', 'currency', 'company', 'telegram', 'legacyUsers'];
 const SERVER_CONFIG_KEY = 'biznes-tizim-server';
 const LOCAL_DATA_KEY = 'biznes-tizim-v1';
 const LOCAL_SESSION_KEY = 'biznes-tizim-session';

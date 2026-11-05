@@ -1452,3 +1452,9 @@ html.modal-open, html.modal-open body { overflow: hidden; overscroll-behavior: n
 .sec-tg.on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-dark) !important; font-weight: 600; }
 .sec-size, .sec-mat, .sec-color { display: contents; }
 .product-form.no-size .sec-size, .product-form.no-mat .sec-mat, .product-form.no-color .sec-color { display: none; }
+
+/* Kassa kam topshirilganda */
+.short-note { display: flex; gap: 8px; align-items: flex-start; margin: 6px 0 10px; padding: 10px 12px; border-radius: 12px; background: var(--danger-soft); color: var(--danger); }
+.short-note svg { flex: none; width: 18px; height: 18px; margin-top: 2px; }
+.sc-short { background: var(--danger-soft); border-radius: 10px; padding-left: 8px !important; padding-right: 8px !important; }
+.cc-other { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }

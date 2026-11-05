@@ -187,6 +187,7 @@ function emptyDb() {
     drivers: [],
     driverChats: [],
     staffNames: [],
+    cashShorts: [], // kassa topshirishda kam berilgan summalar (xodim to'liqlashi kerak)
     customerTypes: DEFAULT_CUSTOMER_TYPES.slice(),
     regions: JSON.parse(JSON.stringify(DEFAULT_REGIONS)),
     currency: { rate: 0, date: '', source: '', updatedAt: '', manual: false },
@@ -4723,6 +4724,12 @@ function renderAlertBanner() {
   const parts = [];
   const ho = me ? myHandovers() : [];
   if (ho.length) parts.push(`💵 Shofyordan qabul qilinadigan pul: <b>${money(ho.reduce((s, p) => s + p.amount, 0))}</b>`);
+  // Kassa kam topshirilgan: xodimga — «to'liqlab bering», administratorga — «qolganini qabul qiling»
+  const shorts = !me ? [] : isAdmin() ? (db.cashShorts || []).filter((x) => x.status !== 'closed') : staffShorts(me.id);
+  if (shorts.length) {
+    const sum = shorts.reduce((s, x) => s + x.amount, 0);
+    parts.push(isAdmin() ? `⚠️ Kam topshirilgan kassa: <b class="late">${money(sum)}</b> — qolganini qabul qiling` : `⚠️ Kassa <b class="late">${money(sum)}</b> kam topshirilgan — to'liqlab bering`);
+  }
   if (me && can('sale')) {
     const open = openSales();
     const late = open.filter(isOverdueSale).length;
@@ -5077,8 +5084,10 @@ function staffCash(userId) {
     .sort((a, b) => (a.date + (a.no || '')).localeCompare(b.date + (b.no || '')));
   return { list, total: list.reduce((s, p) => s + (p.dir === 'in' ? p.amount : -p.amount), 0) };
 }
+// Kam topshirilgan (ochiq) summalar — xodim keyin to'liqlab beradi
+const staffShorts = (userId) => (db.cashShorts || []).filter((x) => x.userId === userId && x.status !== 'closed');
 const cashStaff = () => db.users.filter((u) => u.role !== 'admin' && u.active !== false)
-  .map((u) => ({ u, ...staffCash(u.id) })).filter((x) => x.list.length);
+  .map((u) => ({ u, ...staffCash(u.id), shorts: staffShorts(u.id) })).filter((x) => x.list.length || x.shorts.length);
 
 // To'lov nima uchun: «Sotuv S-00012 · Divan ×1» yoki «Xarajat: Ovqat»
 function cashLine(p) {
@@ -5103,12 +5112,14 @@ function myCashCard() {
   const t = today();
   const sold = db.docs.filter((d) => d.type === 'sale' && d.date === t && d.userId === me.id);
   const { list, total } = staffCash(me.id);
-  if (!sold.length && !list.length) return '';
+  const shorts = staffShorts(me.id);
+  if (!sold.length && !list.length && !shorts.length) return '';
   return `<div class="card my-cash"><h3>${icon('cash')}Bugungi kassam</h3>
+    ${shorts.map((x) => `<div class="short-note">${icon('alert')}<span><b>${money(x.amount)} kam topshirildi</b> (${fmtDate(x.date)}, ${money(x.got)} berildi ${money(x.expected)} o'rniga). Shuni to'liqlab administratorga bering.</span></div>`).join('')}
     ${sold.length ? `<p class="muted small">Bugun sotganlaringiz: <b>${sold.length} ta</b> · jami ${money(sold.reduce((s, d) => s + docTotal(d), 0))}</p>
       <ul class="mc-sold">${sold.map((d) => `<li><b>${esc(d.no)}</b> — ${esc(docItemsText(d))} · ${money(docTotal(d))}</li>`).join('')}</ul>` : ''}
     ${list.length ? `<div class="table-wrap"><table class="cash-table"><thead><tr><th>Sana</th><th>Nima uchun</th><th class="num">Naqd</th></tr></thead><tbody>${cashRows(list)}</tbody></table></div>` : ''}
-    <div class="mc-total ${total > 0 ? '' : 'ok'}">${total > 0 ? `Administratorga topshirishingiz kerak: <b>${money(total)}</b>` : `${icon('check')} Topshiriladigan naqd pul yo'q`}</div>
+    <div class="mc-total ${total + shorts.reduce((s, x) => s + x.amount, 0) > 0 ? '' : 'ok'}">${total + shorts.reduce((s, x) => s + x.amount, 0) > 0 ? `Administratorga topshirishingiz kerak: <b>${money(total + shorts.reduce((s, x) => s + x.amount, 0))}</b>${shorts.length && total ? ` <span class="small">(bugungi ${money(total)} + kam berilgan ${money(shorts.reduce((s, x) => s + x.amount, 0))})</span>` : ''}` : `${icon('check')} Topshiriladigan naqd pul yo'q`}</div>
     <p class="muted small">Karta, terminal va hisob raqamiga tushgan pullar bu yerga kirmaydi — ular to'g'ridan-to'g'ri hisobga tushadi.</p></div>`;
 }
 
@@ -5118,34 +5129,60 @@ function staffCashCard() {
   const rows = cashStaff();
   if (!rows.length) return '';
   return `<div class="card staff-cash"><h3>${icon('cash')}Xodimlardagi naqd pul — topshirilishi kerak</h3>
-    ${rows.map(({ u, list, total }) => `<div class="sc-row"><span><b>${esc(u.name)}</b> <span class="muted small">· ${list.length} ta to'lov</span></span>
-      <b class="sc-sum">${money(total)}</b><button class="small primary" data-act="collectCash" data-id="${u.id}">${icon('check')}Qabul qilish</button></div>`).join('')}
-    <div class="sc-row sc-all"><span>Jami</span><b class="sc-sum">${money(rows.reduce((s, x) => s + x.total, 0))}</b><span></span></div></div>`;
+    ${rows.map(({ u, list, total, shorts }) => `${list.length ? `<div class="sc-row"><span><b>${esc(u.name)}</b> <span class="muted small">· ${list.length} ta to'lov</span></span>
+      <b class="sc-sum">${money(total)}</b><button class="small primary" data-act="collectCash" data-id="${u.id}">${icon('check')}Qabul qilish</button></div>` : ''}
+      ${shorts.map((x) => `<div class="sc-row sc-short"><span><b>${esc(u.name)}</b> <span class="debt small">· ${fmtDate(x.date)} kuni kam berilgan — qolganini qabul qilib oling</span></span>
+        <b class="sc-sum debt">${money(x.amount)}</b><button class="small" data-act="closeShort" data-id="${x.id}">${icon('check')}Oldim — yopish</button></div>`).join('')}`).join('')}
+    <div class="sc-row sc-all"><span>Jami</span><b class="sc-sum">${money(rows.reduce((s, x) => s + x.total + x.shorts.reduce((a, y) => a + y.amount, 0), 0))}</b><span></span></div></div>`;
 }
 
-function collectCash(uid) {
-  const u = db.users.find((x) => x.id === uid);
-  const { list } = staffCash(uid);
+function collectCash(userId) {
+  const u = db.users.find((x) => x.id === userId);
+  const { list } = staffCash(userId);
   if (!u || !list.length) return alert("Bu xodimda topshiriladigan naqd pul yo'q.");
   openModal({
     title: `${u.name} — kassa topshirish`,
     submitText: 'Qabul qildim',
     body: `<p class="muted small">Xodim olgan naqd pullar. Qabul qilinmaganini belgidan oling — u xodimda qoladi.</p>
       <div class="table-wrap"><table class="cash-table"><thead><tr><th></th><th>Sana</th><th>Nima uchun</th><th class="num">Naqd</th></tr></thead><tbody>${cashRows(list, true)}</tbody></table></div>
-      <div class="mc-total" id="ccTotal"></div>`,
+      <div class="mc-total" id="ccTotal"></div>
+      <div class="cc-other" id="ccOther" hidden>${moneyField('Aslida qancha oldingiz?', 'got', '', 'UZS', 'inputmode="numeric"')}
+        <div class="small" id="ccDiff"></div></div>`,
+    extra: [{ label: '✏️ Boshqa summa', cls: 'cc-other-btn', onClick: () => {
+      const box = $('#ccOther');
+      box.hidden = !box.hidden;
+      if (!box.hidden) { const inp = $('#modalBody [name=got]'); inp.value = ''; inp.focus(); }
+      $('#modalSubmit').textContent = box.hidden ? 'Qabul qildim' : 'Shu summani qabul qildim';
+      $('#modalBody').dispatchEvent(new Event('change'));
+    } }],
     onOpen: () => {
       const upd = () => {
         const sum = list.filter((p) => $(`#modalBody .cc-pick[data-id="${p.id}"]`).checked).reduce((s, p) => s + (p.dir === 'in' ? p.amount : -p.amount), 0);
-        $('#ccTotal').innerHTML = `${esc(u.name)} sizga topshiradi: <b>${money(sum)}</b>`;
+        $('#ccTotal').innerHTML = `${esc(u.name)} sizga topshirishi kerak: <b>${money(sum)}</b>`;
+        const other = !$('#ccOther').hidden;
+        const got = num($('#modalBody [name=got]').value);
+        $('#ccDiff').innerHTML = other && $('#modalBody [name=got]').value
+          ? got < sum ? `<b class="debt">${money(sum - got)} kam</b> — xodimga «to'liqlab bering» degan eslatma boradi, sizda esa «qolganini qabul qiling» eslatmasi qoladi.`
+            : got > sum ? `<b class="ok">${money(got - sum)} ortiq</b> berilyapti.` : 'Summa to\'g\'ri.'
+          : '';
       };
       $('#modalBody').addEventListener('change', upd);
+      $('#modalBody').addEventListener('input', upd);
       upd();
     },
-    onSubmit: async () => {
+    onSubmit: async (d) => {
       const picked = list.filter((p) => $(`#modalBody .cc-pick[data-id="${p.id}"]`).checked);
       if (!picked.length) { alert('Hech narsa belgilanmagan.'); return false; }
+      const sum = picked.reduce((s, p) => s + (p.dir === 'in' ? p.amount : -p.amount), 0);
+      const other = !$('#ccOther').hidden;
+      const got = other ? num(d.got) : sum;
+      if (other && !String(d.got || '').trim()) { alert('Olgan summangizni yozing.'); $('#modalBody [name=got]').focus(); return false; }
+      if (got < sum && !confirm(`${u.name} ${money(got)} berdi — ${money(sum - got)} kam.\n\nKamomad xodimga eslatma bo'lib yoziladi va u to'liqlab berguncha sizda ham ko'rinib turadi. Davom etasizmi?`)) return false;
       const at = new Date().toISOString();
-      picked.forEach((p) => { p.collected = { at, by: me.id }; });
+      picked.forEach((p) => { p.collected = { at, by: me.id, got: other ? got : undefined }; });
+      if (got < sum) {
+        db.cashShorts = [...(db.cashShorts || []), { id: uid(), userId: u.id, amount: sum - got, expected: sum, got, date: today(), at, by: me.id, status: 'open' }];
+      }
       await save();
     },
   });
@@ -6821,6 +6858,14 @@ const ACTIONS = {
   payNasiya: (ds) => payNasiya(ds.id),
   bookFreight: async (ds) => { const d = doc(ds.id); if (d && canBookFreight()) { await bookFreight(d); save(); } },
   collectCash: (ds) => { if (isAdmin()) collectCash(ds.id); },
+  closeShort: (ds) => {
+    const x = (db.cashShorts || []).find((y) => y.id === ds.id);
+    if (!x || !isAdmin()) return;
+    const u = db.users.find((y) => y.id === x.userId);
+    if (!confirm(`${u?.name || 'Xodim'}dan qolgan ${money(x.amount)} ni oldingizmi? Eslatma yopiladi.`)) return;
+    Object.assign(x, { status: 'closed', closedAt: new Date().toISOString(), closedBy: me.id });
+    save();
+  },
   openDoc: (ds) => { const d = doc(ds.id); if (d) openDoc(d.type, d); },
   exportDocs: (ds) => exportDocs(ds.type),
   newProduct: () => newProduct(),
