@@ -659,11 +659,20 @@ class SupabaseBackend {
     this.saveOutbox(plan);
     // Avval qo'shish/yangilash (bog'liq yozuvlar tartibida), keyin teskari tartibda o'chirish
     for (const { t, upserts } of plan) {
-      for (let i = 0; i < upserts.length; i += 500) {
-        const chunk = upserts.slice(i, i + 500);
+      this.snap[t] = this.snap[t] || new Map();
+      // Xodimda: serverda bor yozuv «yangilash» bilan yuboriladi. «upsert» qo'shish qoidasini ham tekshiradi —
+      // boshqa xodim yaratgan hujjatni (masalan, sotuv holatini) o'zgartirganda server rad etardi.
+      const existing = this.isAdmin ? [] : upserts.filter(({ id }) => this.snap[t].has(id));
+      const fresh = this.isAdmin ? upserts : upserts.filter(({ id }) => !this.snap[t].has(id));
+      for (const { id, data, json } of existing) {
+        const { error } = await this.sb.from(t).update({ data }).eq('id', id);
+        if (error) throw syncError(error);
+        this.snap[t].set(id, json);
+      }
+      for (let i = 0; i < fresh.length; i += 500) {
+        const chunk = fresh.slice(i, i + 500);
         const { error } = await this.sb.from(t).upsert(chunk.map(({ id, data }) => ({ id, data })));
         if (error) throw syncError(error);
-        this.snap[t] = this.snap[t] || new Map();
         chunk.forEach(({ id, json }) => this.snap[t].set(id, json));
       }
     }

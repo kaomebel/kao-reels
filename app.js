@@ -233,6 +233,8 @@ function commit(quiet = false) {
       if (backend.kind === 'local') {
         alert("Saqlab bo'lmadi: " + e.message);
       } else if (e.fatal) {
+        // Server rad etgan o'zgarish telefonda qolib, har kirishda qayta yuborilmasin (dastur ochilmay qolardi)
+        backend.saveOutbox?.([]);
         alert("Saqlanmadi: " + e.message + "\n\nMa'lumotlar serverdan qayta yuklanadi.");
         await loadData();
       } else {
