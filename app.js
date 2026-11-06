@@ -45,8 +45,8 @@ const EXPENSE_PURPOSES = PAY_PURPOSES_OUT.slice(2);
 // Oylik moddasida ichki tugmalar — xodimlar ismlari.
 const DEFAULT_EXPENSE_CATS = [
   { name: 'Ish haqi (oylik)', emoji: '👷', subsOn: true, subs: [] },
-  { name: 'Ombor (sklad) ijarasi', emoji: '🏭' },
-  { name: "Do'kon ijarasi", emoji: '🏪' },
+  // Oyiga bir marta to'lanadiganlar; ijara asosan dollarda (usd: true — oynada dollar oldindan tanlanadi)
+  { name: 'Doimiy xarajatlar', emoji: '🗓', subsOn: true, subs: ["Do'kon ijarasi", 'Ombor (sklad) ijarasi'], usd: true },
   { name: "Kommunal to'lovlar", emoji: '💡', subsOn: true, subs: ['Elektr', 'Maxsustrans', 'Gaz'] },
   { name: "Avtomashina yoqilg'isi", emoji: '⛽' },
   { name: 'Ovqat (obed)', emoji: '🍽' },
@@ -4106,7 +4106,12 @@ function openExpenseSubs(name) {
   openModal({
     title: `${c.emoji || '📦'} ${c.name}`,
     body: `<p class="muted small">${salary ? 'Kimga oylik berilyapti?' : 'Nima uchun?'}</p>
-      <div class="exp-quick exp-subs">${subs.map((x) => `<button type="button" class="exp-tile" data-sub="${esc(x)}"><span>${esc(x)}</span></button>`).join('')}
+      <div class="exp-quick exp-subs">${subs.map((x) => {
+        // Doimiy (oylik) xarajat: shu oy to'langanmi
+        const month = today().slice(0, 7);
+        const paid = (c.usd || /doimiy/i.test(c.name)) && db.payments.some((p) => isExpense(p) && p.purpose === c.name && p.sub === x && (p.forMonthFixed || p.date.slice(0, 7)) === month);
+        return `<button type="button" class="exp-tile" data-sub="${esc(x)}"><span>${esc(x)}${(c.usd || /doimiy/i.test(c.name)) ? `<br><small class="${paid ? 'ok' : 'debt'}">${paid ? '✓ bu oy to\'langan' : 'bu oy to\'lanmagan'}</small>` : ''}</span></button>`;
+      }).join('')}
         <button type="button" class="exp-tile exp-new" data-sub-new="1"><span class="exp-emoji">➕</span><span>${salary ? 'Yangi xodim qo\'shish' : 'Yangi qo\'shish'}</span></button>
         <button type="button" class="exp-tile exp-other" data-sub=""><span>${salary ? 'Ro\'yxatda yo\'q' : 'Boshqa (tanlamasdan)'}</span></button></div>`,
     onOpen: () => {
@@ -4153,8 +4158,14 @@ function newExpense(catName, sub = '') {
     title: 'Yangi xarajat',
     body: `<div class="form-grid">
         ${selectField('Moddasi', 'purpose', cats.map((c) => [c.name, `${c.emoji || '📦'} ${c.name}`]), cat, 'full')}
-        ${moneyField('Summa *', 'amount', '', 'UZS', 'required')}
+        <div class="field full exp-cur"><span class="field-label">Valyuta</span><div class="seg seg-sm" role="radiogroup">
+          <label><input type="radio" name="expCur" value="UZS" ${expenseCat(cat)?.usd ? '' : 'checked'}><span>So'm</span></label>
+          <label><input type="radio" name="expCur" value="USD" ${expenseCat(cat)?.usd ? 'checked' : ''}><span>Dollar ($)</span></label></div></div>
+        ${moneyField('Summa *', 'amount', '', expenseCat(cat)?.usd ? 'USD' : 'UZS', 'required')}
+        <label id="expRateLbl" ${expenseCat(cat)?.usd ? '' : 'hidden'}>Kurs: 1 $ =<span class="money-wrap"><input name="rate" class="money" data-cur="USD" inputmode="decimal" value="${esc(fmtIn(usdRate() || '', 'USD'))}"><span class="cur">so'm</span></span></label>
+        <div class="full muted small" id="expUzs"></div>
         ${field('Sana', 'date', today(), 'type="date" required')}
+        <label id="expMonthLbl" ${expenseCat(cat)?.usd || /doimiy|ijara/i.test(cat) ? '' : 'hidden'}>Qaysi oy uchun<input type="month" name="expMonth" value="${today().slice(0, 7)}"></label>
         ${selectField("To'lov usuli", 'method', Object.entries(PAY_METHODS), 'cash')}
         <label class="full" id="subLbl" ${subOpts(cat, sub) ? '' : 'hidden'}>Nima uchun<select name="sub">${subOpts(cat, sub)}</select></label>
         <label class="full" id="forDocLbl" ${FARE_RE.test(cat) || FUEL_RE.test(cat) ? '' : 'hidden'}>Qaysi qabul (tovar) uchun — ixtiyoriy<select name="forDocId"><option value="">—</option>${freightDocOptions().map(([v, t]) => `<option value="${esc(v)}">${esc(t)}</option>`).join('')}</select></label>
@@ -4169,7 +4180,24 @@ function newExpense(catName, sub = '') {
       </div>`,
     onOpen: () => {
       const sel = $('#modalBody [name=purpose]');
+      // Dollar: summa × kurs = so'mda (hisob-kitob so'mda yuritiladi)
+      const curOfExp = () => ($('#modalBody [name=expCur]:checked')?.value === 'USD' ? 'USD' : 'UZS');
+      const showUzs = () => {
+        const usd = curOfExp() === 'USD';
+        $('#expRateLbl').hidden = !usd;
+        const v = num($('#modalBody [name=amount]').value) * num($('#modalBody [name=rate]').value);
+        $('#expUzs').textContent = usd && v ? `= ${money(Math.round(v))}` : '';
+      };
+      $$('#modalBody [name=expCur]').forEach((r) => r.addEventListener('change', () => { setMoneyCurrency($('#modalBody [name=amount]'), curOfExp()); showUzs(); }));
+      $('#modalBody [name=amount]').addEventListener('input', showUzs);
+      $('#modalBody [name=rate]').addEventListener('input', showUzs);
       sel.addEventListener('change', () => {
+        const c = expenseCat(sel.value);
+        const want = c?.usd ? 'USD' : 'UZS';
+        $(`#modalBody [name=expCur][value=${want}]`).checked = true;
+        setMoneyCurrency($('#modalBody [name=amount]'), want);
+        showUzs();
+        $('#expMonthLbl').hidden = !(c?.usd || /doimiy|ijara/i.test(sel.value));
         $('#salaryBox').hidden = !isSalaryCat(sel.value);
         const o = subOpts(sel.value, '');
         $('#modalBody [name=sub]').innerHTML = o;
@@ -4183,7 +4211,9 @@ function newExpense(catName, sub = '') {
       setTimeout(() => $('#modalBody [name=amount]')?.focus(), 50);
     },
     onSubmit: async (d) => {
-      const amount = num(d.amount);
+      const usd = d.expCur === 'USD';
+      if (usd && !(num(d.rate) > 0)) { alert('Dollar kursini kiriting.'); return false; }
+      const amount = usd ? Math.round(num(d.amount) * num(d.rate)) : num(d.amount);
       if (amount <= 0) { alert('Summani kiriting.'); return false; }
       const salary = isSalaryCat(d.purpose);
       if (d.employeeSel && d.employeeSel !== '__new') d.employee = d.employeeSel;
@@ -4194,6 +4224,8 @@ function newExpense(catName, sub = '') {
         employee: salary ? d.employee.trim() : undefined, forMonth: salary ? d.forMonth : undefined,
         sub: !salary && d.sub ? d.sub : undefined,
         forDocId: d.forDocId && (FARE_RE.test(d.purpose) || FUEL_RE.test(d.purpose)) ? d.forDocId : undefined,
+        currency: usd ? 'USD' : undefined, amountUsd: usd ? num(d.amount) : undefined, rate: usd ? num(d.rate) : undefined,
+        forMonthFixed: !salary && d.expMonth && !$('#expMonthLbl').hidden ? d.expMonth : undefined,
       });
       // Yangi xodim ismi oylik moddasining tugmalariga yoziladi (administrator) — keyingi safar tanlanadi
       const sc = salaryCat();
@@ -4229,10 +4261,10 @@ function viewExpenses() {
       <span class="exp-bar"><i style="width:${Math.round((sum / max) * 100)}%"></i></span></button>`).join('');
   const rows = list.map((p) => `<tr>
       <td>${fmtDate(p.date)}<div class="muted small">${esc(p.no || '')}</div></td>
-      <td>${expenseEmoji(p.purpose)} ${esc(p.purpose)}${p.sub ? ` › <b>${esc(p.sub)}</b>` : ''}${p.forDocId && doc(p.forDocId) ? `<div class="small for-doc">📦 ${esc(doc(p.forDocId).no)} · ${esc(party(doc(p.forDocId).counterpartyId)?.name || '')} · ${esc(docItemsText(doc(p.forDocId)))}</div>` : ''}${p.employee ? `<div class="small"><b>${esc(p.employee)}</b>${p.forMonth ? ` · ${esc(p.forMonth)} oy uchun` : ''}</div>` : ''}</td>
+      <td>${expenseEmoji(p.purpose)} ${esc(p.purpose)}${p.sub ? ` › <b>${esc(p.sub)}</b>` : ''}${p.forMonthFixed ? ` <span class="muted small">· ${esc(p.forMonthFixed)} oy uchun</span>` : ''}${p.forDocId && doc(p.forDocId) ? `<div class="small for-doc">📦 ${esc(doc(p.forDocId).no)} · ${esc(party(doc(p.forDocId).counterpartyId)?.name || '')} · ${esc(docItemsText(doc(p.forDocId)))}</div>` : ''}${p.employee ? `<div class="small"><b>${esc(p.employee)}</b>${p.forMonth ? ` · ${esc(p.forMonth)} oy uchun` : ''}</div>` : ''}</td>
       <td>${esc(p.note || '')}<div class="muted small">${esc(userName(p.userId))}</div></td>
       <td>${esc(PAY_METHODS[p.method] || '')}</td>
-      <td class="num"><b>${money(p.amount)}</b></td>
+      <td class="num"><b>${p.currency === 'USD' ? fmtUsd(p.amountUsd) : money(p.amount)}</b>${p.currency === 'USD' ? `<div class="muted small">≈ ${money(p.amount)} · kurs ${fmt(p.rate)}</div>` : ''}</td>
       <td class="actions">${admin ? `<button class="small danger icon-only" data-act="deletePayment" data-id="${p.id}" title="O'chirish">${icon('trash')}</button>` : ''}</td></tr>`).join('');
   return unbookedFreightCard() + `<p class="muted small exp-hint">Xarajat turini tanlang — summani kiriting:</p>${quick}`
     + toolbar('expenses', { extra: periodInputs('expenses'), buttons: `<button class="primary" data-act="newExpense">${icon('plus')}Xarajat</button>` })
@@ -4253,6 +4285,7 @@ function viewExpenseCats() {
         <input class="ec-name" value="${esc(c.name)}" aria-label="Nomi">
         <button class="small danger icon-only" data-act="ecDel" data-i="${i}" title="O'chirish">${icon('trash')}</button></div>
       <label class="check ec-on"><input type="checkbox" class="ec-subs-on" ${c.subsOn ? 'checked' : ''}> Ichida tugmalar${isSalaryCat(c.name) ? ' (xodimlar)' : ''}</label>
+      <label class="check ec-on"><input type="checkbox" class="ec-usd" ${c.usd ? 'checked' : ''}> Dollarda to'lanadi (oynada $ oldindan tanlanadi)</label>
       <div class="ec-subs" ${c.subsOn ? '' : 'hidden'}>${chipEditor(expenseSubs(c), isSalaryCat(c.name) ? "+ Xodim qo'shish (Enter)" : "+ Tugma qo'shish (Enter)")}</div>
     </div>`).join('')}</div>
     <div class="toolbar" style="margin-top:10px"><button data-act="ecAdd">${icon('plus')}Modda qo'shish</button><span id="ecSaved" class="lists-saved"></span><button class="primary" data-act="ecSave">Saqlash</button></div>
@@ -4264,7 +4297,8 @@ function readExpenseCats() {
     const name = $('.ec-name', row).value.trim();
     const subsOn = $('.ec-subs-on', row).checked;
     const subs = $$('.ec-subs .chip', row).map((c) => c.dataset.v);
-    return { emoji: $('.ec-emoji', row).value.trim(), name, ...(subsOn || subs.length ? { subsOn, subs } : {}) };
+    const usd = $('.ec-usd', row)?.checked;
+    return { emoji: $('.ec-emoji', row).value.trim(), name, ...(subsOn || subs.length ? { subsOn, subs } : {}), ...(usd ? { usd: true } : {}) };
   }).filter((c) => c.name);
   const names = new Set();
   const out = cats.filter((c) => !names.has(c.name) && names.add(c.name));
