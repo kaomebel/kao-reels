@@ -858,6 +858,18 @@ class SupabaseBackend {
     return data;
   }
 
+  // Rasmdan mahsulot tavsiyasi (server funksiyasi ai-photo → Claude)
+  async aiPhoto(image, options) {
+    const { data, error } = await this.sb.functions.invoke('ai-photo', { body: { image, options } });
+    if (error) {
+      let msg = error.message;
+      try { msg = (await error.context?.json())?.error || msg; } catch (e) { /* */ }
+      throw new Error(isNetErr(error) ? "Internet yo'q" : msg);
+    }
+    if (!data?.ok) throw new Error(data?.error || 'Javob yo\'q');
+    return data.suggestion;
+  }
+
   // Etiketka almashtirildi: xodimda mahsulotni o'zgartirish ruxsati bo'lmasa ham (server funksiyasi)
   async markLabelDone(pid, db) {
     const { error } = await this.sb.rpc('mark_label_done', { pid });

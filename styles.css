@@ -1490,3 +1490,10 @@ html.modal-open, html.modal-open body { overflow: hidden; overscroll-behavior: n
 .credit-box .check { display: flex; gap: 8px; align-items: center; color: var(--text); font-size: 14px; }
 .over-block { display: flex; gap: 8px; align-items: flex-start; padding: 10px 12px; border-radius: 12px; background: var(--warn-soft, #f6ecd2); color: var(--text); font-size: 14px; }
 .over-block svg { flex: none; width: 18px; height: 18px; margin-top: 2px; }
+
+/* Sun'iy intellekt tavsiyasi */
+.ai-box { padding: 10px 12px; border-radius: 12px; background: linear-gradient(90deg, #efe6ff, var(--accent-soft)); color: var(--text); font-size: 14px; line-height: 1.4; }
+.ai-box.err { background: var(--danger-soft); }
+.ai-box .ai-spin { display: inline-block; width: 14px; height: 14px; margin-right: 4px; border: 2px solid var(--accent); border-right-color: transparent; border-radius: 50%; vertical-align: -2px; animation: aispin .8s linear infinite; }
+@keyframes aispin { to { transform: rotate(360deg); } }
+.ai-fill { margin-top: 8px; width: 100%; }

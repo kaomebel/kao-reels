@@ -1341,7 +1341,8 @@ function productForm(p = {}, readonly = false) {
       <div class="photo-list" id="photoList"></div>
       ${readonly ? '' : `<input type="file" id="photoInput" accept="image/*" multiple hidden>
       <input type="file" id="photoReplace" accept="image/*" hidden>
-      <div class="muted small">${MAX_PHOTOS} tagacha. Birinchisi — asosiy (Telegram va ro'yxatda). Rasm ustiga bosilsa — to'liq ekranda ochiladi.</div>`}
+      <div class="muted small">${MAX_PHOTOS} tagacha. Birinchisi — asosiy (Telegram va ro'yxatda). Rasm ustiga bosilsa — to'liq ekranda ochiladi.</div>
+      ${backend?.kind === 'supabase' ? `<button type="button" class="small ai-fill" id="aiFillBtn">✨ Rasmdan to'ldirish (AI)</button>` : ''}`}
     </div>
     <div class="form-grid">
       ${field('Mahsulot *', 'name', p.name, 'required', 'full')}
@@ -1563,6 +1564,100 @@ async function editFiles(files) {
     if (r) out.push(r);
   }
   return out;
+}
+
+// ---------- Sun'iy intellekt: rasmdan mahsulot kartochkasini tavsiya qilish ----------
+// Birinchi rasm qo'shilishi bilan: qanday mebel (kategoriya, tur), material, rang, nom — o'zi belgilanadi.
+// Bu faqat tavsiya: xodim istalgan maydonni o'zgartiradi.
+async function imageToJpegBase64(blob, max = 1024) {
+  const bm = await createImageBitmap(blob);
+  const k = Math.min(1, max / Math.max(bm.width, bm.height));
+  const c = document.createElement('canvas');
+  c.width = Math.round(bm.width * k); c.height = Math.round(bm.height * k);
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
+  ctx.drawImage(bm, 0, 0, c.width, c.height);
+  return c.toDataURL('image/jpeg', 0.85).split(',')[1];
+}
+
+function aiBox(html, cls = '') {
+  let box = $('#aiBox');
+  if (!box) {
+    const grid = $('#modalBody .product-form .form-grid');
+    if (!grid) return;
+    grid.insertAdjacentHTML('afterbegin', '<div class="field full ai-box" id="aiBox"></div>');
+    box = $('#aiBox');
+  }
+  box.className = `field full ai-box ${cls}`;
+  box.innerHTML = html;
+}
+
+async function aiSuggestFromPhoto(blob) {
+  if (backend.kind !== 'supabase' || !$('#catSel')) return;
+  const form = $('#modalBody .product-form');
+  aiBox(`<span class="ai-spin"></span> ✨ Sun'iy intellekt rasmni ko'rib, kartochkani to'ldirmoqda…`, 'busy');
+  const options = {
+    categories: Object.fromEntries(categoriesAll().filter((c) => c !== KIT_CATEGORY).map((c) => [c, typesOf(c)])),
+    materials: allMaterials(),
+    materialColors: db.materialColors || {},
+    colors: db.colors,
+    featureSets: (db.featureSets || []).map((f) => ({ applies: f.applies, fields: f.fields, colors: f.colors })),
+  };
+  let s;
+  try {
+    s = await backend.aiPhoto(await imageToJpegBase64(blob), options);
+  } catch (e) {
+    if ($('#modalBody .product-form') === form) aiBox(`✨ Tavsiya olinmadi: ${esc(e.message)}`, 'err');
+    return;
+  }
+  if ($('#modalBody .product-form') !== form || !$('#modal').open) return; // oyna yopilgan yoki almashgan
+  applyAiSuggestion(s);
+}
+
+function applyAiSuggestion(s) {
+  const byKey = (list, v) => list.find((x) => nameKey(x) === nameKey(v));
+  const nameEl = $('#modalBody [name=name]');
+  if (nameEl && !nameEl.value.trim() && s.name) nameEl.value = capFirst(s.name);
+  // Kategoriya va tur — ro'yxatdagisi, bo'lmasa yangi variant sifatida
+  const catSel = $('#catSel');
+  const cat = byKey(categoriesAll(), s.category) || capFirst(s.category || '');
+  window.__aiApplying = true;
+  try {
+    if (cat) {
+      if (![...catSel.options].some((o) => o.value === cat)) catSel.insertAdjacentHTML('beforeend', `<option value="${esc(cat)}">${esc(cat)}</option>`);
+      catSel.value = cat;
+      catSel.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+    const typeSel = $('#typeSel');
+    const type = byKey(typesOf(cat), s.type) || capFirst(s.type || '');
+    if (type) {
+      if (![...typeSel.options].some((o) => o.value === type)) {
+        const nw = typeSel.querySelector('option[value="__new"]');
+        const opt = `<option value="${esc(type)}">${esc(type)}</option>`;
+        if (nw) nw.insertAdjacentHTML('beforebegin', opt); else typeSel.insertAdjacentHTML('beforeend', opt);
+      }
+      typeSel.value = type;
+      typeSel.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+  } finally {
+    window.__aiApplying = false;
+  }
+  const curCat = catSel.value;
+  const curType = $('#typeSel').value;
+  const mats = (s.materials || []).map((m) => byKey(allMaterials(), m) || capFirst(m)).filter(Boolean);
+  const attrs = {};
+  (s.attrs || []).forEach(({ field, value }) => { if (field && value) attrs[field] = value; });
+  const colors = (s.colors || []).map(capFirst).filter(Boolean);
+  secState.mat = secState.mat || !!(mats.length || Object.keys(attrs).length);
+  secState.color = secState.color || !!colors.length;
+  applySec();
+  const box = $('#featBlock');
+  if (box) box.innerHTML = featureBlock(curCat, curType, { material: mats.join(', '), color: colors.join(', '), attrs });
+  const desc = $('#modalBody [name=note]');
+  if (desc && !desc.value.trim() && s.description) desc.value = s.description;
+  const parts = [[curCat, curType].filter(Boolean).join(' › '), ...mats, ...Object.values(attrs), ...colors].filter(Boolean);
+  aiBox(`✨ <b>Sun'iy intellekt tavsiyasi:</b> ${esc(parts.join(' · ') || "aniqlab bo'lmadi")}. <span class="muted">Noto'g'ri bo'lsa — o'zgartiring.</span>`, 'done');
+  if (modalState) modalState.dirty = true;
 }
 
 // Joylangan (yoki yangi) rasmni qayta moslash — natija o'sha o'ringa qo'yiladi
@@ -1858,6 +1953,7 @@ function bindTypeField() {
     type.innerHTML = typeOptions(cat.value, ''); toggle(); refresh();
     // Kategoriya tanlanishi bilan turlar ro'yxati o'zi ochiladi
     if (cat.value && [...type.options].some((o) => o.value && o.value !== '__new')) {
+      if (window.__aiApplying) return;
       setTimeout(() => {
         if (isTouch()) openSelectSheet(type);
         else { type.focus(); try { type.showPicker?.(); } catch (e) { /* brauzer ruxsat bermadi */ } }
@@ -1886,6 +1982,16 @@ function syncChips(box) {
 
 function bindProductForm(p, readonly = false) {
   matShowAll = false;
+  // Qo'lda: birinchi rasmdan sun'iy intellekt tavsiyasi
+  setTimeout(() => $('#aiFillBtn')?.addEventListener('click', async () => {
+    const ph = photoEdit.items[0];
+    if (!ph) return alert("Avval rasm qo'shing.");
+    let blob = ph.file;
+    if (!blob) {
+      try { blob = await (await fetch(await backend.photoUrl(ph.path))).blob(); } catch (e) { return alert("Rasmni ochib bo'lmadi."); }
+    }
+    aiSuggestFromPhoto(blob);
+  }));
   photoEdit = { items: (p.photos || []).slice(), removed: [] };
   renderPhotoList(readonly);
   if (readonly) return;
@@ -1907,8 +2013,12 @@ function bindProductForm(p, readonly = false) {
     const files = picked.slice(0, MAX_PHOTOS - photoEdit.items.length);
     if (picked.length > files.length) alert(`Ko'pi bilan ${MAX_PHOTOS} ta rasm. Keraksizini o'chiring yoki «Almashtirish» ni bosing.`);
     // Har bir rasm avval moslanadi (kesish, kattalashtirish, burish)
-    (await editFiles(files)).forEach((file) => photoEdit.items.push({ file, url: URL.createObjectURL(file) }));
+    const wasEmpty = !photoEdit.items.length;
+    const edited = await editFiles(files);
+    edited.forEach((file) => photoEdit.items.push({ file, url: URL.createObjectURL(file) }));
     renderPhotoList();
+    // Yangi mahsulotning birinchi rasmi — sun'iy intellekt tavsiyasi
+    if (wasEmpty && edited.length && !p.id && !$('#catSel')?.value) aiSuggestFromPhoto(edited[0]);
   };
   $('#photoInput').addEventListener('change', addFiles);
   $('#photoCam')?.addEventListener('change', addFiles);
