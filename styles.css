@@ -1484,3 +1484,9 @@ html.modal-open, html.modal-open body { overflow: hidden; overscroll-behavior: n
 .sup-acc .sa-due { min-width: 150px; }
 .unp-table .up-price { min-width: 130px; }
 .unp-table select { min-width: 140px; }
+
+/* Mijoz haqdorligi */
+.credit-box { padding: 10px 12px; border-radius: 12px; background: var(--ok-soft); }
+.credit-box .check { display: flex; gap: 8px; align-items: center; color: var(--text); font-size: 14px; }
+.over-block { display: flex; gap: 8px; align-items: flex-start; padding: 10px 12px; border-radius: 12px; background: var(--warn-soft, #f6ecd2); color: var(--text); font-size: 14px; }
+.over-block svg { flex: none; width: 18px; height: 18px; margin-top: 2px; }
