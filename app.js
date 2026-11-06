@@ -1830,7 +1830,7 @@ function colorsFor(set, attrs = {}, cat = '', material = '') {
 // Yangi mahsulotda shu turdagi oldingi mahsulotlarga qarab o'zi belgilanadi (masalan, stulda o'lcham yo'q).
 let secState = { size: true, mat: true, color: true };
 function secDefaults(cat, type, p = {}) {
-  if (p.id) return { size: !!p.size, mat: !!p.material || Object.keys(p.attrs || {}).length > 0, color: !!p.color };
+  if (p.id || p.__copy) return { size: !!p.size, mat: !!p.material || Object.keys(p.attrs || {}).length > 0, color: !!p.color };
   const list = db.products.filter((x) => x.category === cat && (type ? nameKey(x.type) === nameKey(type) : true) && !isKit(x) && x.category);
   if (!list.length) return { size: false, mat: false, color: false }; // birinchi marta — kerakligini o'zi belgilaydi
   return {
@@ -2278,13 +2278,15 @@ async function withPhotos(fn) {
   }
 }
 
-function newProduct() {
+// tpl — o'xshash mahsulotdan nusxa: hamma maydonlar to'ldirilgan holda ochiladi (rasm, artikul va qoldiqsiz)
+function newProduct(tpl = null) {
   if (!canAddProducts()) return alert("Mahsulot qo'shish uchun ruxsatingiz yo'q.");
+  const base = tpl ? (({ id, code, photos, created, labelDue, archived, tgPost, ...rest }) => ({ ...JSON.parse(JSON.stringify(rest)), __copy: true }))(tpl) : {};
   openModal({
-    title: 'Yangi mahsulot',
-    body: productForm(),
+    title: tpl ? "O'xshash mahsulot" : 'Yangi mahsulot',
+    body: (tpl ? `<p class="copy-note">${icon('plus')} «${esc(tpl.name)}» ma'lumotlari ko'chirildi. Rangi, turi yoki boshqasini o'zgartirib saqlang — yangi mahsulot bo'lib qo'shiladi. Rasm va artikulni yangisini qo'ying.</p>` : '') + productForm(base),
     wide: true,
-    onOpen: () => bindProductForm({}),
+    onOpen: () => { bindProductForm(base); if (tpl) { modalState.dirty = true; $('#modalBody [name=name]')?.select?.(); } },
     onSubmit: (d) => (!tgAnswered(d) ? false : withPhotos(async (photos) => {
       const p = readProduct(d, { id: uid(), created: today(), photos });
       db.products.push(p);
@@ -2309,7 +2311,7 @@ function editProduct(id) {
   if (isKit(p)) return editKit(id);
   if (!can('products')) {
     // Mahsulot ruxsati yo'q — kartochkani faqat ko'radi
-    openModal({ title: p.name, body: `<p class="muted small ro-note">${icon('alert')} Faqat ko'rish. O'zgartirish uchun administrator sizga «Mahsulotlar» ruxsatini berishi kerak.</p><fieldset disabled>${productForm(p, true)}</fieldset>`, wide: true, onOpen: () => bindProductForm(p, true), extra: [{ label: 'Etiketka', onClick: () => quickLabel(id) }] });
+    openModal({ title: p.name, body: `<p class="muted small ro-note">${icon('alert')} Faqat ko'rish. O'zgartirish uchun administrator sizga «Mahsulotlar» ruxsatini berishi kerak.</p><fieldset disabled>${productForm(p, true)}</fieldset>`, wide: true, onOpen: () => bindProductForm(p, true), extra: [{ label: 'Etiketka', onClick: () => quickLabel(id) }, ...(canAddProducts() ? [{ label: "➕ O'xshashini qo'shish", onClick: () => { closeModal(); newProduct(product(id)); } }] : [])] });
     return;
   }
   openModal({
@@ -2321,6 +2323,7 @@ function editProduct(id) {
       { label: 'Etiketka', onClick: () => quickLabel(id) },
       { label: 'Telegramga yuborish', onClick: () => telegramPostProducts([id], true) },
       { label: 'Harakatlar tarixi', onClick: () => productHistory(id) },
+      { label: "➕ O'xshashini qo'shish", onClick: () => { if (!modalState.dirty || confirm("Shu kartochkadagi saqlanmagan o'zgarishlar yo'qoladi. Davom etasizmi?")) { closeModal(); newProduct(product(id)); } } },
     ],
     onSubmit: (d) => withPhotos(async (photos) => {
       readProduct(d, p);
@@ -5845,7 +5848,7 @@ function viewProducts() {
       ${showCost ? `<td class="num">${money(ctx.cost[p.id])}</td>` : ''}
       ${showPrice ? `<td class="num">${priceLabel(p)}${p.priceCurrency === 'USD' ? `<div class="muted small">${fmtUsd(p.salePrice)}</div>` : ''}${p.minPrice ? `<div class="muted small">eng kami: ${priceLabel(p, 'minPrice')}</div>` : ''}</td>` : ''}
       <td class="num ${st - rs <= (p.minQty || 0) ? 'debt' : ''}">${st}${rs ? `<div class="muted small">rezerv ${rs}</div>` : ''}</td>
-      <td class="actions">${can('products') ? `<button class="small edit-btn" data-act="editProduct" data-id="${p.id}" title="Tahrirlash">${icon('edit')}<span>Tahrirlash</span></button>` : ''}<button class="small icon-only" data-act="labelOne" data-id="${p.id}" title="Etiketka chop etish">${icon('tag')}</button>${admin ? `
+      <td class="actions">${can('products') ? `<button class="small edit-btn" data-act="editProduct" data-id="${p.id}" title="Tahrirlash">${icon('edit')}<span>Tahrirlash</span></button>` : ''}${canAddProducts() && !isKit(p) ? `<button class="small edit-btn" data-act="copyProduct" data-id="${p.id}" title="Shu mahsulotga o'xshashini qo'shish (boshqa rang, tur...)">${icon('plus')}<span>O'xshash</span></button>` : ''}<button class="small icon-only" data-act="labelOne" data-id="${p.id}" title="Etiketka chop etish">${icon('tag')}</button>${admin ? `
         <button class="small icon-only" data-act="tgProduct" data-id="${p.id}" title="Telegram guruhga yuborish">${icon('send')}</button>
         ${p.archived ? `<button class="small" data-act="unarchive" data-id="${p.id}">Tiklash</button>` : `<button class="small danger icon-only" data-act="deleteProduct" data-id="${p.id}" title="O'chirish">${icon('trash')}</button>`}` : ''}
       </td>
@@ -7325,6 +7328,7 @@ const ACTIONS = {
   staffDel: (ds) => { const n = db.staffNames[+ds.i]; if (n && confirm(`«${n}» ro'yxatdan olib tashlansinmi?`)) { db.staffNames.splice(+ds.i, 1); save(); } },
   ecSave: async () => { db.expenseCats = readExpenseCats(); await save(); alert('Saqlandi.'); },
   editProduct: (ds) => editProduct(ds.id),
+  copyProduct: (ds) => { const p = product(ds.id); if (p) newProduct(p); },
   // Rasmsiz mahsulot: kartochka ochiladi va darhol rasm tanlash oynasi chiqadi
   addPhoto: (ds) => { editProduct(ds.id); $('#photoInput')?.click(); },
   deleteProduct: (ds) => deleteProduct(ds.id),
