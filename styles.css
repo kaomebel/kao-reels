@@ -1504,3 +1504,19 @@ html.modal-open, html.modal-open body { overflow: hidden; overscroll-behavior: n
 .hist-table { width: 100%; }
 .hist-table td { padding: 8px 6px; vertical-align: top; border-bottom: 1px solid var(--border); }
 .hist-table td.small { white-space: nowrap; }
+.hist-items { margin-top: 4px; font-size: 13px; }
+.hist-items > div { display: flex; justify-content: space-between; gap: 10px; padding: 2px 0; border-bottom: 1px dashed var(--border); }
+.hist-items > div:last-child { border-bottom: none; }
+.hist-total { margin-top: 10px; padding: 10px 12px; border-radius: 12px; background: var(--card-2); font-size: 14px; }
+.hist-total > div { display: flex; justify-content: space-between; padding: 3px 0; }
+.hist-total > div:first-child b { font-size: 16px; }
+.party-hist { margin: 0 0 14px; padding: 0; border-top: none; }
+.hist-list { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+.hist-card { padding: 10px 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--card); cursor: pointer; }
+.hist-card .hc-head { font-size: 14px; margin-bottom: 4px; }
+.hist-card .hist-items .hi-name { flex: 1; min-width: 0; }
+.hist-card .hist-items .hi-sum { white-space: nowrap; color: var(--muted); }
+.hist-card .hc-foot { display: flex; justify-content: space-between; align-items: center; margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--border); font-size: 14px; }
+.hist-card .hc-foot b { font-size: 16px; }
+.pf-title { display: flex; gap: 6px; align-items: center; margin: 16px 0 8px; padding-top: 12px; border-top: 1px solid var(--border); }
+@media (max-width: 700px) { .hist-card .hist-items > div { flex-wrap: wrap; } .hist-card .hist-items .hi-sum { margin-left: auto; } }

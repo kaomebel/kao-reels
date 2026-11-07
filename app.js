@@ -2620,15 +2620,27 @@ function partyHistoryHtml(c) {
     const total = multiSup(d) ? docPartyShare(d, c.id) : docTotal(d);
     const paid = t.pay === 'in' && !multiSup(d) ? docPaid(d) : null;
     const rest = paid === null ? 0 : Math.max(0, total - paid);
-    return `<tr class="click" data-act="openDoc" data-id="${d.id}">
-      <td class="small">${fmtDate(d.date)}<div class="muted small">${esc(d.no)}</div></td>
-      <td><b>${esc(t.one)}</b>${d.status && t.statuses ? ` <span class="muted small">· ${esc(t.statuses[d.status] || '')}</span>` : ''}
-        <div class="small">${items.map((it) => `${esc(itemName(it))} ×${fmt(it.qty)}`).join(', ')}</div></td>
-      <td class="num"><b>${money_ ? money(total) : ''}</b>${!money_ || paid === null ? '' : d.type === 'order' ? (paid ? `<div class="muted small">zaklad ${money(paid)}</div>` : '') : rest > 0.5 ? `<div class="debt small">qolgan ${money(rest)}</div>` : total ? '<div class="ok small">to\'langan</div>' : ''}</td></tr>`;
+    const state = !money_ || paid === null ? '' : d.type === 'order' ? (paid ? `<span class="muted">zaklad ${money(paid)}</span>` : '') : rest > 0.5 ? `<span class="debt">qolgan ${money(rest)}</span>` : total ? '<span class="ok">to\'langan</span>' : '';
+    return `<div class="hist-card click" data-act="openDoc" data-id="${d.id}">
+      <div class="hc-head"><b>${fmtDate(d.date)}</b> <span class="muted">${esc(d.no)}</span> · ${esc(t.one)}${d.status && t.statuses ? ` <span class="muted small">(${esc(t.statuses[d.status] || '')})</span>` : ''}</div>
+      ${money_
+        ? `<div class="hist-items">${items.map((it) => `<div><span class="hi-name">${esc(itemName(it))}</span><span class="hi-sum">${fmt(it.qty)} × ${fmt(it.price)} = <b>${fmt(it.qty * it.price)}</b></span></div>`).join('')}${d.discount ? `<div class="muted"><span>Chegirma</span><span class="hi-sum">−${fmt(d.discount)}</span></div>` : ''}</div>
+          <div class="hc-foot"><span>${state}</span><b>${money(total)}</b></div>`
+        : `<div class="small">${items.map((it) => `${esc(itemName(it))} ×${fmt(it.qty)}`).join(', ')}</div>`}
+    </div>`;
   }).join('');
+  // Jami: xaridlar (sotuvlar − qaytarishlar), to'langan, qolgan
+  const returns = list.filter((d) => d.type === 'salesReturn').reduce((s, d) => s + docTotal(d), 0);
+  const paidAll = sales.reduce((s, d) => s + docPaid(d), 0);
+  const foot = money_ && c.kind !== 'supplier' && sales.length
+    ? `<div class="hist-total"><div><span>Jami xaridlar (${sales.length} ta)</span><b>${money(sum)}</b></div>
+        ${returns ? `<div><span>Qaytarilgan</span><b>−${money(returns)}</b></div>` : ''}
+        <div><span>To'langan</span><b class="ok">${money(paidAll)}</b></div>
+        <div><span>${bal >= 0 ? 'Qarzi' : 'Haqdorligi'}</span><b class="${bal > 0.5 ? 'debt' : 'ok'}">${money(Math.abs(bal))}</b></div></div>`
+    : '';
   return `<div class="party-hist"><h4>${icon('receipt')}${c.kind === 'supplier' ? 'Kirimlar tarixi' : 'Xaridlar tarixi'}</h4>
-    ${c.kind !== 'supplier' ? `<p class="small">Jami <b>${sales.length} ta xarid</b>${money_ ? ` · <b>${money(sum)}</b>` : ''}${sales[0] ? ` · oxirgisi ${fmtDate(sales[0].date)}` : ''}${money_ && bal > 0.5 ? ` · <span class="debt">qarzi ${money(bal)}</span>` : money_ && bal < -0.5 ? ` · <span class="ok">haqdorligi ${money(-bal)}</span>` : ''}</p>` : ''}
-    <div class="table-wrap"><table class="hist-table"><tbody>${rows}</tbody></table></div></div>`;
+    ${c.kind !== 'supplier' && !foot ? `<p class="small">Jami <b>${sales.length} ta xarid</b>${money_ ? ` · <b>${money(sum)}</b>` : ''}${sales[0] ? ` · oxirgisi ${fmtDate(sales[0].date)}` : ''}${money_ && bal > 0.5 ? ` · <span class="debt">qarzi ${money(bal)}</span>` : money_ && bal < -0.5 ? ` · <span class="ok">haqdorligi ${money(-bal)}</span>` : ''}</p>` : ''}
+    ${foot}<div class="hist-list">${rows}</div></div>`;
 }
 
 function editParty(id) {
@@ -2639,8 +2651,8 @@ function editParty(id) {
     return;
   }
   openModal({
-    title: 'Kontragent',
-    body: partyForm(c) + partyHistoryHtml(c),
+    title: c.name || 'Kontragent',
+    body: partyHistoryHtml(c) + `<h4 class="pf-title">${icon('edit')}Ma'lumotlari</h4>` + partyForm(c),
     onOpen: bindPartyForm,
     extra: [{ label: "O'zaro hisob-kitob", onClick: () => partyStatement(id) }],
     onSubmit: (d) => {
