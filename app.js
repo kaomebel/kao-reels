@@ -1342,7 +1342,7 @@ function productForm(p = {}, readonly = false) {
       ${readonly ? '' : `<input type="file" id="photoInput" accept="image/*" multiple hidden>
       <input type="file" id="photoReplace" accept="image/*" hidden>
       <div class="muted small">${MAX_PHOTOS} tagacha. Birinchisi — asosiy (Telegram va ro'yxatda). Rasm ustiga bosilsa — to'liq ekranda ochiladi.</div>
-      ${backend?.kind === 'supabase' ? `<button type="button" class="small ai-fill" id="aiFillBtn">✨ Rasmdan to'ldirish (AI)</button>` : ''}`}
+      <button type="button" class="small ai-fill" id="aiFillBtn">✨ Rasmdan to'ldirish (AI)</button>`}
     </div>
     <div class="form-grid">
       ${field('Mahsulot *', 'name', p.name, 'required', 'full')}
@@ -1580,6 +1580,150 @@ async function imageToJpegBase64(blob, max = 1024) {
   return c.toDataURL('image/jpeg', 0.85).split(',')[1];
 }
 
+// ---------- Bepul sun'iy intellekt: telefonning o'zida (CLIP modeli) ----------
+// Kalit va to'lov kerak emas: model birinchi marta yuklab olinadi (~150 MB, keyin telefonda saqlanadi).
+// Mebel turi, material — rasmni inglizcha tavsiflar bilan solishtirib; rang — rasm piksellaridan.
+const CLIP_LIB = 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.5.2';
+const CLIP_MODEL = 'Xenova/clip-vit-base-patch32';
+// O'zbekcha nomlar → modelga tushunarli inglizcha tavsif (ro'yxatda yo'q nom o'zi ishlatiladi)
+const EN_WORDS = {
+  "yotoqxona to'plami": 'bedroom furniture set with bed and wardrobe', karavot: 'bed', 'kiyim shkafi': 'clothes wardrobe', tumbochka: 'bedside nightstand', komod: 'chest of drawers', trelyaj: 'dressing table with mirror',
+  "mehmonxona to'plami": 'living room furniture set', 'tv tumba': 'tv stand cabinet', 'jurnal stoli': 'coffee table', vitrina: 'glass display cabinet', 'kitob javoni': 'bookshelf',
+  'oshxona garnituri': 'kitchen cabinets set', 'oshxona stoli': 'kitchen table', 'oshxona stuli': 'kitchen chair', 'oshxona burchak divani': 'kitchen corner bench sofa', 'bar stuli': 'bar stool',
+  "to'g'ri divan": 'straight sofa', 'burchak divan': 'corner sofa', 'divan-karavot': 'sofa bed', kreslo: 'armchair', 'kreslo-karavot': 'armchair bed', puf: 'pouf ottoman',
+  'ovqat stoli': 'dining table', stul: 'chair', "stol-stul to'plami": 'dining table with chairs set', 'yozuv stoli': 'writing desk', xontaxta: 'low wooden tea table',
+  'shkaf-kupe': 'sliding door wardrobe', 'kitob shkafi': 'bookcase cabinet', 'dahliz shkafi': 'hallway wardrobe', 'burchak shkaf': 'corner wardrobe',
+  'bolalar karavoti': 'kids bed', 'ikki qavatli karavot': 'bunk bed', 'bolalar shkafi': 'kids wardrobe', 'bolalar yozuv stoli': 'kids study desk', beshik: 'baby crib', "bolalar to'plami": 'kids room furniture set',
+  'rahbar stoli': 'executive office desk', 'xodim stoli': 'office desk', 'kompyuter stoli': 'computer desk', 'majlislar stoli': 'conference table', 'telefon tumba': 'small side cabinet',
+  'ofis kreslo': 'office swivel chair', 'rahbar kreslosi': 'executive leather office chair', 'hujjat shkafi': 'office filing cabinet', seyf: 'metal safe', resepshn: 'reception desk',
+  'ortopedik matras': 'mattress', 'prujinali matras': 'spring mattress', 'prujinasiz matras': 'foam mattress', 'bolalar matrasi': 'kids mattress', topper: 'mattress topper',
+  ldsp: 'laminated wooden board', laminat: 'laminated wooden board', mdf: 'painted smooth mdf', dsp: 'chipboard', "massiv (yog'och)": 'solid wood', faner: 'plywood',
+  metall: 'metal', temir: 'metal', shisha: 'glass', oyna: 'mirror', velyur: 'velvet fabric', ekokoja: 'faux leather', charm: 'leather', 'eko-charm': 'faux leather', 'tabiiy charm': 'genuine leather',
+  mato: 'fabric upholstery', rattan: 'rattan wicker', plastik: 'plastic', plastmas: 'plastic', akril: 'glossy acrylic', mago: 'soft velvet fabric', meshkovina: 'burlap linen fabric',
+  "setka (to'r)": 'mesh net fabric', 'aralash (charm + setka)': 'leather and mesh', neylon: 'nylon', xrom: 'chrome metal', alyuminiy: 'aluminium', "yog'och": 'wood', "metall (bo'yalgan)": 'painted metal',
+};
+const enOf = (v) => EN_WORDS[nameKey(v)] || String(v || '');
+
+// Rang nomi → taxminiy RGB (ro'yxatdagi ranglardan eng yaqini tanlanadi)
+const COLOR_RGB = {
+  qora: [30, 30, 32], oq: [240, 240, 238], 'oq gladkiy': [244, 243, 240], kulrang: [140, 140, 142], "to'q kulrang": [80, 80, 84], antratsit: [55, 57, 60],
+  bej: [214, 196, 168], kapuchino: [150, 115, 90], jigarrang: [110, 70, 45], konyak: [150, 85, 40], yashil: [70, 120, 70], zaytun: [120, 120, 70],
+  "ko'k": [60, 100, 170], "to'q ko'k": [30, 45, 90], qizil: [180, 40, 40], sariq: [220, 190, 60], pushti: [225, 160, 175], "to'q sariq": [225, 140, 50], 'qum rang': [200, 175, 135],
+  'dub beliy': [214, 204, 186], 'belaya korona': [235, 232, 225], 'dub sonoma': [196, 160, 112], 'dub votan': [150, 115, 80], 'dub kraft': [190, 140, 90], venge: [62, 44, 34], "yong'oq": [125, 85, 55],
+  oltin: [200, 160, 70], tilla: [200, 160, 70], nikel: [185, 185, 188], xrom: [195, 197, 200], bronza: [140, 100, 60], shampan: [222, 205, 165], kumush: [190, 190, 195],
+  tabiiy: [190, 150, 105], 'lak bilan': [170, 120, 75], shaffof: [220, 230, 232], matoviy: [210, 215, 215],
+};
+function rgbOfColor(name) {
+  const k = nameKey(name);
+  if (COLOR_RGB[k]) return COLOR_RGB[k];
+  const hit = Object.keys(COLOR_RGB).sort((a, b) => b.length - a.length).find((x) => k.includes(x));
+  return hit ? COLOR_RGB[hit] : null;
+}
+
+// Rasmning asosiy rangi: markaziy qismi, oq/juda och fon chiqarib tashlanadi
+async function dominantRgb(blob) {
+  const bm = await createImageBitmap(blob);
+  const c = document.createElement('canvas');
+  c.width = 64; c.height = 64;
+  const ctx = c.getContext('2d', { willReadFrequently: true });
+  ctx.drawImage(bm, 0, 0, 64, 64);
+  const px = ctx.getImageData(8, 8, 48, 48).data;
+  const buckets = new Map();
+  for (let i = 0; i < px.length; i += 4) {
+    const [r, g, b] = [px[i], px[i + 1], px[i + 2]];
+    if (r > 235 && g > 235 && b > 235) continue; // oq fon
+    const key = `${r >> 5},${g >> 5},${b >> 5}`;
+    const e = buckets.get(key) || { n: 0, r: 0, g: 0, b: 0 };
+    e.n++; e.r += r; e.g += g; e.b += b;
+    buckets.set(key, e);
+  }
+  const top = [...buckets.values()].sort((a, b) => b.n - a.n)[0];
+  return top ? [top.r / top.n, top.g / top.n, top.b / top.n] : [240, 240, 240];
+}
+function nearestColor(rgb, names) {
+  let best = '';
+  let bestD = Infinity;
+  names.forEach((n) => {
+    const c = rgbOfColor(n);
+    if (!c) return;
+    const d = (c[0] - rgb[0]) ** 2 * 0.3 + (c[1] - rgb[1]) ** 2 * 0.59 + (c[2] - rgb[2]) ** 2 * 0.11;
+    if (d < bestD) { bestD = d; best = n; }
+  });
+  return best;
+}
+
+let clipPipe = null;
+async function getClip(onProgress) {
+  if (window.__clipMock) return window.__clipMock; // sinov uchun
+  if (!clipPipe) {
+    clipPipe = (async () => {
+      const T = await import(CLIP_LIB);
+      T.env.allowLocalModels = false;
+      return T.pipeline('zero-shot-image-classification', CLIP_MODEL, { progress_callback: onProgress });
+    })();
+  }
+  try { return await clipPipe; } catch (e) { clipPipe = null; throw e; }
+}
+
+// Rasmni telefonning o'zida tahlil qiladi — javobi server tavsiyasi bilan bir xil ko'rinishda
+async function localSuggest(blob, onStatus) {
+  const loaded = {};
+  const clf = await getClip((p) => {
+    if (p.status === 'progress' && p.total) {
+      loaded[p.file] = [p.loaded, p.total];
+      const sum = Object.values(loaded).reduce((a, [l, t]) => [a[0] + l, a[1] + t], [0, 0]);
+      onStatus?.(`Bepul model yuklanmoqda (bir martalik): ${Math.round((sum[0] / sum[1]) * 100)}% · ${Math.round(sum[1] / 1048576)} MB`);
+    }
+  });
+  onStatus?.('Rasm tahlil qilinmoqda…');
+  const url = URL.createObjectURL(blob);
+  try {
+    const ask = async (options) => {
+      const labels = options.map((o) => o.en);
+      const res = await clf(url, labels, { hypothesis_template: 'a photo of a {}' });
+      const top = res[0];
+      return options.find((o) => o.en === top.label);
+    };
+    // 1) Tur (kategoriya bilan birga)
+    const cats = categoriesAll().filter((c) => c !== KIT_CATEGORY);
+    const pairs = [];
+    cats.forEach((c) => {
+      const ts = typesOf(c);
+      if (ts.length) ts.forEach((t) => pairs.push({ c, t, en: enOf(t) }));
+      else pairs.push({ c, t: '', en: enOf(c) });
+    });
+    const uniq = new Map();
+    pairs.forEach((x) => { if (!uniq.has(x.en)) uniq.set(x.en, x); });
+    const best = await ask([...uniq.values()]);
+    const cat = best?.c || '';
+    const type = best?.t || '';
+    // 2) Material: turga xos maydonlar (kreslo, stul) yoki umumiy materiallar
+    const set = featureSetFor(cat, type);
+    const attrs = [];
+    let materials = [];
+    if (set) {
+      for (const f of set.fields || []) {
+        if (!(f.options || []).length) continue;
+        const pick = await ask(f.options.map((o) => ({ v: o, en: `${enOf(o)} ${enOf(type) || 'furniture'}` })));
+        if (pick) attrs.push({ field: f.name, value: pick.v });
+      }
+    } else {
+      const mats = usedMaterials(cat, type).length ? usedMaterials(cat, type) : allMaterials();
+      const pick = await ask(mats.map((m) => ({ v: m, en: `${enOf(type) || 'furniture'} made of ${enOf(m)}` })));
+      if (pick) materials = [pick.v];
+    }
+    // 3) Rang: shu material/turning ranglaridan eng yaqini (bo'lmasa umumiy nomlardan)
+    const attrObj = Object.fromEntries(attrs.map((a) => [a.field, a.value]));
+    const candidates = uniqNames([...colorsFor(set, attrObj, cat, materials.join(', ')), ...db.colors]);
+    const rgb = await dominantRgb(blob);
+    const color = nearestColor(rgb, candidates) || nearestColor(rgb, Object.keys(COLOR_RGB).map(capFirst));
+    const name = [type || cat, ...attrs.slice(0, 1).map((a) => a.value), ...materials, color].filter(Boolean).join(', ');
+    return { name: capFirst(name), category: cat, type, materials, colors: color ? [color] : [], attrs, description: '', local: true };
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
 function aiBox(html, cls = '') {
   let box = $('#aiBox');
   if (!box) {
@@ -1592,8 +1736,9 @@ function aiBox(html, cls = '') {
   box.innerHTML = html;
 }
 
+let aiServerOff = false;
 async function aiSuggestFromPhoto(blob) {
-  if (backend.kind !== 'supabase' || !$('#catSel')) return;
+  if (!$('#catSel')) return;
   const form = $('#modalBody .product-form');
   aiBox(`<span class="ai-spin"></span> ✨ Sun'iy intellekt rasmni ko'rib, kartochkani to'ldirmoqda…`, 'busy');
   const options = {
@@ -1605,7 +1750,16 @@ async function aiSuggestFromPhoto(blob) {
   };
   let s;
   try {
-    s = await backend.aiPhoto(await imageToJpegBase64(blob), options);
+    // Pullik (aniqroq) server tahlili — Anthropic kaliti qo'yilgan bo'lsa; aks holda bepul, telefonning o'zida
+    if (backend.kind === 'supabase' && !aiServerOff) {
+      try {
+        s = await backend.aiPhoto(await imageToJpegBase64(blob), options);
+      } catch (e) {
+        if (!/sozlanmagan|ANTHROPIC/i.test(e.message)) throw e;
+        aiServerOff = true; // kalit yo'q — bu safar ham, keyingi safar ham bepul modelga
+      }
+    }
+    if (!s) s = await localSuggest(blob, (t) => { if ($('#modalBody .product-form') === form) aiBox(`<span class="ai-spin"></span> ✨ ${esc(t)}`, 'busy'); });
   } catch (e) {
     if ($('#modalBody .product-form') === form) aiBox(`✨ Tavsiya olinmadi: ${esc(e.message)}`, 'err');
     return;
@@ -1656,7 +1810,7 @@ function applyAiSuggestion(s) {
   const desc = $('#modalBody [name=note]');
   if (desc && !desc.value.trim() && s.description) desc.value = s.description;
   const parts = [[curCat, curType].filter(Boolean).join(' › '), ...mats, ...Object.values(attrs), ...colors].filter(Boolean);
-  aiBox(`✨ <b>Sun'iy intellekt tavsiyasi:</b> ${esc(parts.join(' · ') || "aniqlab bo'lmadi")}. <span class="muted">Noto'g'ri bo'lsa — o'zgartiring.</span>`, 'done');
+  aiBox(`✨ <b>Sun'iy intellekt tavsiyasi${s.local ? ' (bepul, telefonda)' : ''}:</b> ${esc(parts.join(' · ') || "aniqlab bo'lmadi")}. <span class="muted">Noto'g'ri bo'lsa — o'zgartiring.</span>`, 'done');
   if (modalState) modalState.dirty = true;
 }
 
