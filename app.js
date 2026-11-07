@@ -833,6 +833,89 @@ function cashBalances() {
   return b;
 }
 
+// ---------- Klaviatura: yoziladigan maydon joyida qotib tursin ----------
+// Raqam/narx maydoni bosilganda klaviatura ochiladi, maydon esa ekranda turgan joyida qoladi
+// (klaviatura uni yopib qo'ysagina — klaviatura ustiga, kerakli darajada ko'tariladi).
+// Qo'l bilan surilsa — klaviatura o'zi yopiladi.
+const isTypingField = (el) => !!el && (el.isContentEditable || el.tagName === 'TEXTAREA'
+  || (el.tagName === 'INPUT' && !/^(checkbox|radio|button|submit|reset|file|range|color|image|hidden)$/.test(el.type)));
+const isNumberField = (el) => el?.tagName === 'INPUT' && (el.type === 'number' || /^(numeric|decimal|tel)$/.test(el.inputMode || el.getAttribute('inputmode') || ''));
+(function keyboardHold() {
+  const vv = window.visualViewport;
+  let hold = null; // { el, top, until }
+  let tStart = null;
+  const scrollerOf = (el) => {
+    for (let a = el.parentElement; a && a !== document.body; a = a.parentElement) {
+      const oy = getComputedStyle(a).overflowY;
+      if ((oy === 'auto' || oy === 'scroll') && a.scrollHeight > a.clientHeight + 2) return a;
+    }
+    return null; // sahifaning o'zi
+  };
+  const vTop = () => (vv ? vv.offsetTop : 0);
+  const vH = () => (vv ? vv.height : window.innerHeight);
+  const fix = () => {
+    if (!hold || document.activeElement !== hold.el || Date.now() > hold.until) return;
+    const el = hold.el;
+    const r = el.getBoundingClientRect();
+    if (!r.height) return;
+    const sc = scrollerOf(el);
+    const cur = r.top - vTop(); // ko'rinib turgan qismga nisbatan
+    let lo; let hi;
+    if (sc) {
+      const b = sc.getBoundingClientRect();
+      lo = b.top - vTop() + 8;
+      hi = Math.min(b.bottom - vTop(), vH()) - 12;
+    } else {
+      lo = ($('#sidebar')?.getBoundingClientRect().bottom || 0) + 8;
+      hi = vH() - 12;
+    }
+    const want = Math.max(lo, Math.min(hold.top, hi - r.height));
+    const d = Math.round(cur - want);
+    if (Math.abs(d) < 3) return;
+    if (sc) sc.scrollTop += d;
+    else window.scrollBy(0, d);
+  };
+  const start = (el) => {
+    if (!isTouch() || !isTypingField(el) || el.classList.contains('it-search') || el.closest('.sel-sheet, .lightbox, .scanner')) { hold = null; return; }
+    hold = { el, top: el.getBoundingClientRect().top - vTop(), until: Date.now() + 1500 };
+    [0, 60, 150, 300, 500, 800, 1200].forEach((t) => setTimeout(fix, t));
+  };
+  // Raqam maydoni: brauzerning o'zi sahifani «sakratmasin» — fokus surishsiz beriladi
+  document.addEventListener('touchstart', (e) => {
+    const t = e.touches[0];
+    tStart = e.touches.length === 1 ? { x: t.clientX, y: t.clientY, el: e.target, moved: false } : null;
+  }, { passive: true, capture: true });
+  document.addEventListener('touchend', (e) => {
+    const s = tStart;
+    if (!s || s.moved) return;
+    const el = e.target;
+    if (el !== s.el || !isNumberField(el) || document.activeElement === el || el.disabled || el.readOnly || !isTouch()) return;
+    e.preventDefault(); // klaviatura baribir ochiladi (fokus barmoq bosilgan paytda beriladi)
+    hold = { el, top: el.getBoundingClientRect().top - vTop(), until: Date.now() + 1500 };
+    el.focus({ preventScroll: true });
+    try { if (el.type !== 'number') el.setSelectionRange(el.value.length, el.value.length); } catch (err) { /* */ }
+  }, { passive: false, capture: true });
+  document.addEventListener('focusin', (e) => {
+    if (hold && hold.el === e.target) { [0, 60, 150, 300, 500, 800, 1200].forEach((t) => setTimeout(fix, t)); return; }
+    start(e.target);
+  });
+  document.addEventListener('focusout', () => { setTimeout(() => { if (hold && document.activeElement !== hold.el) hold = null; }, 0); });
+  vv?.addEventListener('resize', fix);
+  vv?.addEventListener('scroll', fix);
+  // Qo'l bilan surildi — klaviatura yopiladi (ro'yxat ichida surish bundan mustasno: u tanlash uchun)
+  document.addEventListener('touchmove', (e) => {
+    if (!tStart || tStart.moved || e.touches.length !== 1) return;
+    const t = e.touches[0];
+    if (Math.abs(t.clientY - tStart.y) < 14 && Math.abs(t.clientX - tStart.x) < 14) return;
+    tStart.moved = true;
+    const a = document.activeElement;
+    if (!isTypingField(a) || !isTouch()) return;
+    if (tStart.el === a || tStart.el.closest?.('.pick-panel, .party-suggest, .ss-list, .ie-stage, .lb-stage, #ldWrap')) return;
+    hold = null;
+    a.blur();
+  }, { passive: true, capture: true });
+})();
+
 let ctx = {};
 function refreshCtx() {
   ctx = { stock: computeStock(), reserve: computeReserve(), cost: computeCost() };
