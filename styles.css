@@ -1520,3 +1520,11 @@ html.modal-open, html.modal-open body { overflow: hidden; overscroll-behavior: n
 .hist-card .hc-foot b { font-size: 16px; }
 .pf-title { display: flex; gap: 6px; align-items: center; margin: 16px 0 8px; padding-top: 12px; border-top: 1px solid var(--border); }
 @media (max-width: 700px) { .hist-card .hist-items > div { flex-wrap: wrap; } .hist-card .hist-items .hi-sum { margin-left: auto; } }
+
+/* Tartiblashda ko'chirilgan qator bir lahza ajralib turadi */
+.lo-row.lo-moved { animation: loMoved 1s ease-out; border-radius: 10px; }
+@keyframes loMoved { from { background: var(--accent-soft); } to { background: transparent; } }
+
+/* Ichki ro'yxat oxiriga yetganda surish orqadagi sahifaga o'tib ketmasin */
+.party-suggest, .pick-panel, .ss-list, #modalBody, #subBody, textarea { overscroll-behavior: contain; }
+.pick-panel, .ss-list, .party-suggest { -webkit-overflow-scrolling: touch; }

@@ -4381,10 +4381,17 @@ function moveLayout({ kind, sec, i, d }) {
   const a = +i;
   const b = a + +d;
   if (b < 0 || b >= ids.length) return;
+  const btnSel = (k) => `[data-act=loMove][data-kind="${kind}"][data-sec="${sec}"][data-i="${k}"]`;
+  const topOf = (k) => document.querySelector(btnSel(k))?.closest('.lo-row')?.getBoundingClientRect().top;
+  const before = topOf(a);
   [ids[a], ids[b]] = [ids[b], ids[a]];
   if (kind === 'sec') o.sections = ids;
   else o.tabs = Object.assign({}, o.tabs, { [sec]: ids });
   save();
+  // Ko'chirilgan qator barmoq ostida qolsin (sahifa u bilan birga suriladi) va bir lahza belgilanadi
+  const row = document.querySelector(btnSel(b))?.closest('.lo-row');
+  if (row && before != null) window.scrollBy(0, row.getBoundingClientRect().top - before);
+  row?.classList.add('lo-moved');
 }
 
 // ---------- Xarajatlar ----------
@@ -8337,6 +8344,56 @@ ACTIONS.reloadApp = async () => { await checkForUpdate(); location.reload(); };
 setTimeout(compareWithSite, 4000);
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') compareWithSite(); });
 
+// ---------- Barmoq bilan surish: barmoq qaysi ro'yxatda bo'lsa, faqat o'sha surilsin ----------
+// Ro'yxat oxiriga yetganda yoki surilmaydigan joyda «surish» orqadagi oynaga / butun ilovaga o'tib ketmasin.
+// Yonga surish (kategoriya tugmalari, keng jadvallar), rasm ko'rish/tahrirlash va 2 barmoq — o'zgarishsiz.
+(function touchScrollGuard() {
+  const PANELS = '.pick-panel, .ss-list, .party-suggest';
+  const OWN = '.ie-stage, .lb-stage, #ldWrap, input[type=range]';
+  let st = null;
+  const scrollsY = (el) => {
+    if (el.scrollHeight - el.clientHeight <= 2) return false;
+    const oy = getComputedStyle(el).overflowY;
+    return oy === 'auto' || oy === 'scroll';
+  };
+  const canGo = (el, down) => (down ? el.scrollTop + el.clientHeight < el.scrollHeight - 1 : el.scrollTop > 0);
+  document.addEventListener('touchstart', (e) => {
+    st = null;
+    if (e.touches.length !== 1 || !e.target.closest || e.target.closest(OWN)) return;
+    const panel = e.target.closest(PANELS);
+    const dlg = e.target.closest('dialog[open]');
+    const boundary = panel || dlg;
+    if (!boundary) return; // oddiy sahifa — brauzerning o'zi suradi
+    const chain = [];
+    for (let el = e.target; el && el !== document.body; el = el.parentElement) {
+      if (el.nodeType === 1 && scrollsY(el)) chain.push(el);
+      if (el === boundary) break;
+    }
+    const t = e.touches[0];
+    st = { x: t.clientX, y: t.clientY, lx: t.clientX, ly: t.clientY, chain, axis: null };
+  }, { passive: true });
+  document.addEventListener('touchmove', (e) => {
+    if (!st || e.touches.length !== 1) { st = null; return; }
+    const t = e.touches[0];
+    if (!st.axis) {
+      const ax = Math.abs(t.clientX - st.x);
+      const ay = Math.abs(t.clientY - st.y);
+      if (ax < 4 && ay < 4) return;
+      st.axis = ax > ay ? 'x' : 'y';
+    }
+    if (st.axis === 'x') return;
+    const dy = t.clientY - st.ly;
+    st.lx = t.clientX; st.ly = t.clientY;
+    if (!dy) return;
+    const down = dy < 0; // barmoq tepaga — ro'yxat pastga
+    if (st.chain.some((el) => canGo(el, down))) return; // surila oladigan ro'yxat bor — o'zi suriladi
+    if (e.cancelable) e.preventDefault(); // surilishga joy yo'q — orqadagi hech narsa qimirlamasin
+  }, { passive: false });
+  const end = () => { st = null; };
+  document.addEventListener('touchend', end, { passive: true });
+  document.addEventListener('touchcancel', end, { passive: true });
+})();
+
 // Ekranni pastga tortib yangilash (o'rnatilgan ilovada brauzerning o'z "tortish"i yo'q)
 (function pullToRefresh() {
   const el = $('#ptr');
@@ -8352,8 +8409,8 @@ document.addEventListener('visibilitychange', () => { if (document.visibilitySta
     el.style.transform = '';
   };
   document.addEventListener('touchstart', (e) => {
-    if (window.scrollY > 0 || $('#modal').open || e.touches.length > 1) return;
-    if (e.target.closest('input, textarea, select, .table-wrap, .party-suggest, .subnav, #sections')) return;
+    if (window.scrollY > 0 || document.querySelector('dialog[open]') || e.touches.length > 1) return;
+    if (e.target.closest('input, textarea, select, .table-wrap, .party-suggest, .pick-panel, .subnav, #sections, .cat-bar')) return;
     startY = e.touches[0].clientY;
   }, { passive: true });
   document.addEventListener('touchmove', (e) => {
