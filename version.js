@@ -1,0 +1,1 @@
+window.BT_VERSION = "2026.11.07-0409-6bc259c";
