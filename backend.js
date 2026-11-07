@@ -401,6 +401,15 @@ function friendlyError(error) {
   return m;
 }
 
+// Telefon xotirasi to'lganda: keraksiz yozuvlar (server rejimida eski «telefondagi baza», qoldiq nusxasi) o'chiriladi
+function freeLocalStorage() {
+  try {
+    Object.keys(localStorage).forEach((k) => {
+      if (k === LOCAL_DATA_KEY || k.startsWith('bt-stock-')) localStorage.removeItem(k);
+    });
+  } catch (e) { /* */ }
+}
+
 class SupabaseBackend {
   constructor(cfg) {
     this.kind = 'supabase';
@@ -408,7 +417,24 @@ class SupabaseBackend {
     this.label = 'Supabase server: ' + cfg.url.replace(/^https?:\/\//, '');
     this.canSetOthersPassword = false;
     this.loginLabel = 'Login';
-    this.sb = window.supabase.createClient(cfg.url, cfg.key);
+    // Kirish sessiyasi xotirada ham saqlanadi: telefon xotirasi (localStorage) to'lib qolsa yoki yozib
+    // bo'lmasa ham sessiya yo'qolmaydi — aks holda server so'rovlarni «kirilmagan» deb rad etardi
+    const mem = new Map();
+    const storage = {
+      getItem: (k) => { if (mem.has(k)) return mem.get(k); try { return localStorage.getItem(k); } catch (e) { return null; } },
+      setItem: (k, v) => {
+        mem.set(k, v);
+        try { localStorage.setItem(k, v); } catch (e) {
+          console.warn('Sessiya xotiraga yozilmadi:', e);
+          freeLocalStorage();
+          try { localStorage.setItem(k, v); } catch (x) { /* xotirada qoladi */ }
+        }
+      },
+      removeItem: (k) => { mem.delete(k); try { localStorage.removeItem(k); } catch (e) { /* */ } },
+    };
+    this.sb = window.supabase.createClient(cfg.url, cfg.key, { auth: { storage } });
+    // Xotira to'lib qolganmi — kichik sinov yozuvi; yozilmasa keraksizlari tozalanadi
+    try { localStorage.setItem('bt-probe', 'x'.repeat(200000)); localStorage.removeItem('bt-probe'); } catch (e) { freeLocalStorage(); }
     this.snap = {};
     this.profile = null;
     this.channel = null;
