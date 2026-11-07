@@ -1499,3 +1499,8 @@ html.modal-open, html.modal-open body { overflow: hidden; overscroll-behavior: n
 .ai-fill { margin-top: 8px; width: 100%; }
 .copy-note { display: flex; gap: 8px; align-items: flex-start; margin: 0 0 12px; padding: 10px 12px; border-radius: 12px; background: var(--accent-soft); font-size: 14px; }
 .copy-note svg { flex: none; width: 18px; height: 18px; margin-top: 2px; }
+.party-hist { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border); }
+.party-hist h4 { display: flex; gap: 6px; align-items: center; margin: 0 0 6px; }
+.hist-table { width: 100%; }
+.hist-table td { padding: 8px 6px; vertical-align: top; border-bottom: 1px solid var(--border); }
+.hist-table td.small { white-space: nowrap; }

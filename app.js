@@ -910,7 +910,7 @@ const isTouch = () => window.matchMedia('(pointer: coarse), (max-width: 700px)')
 // Telefonda jadval qatorlari kartochkaga aylanadi: har bir katakka ustun nomi yoziladi (CSS ko'rsatadi)
 function cardTables(root) {
   $$('table', root).forEach((table) => {
-    if (['items-table', 'kit-table', 'exp-cats', 'cash-table'].some((c) => table.classList.contains(c))) return;
+    if (['items-table', 'kit-table', 'exp-cats', 'cash-table', 'hist-table'].some((c) => table.classList.contains(c))) return;
     const heads = $$('thead th', table).map((th) => th.textContent.trim());
     table.classList.add('m-cards');
     $$('tbody tr, tfoot tr', table).forEach((tr) => {
@@ -2602,16 +2602,45 @@ function maskPhone(ph) {
   return d ? `+998 •• ••• •• ${d.slice(-2)}` : '';
 }
 
+// Kontragentning xaridlar (yoki ta'minot) tarixi: qachon, nima, qancha, to'langan, qarz
+function partyDocs(id) {
+  return db.docs.filter((d) => DOC_TYPES[d.type]?.party && docHasParty(d, id))
+    .sort((a, b) => (b.date + (b.created || '')).localeCompare(a.date + (a.created || '')));
+}
+function partyHistoryHtml(c) {
+  const list = partyDocs(c.id);
+  if (!list.length) return `<div class="party-hist"><h4>${icon('receipt')}${c.kind === 'supplier' ? 'Kirimlar tarixi' : 'Xaridlar tarixi'}</h4><p class="muted small">Hali hujjat yo'q.</p></div>`;
+  const sales = list.filter((d) => d.type === 'sale');
+  const sum = sales.reduce((s, d) => s + docTotal(d), 0);
+  const money_ = can('money') || seesParties();
+  const bal = partyBalance(c.id);
+  const rows = list.map((d) => {
+    const t = DOC_TYPES[d.type];
+    const items = multiSup(d) ? d.items.filter((it) => it.supplierId === c.id) : d.items;
+    const total = multiSup(d) ? docPartyShare(d, c.id) : docTotal(d);
+    const paid = t.pay === 'in' && !multiSup(d) ? docPaid(d) : null;
+    const rest = paid === null ? 0 : Math.max(0, total - paid);
+    return `<tr class="click" data-act="openDoc" data-id="${d.id}">
+      <td class="small">${fmtDate(d.date)}<div class="muted small">${esc(d.no)}</div></td>
+      <td><b>${esc(t.one)}</b>${d.status && t.statuses ? ` <span class="muted small">· ${esc(t.statuses[d.status] || '')}</span>` : ''}
+        <div class="small">${items.map((it) => `${esc(itemName(it))} ×${fmt(it.qty)}`).join(', ')}</div></td>
+      <td class="num"><b>${money_ ? money(total) : ''}</b>${!money_ || paid === null ? '' : d.type === 'order' ? (paid ? `<div class="muted small">zaklad ${money(paid)}</div>` : '') : rest > 0.5 ? `<div class="debt small">qolgan ${money(rest)}</div>` : total ? '<div class="ok small">to\'langan</div>' : ''}</td></tr>`;
+  }).join('');
+  return `<div class="party-hist"><h4>${icon('receipt')}${c.kind === 'supplier' ? 'Kirimlar tarixi' : 'Xaridlar tarixi'}</h4>
+    ${c.kind !== 'supplier' ? `<p class="small">Jami <b>${sales.length} ta xarid</b>${money_ ? ` · <b>${money(sum)}</b>` : ''}${sales[0] ? ` · oxirgisi ${fmtDate(sales[0].date)}` : ''}${money_ && bal > 0.5 ? ` · <span class="debt">qarzi ${money(bal)}</span>` : money_ && bal < -0.5 ? ` · <span class="ok">haqdorligi ${money(-bal)}</span>` : ''}</p>` : ''}
+    <div class="table-wrap"><table class="hist-table"><tbody>${rows}</tbody></table></div></div>`;
+}
+
 function editParty(id) {
   const c = party(id);
   if (!seesParties()) {
-    openModal({ title: 'Kontragent', body: `<p><b>${esc(c.name)}</b></p><p class="muted">${esc(KINDS[c.kind] || '')}</p>
-      <p class="muted small">To'liq ma'lumotlarni faqat administrator ko'radi.</p>` });
+    openModal({ title: c.name, body: `<p class="muted">${esc(KINDS[c.kind] || '')}</p>
+      <p class="muted small">Telefon va manzilni faqat administrator ko'radi.</p>${partyHistoryHtml(c)}` });
     return;
   }
   openModal({
     title: 'Kontragent',
-    body: partyForm(c),
+    body: partyForm(c) + partyHistoryHtml(c),
     onOpen: bindPartyForm,
     extra: [{ label: "O'zaro hisob-kitob", onClick: () => partyStatement(id) }],
     onSubmit: (d) => {
@@ -5930,7 +5959,8 @@ function viewParties(fixed = '') {
     const full = seesParties();
     const money_ = can('money');
     const sup = c.kind !== 'customer' ? suppliesText(c) : '';
-    return `<tr class="click" data-act="editParty" data-id="${c.id}"><td><b>${esc(c.name)}</b>${sup ? `<div class="small sup-line">${icon('truck')} ${esc(sup)}</div>` : ''}${c.note && full ? `<div class="muted small">${esc(c.note)}</div>` : ''}</td><td>${esc(KINDS[c.kind])}${c.ctype && full ? `<div class="muted small">${esc(c.ctype)}</div>` : ''}</td>
+    const lastSale = c.kind !== 'supplier' ? db.docs.filter((d) => d.type === 'sale' && d.counterpartyId === c.id).map((d) => d.date).sort().pop() : '';
+    return `<tr class="click" data-act="editParty" data-id="${c.id}"><td><b>${esc(c.name)}</b>${sup ? `<div class="small sup-line">${icon('truck')} ${esc(sup)}</div>` : ''}${lastSale ? `<div class="muted small">oxirgi xarid: ${fmtDate(lastSale)}</div>` : ''}${c.note && full ? `<div class="muted small">${esc(c.note)}</div>` : ''}</td><td>${esc(KINDS[c.kind])}${c.ctype && full ? `<div class="muted small">${esc(c.ctype)}</div>` : ''}</td>
       <td class="dt">${full ? esc(c.phone) : '—'}</td><td>${full ? esc(c.address) : '—'}</td><td class="num ${b > 0 ? 'debt' : b < 0 ? 'warn' : ''}">${b && (full || money_) ? money(b) : '—'}</td>
       <td class="actions">${full || money_ ? `<button class="small" data-act="statement" data-id="${c.id}">${icon('receipt')}Hisob-kitob</button>` : ''}${isAdmin() ? `<button class="small danger icon-only" data-act="deleteParty" data-id="${c.id}" title="O'chirish">${icon('trash')}</button>` : ''}</td></tr>`;
   }).join('');
