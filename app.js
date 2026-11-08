@@ -5457,7 +5457,7 @@ const SECTIONS = [
   { id: 'finance', icon: 'chart', title: 'Moliya', views: [['supAcc', "Ta'minotchilar hisobi", 'money'], ['unpriced', 'Narxlanmagan kirimlar', 'money']] },
   { id: 'money', icon: 'wallet', title: 'Pul', views: [['payments', "To'lovlar", 'sale|money'], ['cash', 'Kassa va hisoblar', 'money']] },
   { id: 'expenses', icon: 'arrowOut', title: 'Xarajatlar', views: [['expenses', 'Xarajatlar', 'money|expenses'], ['expenseCats', 'Moddalar', 'A']] },
-  { id: 'reports', icon: 'chart', title: 'Hisobotlar', views: [['profit', 'Foyda va zarar', 'reports'], ['top', 'Savdo tahlili', 'reports']] },
+  { id: 'reports', icon: 'chart', title: 'Hisobotlar', views: [['profit', 'Foyda va zarar', 'reports'], ['top', 'Savdo tahlili', 'reports'], ['salary', 'Ish haqi', 'A']] },
   { id: 'install', icon: 'phone', title: "Telefonga o'rnatish", hideInNav: true },
   { id: 'settings', icon: 'settings', title: 'Sozlamalar', views: [['users', 'Foydalanuvchilar', 'A'], ['currency', 'Valyuta kursi', 'A'], ['server', 'Server', 'A'], ['telegram', 'Telegram', 'A'], ['company', 'Kompaniya', 'A'], ['categories', "Ro'yxatlar", 'A'], ['backup', 'Zaxira nusxa', 'A'], ['drivers', 'Shofyorlar', 'A'], ['layout', 'Interfeys', 'A'], ['profile', 'Profil']] },
 ];
@@ -6017,7 +6017,7 @@ function viewDashboard() {
     ? `<div class="card warn-card backup-warn">${icon('alert')}<span>${age === Infinity ? "Hali birorta ham zaxira nusxa olinmagan." : `Oxirgi zaxira nusxa ${Math.floor(age)} kun oldin olingan.`} Ma'lumot yo'qolmasligi uchun zaxira oling${db.telegram.backupChatId ? '' : ' yoki har kungi avtomatik zaxirani yoqing'}.</span>
         <button class="small primary" data-act="backup">${icon('download')}Zaxira olish</button><a href="#settings/backup">Sozlash</a></div>` : '';
   const moneyBtns = isAdmin() ? `<div class="money-btns"><button class="mb-in" data-act="moneyMenu" data-dir="in"><span>＋</span>Kirim</button><button class="mb-out" data-act="moneyMenu" data-dir="out"><span>−</span>Chiqim</button></div>` : '';
-  return moneyBtns + installCard + backupWarn + usageWarn + staffCashCard() + supplierDebtsCard() + customerCreditsCard() + myCashCard() + labelsDueCard() + handoverCard() + openSalesCard() + `<div class="stats">${cards.map(([l, v, h, cls]) => `<div class="stat">
+  return moneyBtns + installCard + backupWarn + usageWarn + staffCashCard() + salaryDashCard() + supplierDebtsCard() + customerCreditsCard() + myCashCard() + labelsDueCard() + handoverCard() + openSalesCard() + `<div class="stats">${cards.map(([l, v, h, cls]) => `<div class="stat">
       <div class="stat-ic ${cls || ''}">${icon(cardIcon[l] || 'chart')}</div>
       <div class="label">${l}</div><div class="value ${cls || ''}">${v}</div><div class="muted small">${h}</div></div>`).join('')}</div>
     <div class="quick">${quick}</div>
@@ -6355,6 +6355,105 @@ function viewProfit() {
         <tr><td><b>Jami</b></td><td class="num"><b>${money(expTotal + writeoffs)}</b></td></tr>
       </tbody></table></div>
     </div>`;
+}
+
+// ---------- Ish haqi (oylik): kimga, qachon, qancha berilgan ----------
+// Manba — Xarajatlar bo'limidagi «Ish haqi (oylik)» moddasi bo'yicha chiqimlar (xodim ismi bilan).
+const salaryPays = () => db.payments.filter((p) => isExpense(p) && isSalaryCat(p.purpose));
+const salaryWho = (p) => String(p.employee || p.sub || '').trim() || 'Ismi yozilmagan';
+const MONTHS_UZ = ['Yanvar', 'Fevral', 'Mart', 'Aprel', 'May', 'Iyun', 'Iyul', 'Avgust', 'Sentabr', 'Oktabr', 'Noyabr', 'Dekabr'];
+const monthUz = (ym) => (/^\d{4}-\d{2}$/.test(ym || '') ? `${MONTHS_UZ[+ym.slice(5) - 1]} ${ym.slice(0, 4)}` : '');
+const salaryAmount = (p) => `${money(p.amount)}${p.currency === 'USD' ? `<div class="muted small">${fmtUsd(p.amountUsd)} · kurs ${fmt(p.rate)}</div>` : ''}`;
+function salaryGroups(list) {
+  const m = new Map();
+  list.forEach((p) => {
+    const k = salaryWho(p);
+    const g = m.get(k) || { name: k, sum: 0, count: 0, last: null };
+    g.sum += p.amount;
+    g.count++;
+    if (!g.last || p.date > g.last.date || (p.date === g.last.date && String(p.no) > String(g.last.no))) g.last = p;
+    m.set(k, g);
+  });
+  return [...m.values()].sort((a, b) => b.sum - a.sum);
+}
+
+function viewSalary() {
+  const t = today();
+  const from = filterVal('salary.from', t.slice(0, 4) + '-01-01');
+  const to = filterVal('salary.to', t);
+  const q = filterVal('salary.q').toLowerCase();
+  const all = salaryPays();
+  const list = all.filter((p) => p.date >= from && p.date <= to && (!q || salaryWho(p).toLowerCase().includes(q)));
+  const groups = salaryGroups(list);
+  const total = list.reduce((s, p) => s + p.amount, 0);
+  const monthNow = t.slice(0, 7);
+  const thisMonth = all.filter((p) => p.date.startsWith(monthNow)).reduce((s, p) => s + p.amount, 0);
+  const max = Math.max(1, ...groups.map((g) => g.sum));
+  // Oylar bo'yicha: har oyda kimga qancha
+  const byMonth = new Map();
+  list.forEach((p) => {
+    const k = p.date.slice(0, 7);
+    const x = byMonth.get(k) || { sum: 0, people: new Map() };
+    x.sum += p.amount;
+    x.people.set(salaryWho(p), (x.people.get(salaryWho(p)) || 0) + p.amount);
+    byMonth.set(k, x);
+  });
+  const months = [...byMonth.entries()].sort((a, b) => b[0].localeCompare(a[0]));
+  return `<div class="toolbar"><input data-filter="salary.q" placeholder="Xodim ismi..." value="${esc(filterVal('salary.q'))}">
+      <label class="inline">dan <input type="date" data-filter="salary.from" value="${esc(from)}"></label>
+      <label class="inline">gacha <input type="date" data-filter="salary.to" value="${esc(to)}"></label>
+      ${can('money') || can('expenses') ? `<button class="primary" data-act="expTile" data-cat="${esc(salaryCat()?.name || 'Ish haqi (oylik)')}">${icon('plus')}Oylik berish</button>` : ''}</div>
+    <div class="stats">
+      <div class="stat"><div class="label">Davrda berilgan oylik</div><div class="value">${money(total)}</div><div class="small muted">${list.length} ta to'lov</div></div>
+      <div class="stat"><div class="label">Shu oy (${esc(monthUz(monthNow))})</div><div class="value">${money(thisMonth)}</div></div>
+      <div class="stat"><div class="label">Xodimlar</div><div class="value">${groups.length}</div><div class="small muted">shu davrda oylik olgan</div></div>
+    </div>
+    <div class="card"><h3>👷 Xodimlar bo'yicha <span class="muted small">— ismni bosing: to'liq tarix</span></h3>
+      ${groups.length ? `<div class="sal-list">${groups.map((g) => `<button type="button" class="sal-row" data-act="salaryHist" data-name="${esc(g.name)}">
+        <span class="sal-name"><b>${esc(g.name)}</b><span class="muted small">${g.count} marta · oxirgisi ${fmtDate(g.last.date)} — ${money(g.last.amount)}</span></span>
+        <b class="sal-sum">${money(g.sum)}</b><span class="sal-go">›</span>
+        <span class="exp-bar sal-bar"><i style="width:${Math.round((g.sum / max) * 100)}%"></i></span></button>`).join('')}</div>`
+        : `<p class="muted">Bu davrda oylik berilmagan. Oylik Xarajatlar → «Ish haqi (oylik)» orqali, xodim ismi bilan kiritiladi.</p>`}</div>
+    ${months.length ? `<div class="card"><h3>${icon('calendar')}Oylar bo'yicha</h3><div class="table-wrap"><table class="hist-table"><thead><tr><th>Oy</th><th>Kimga qancha</th><th class="num">Jami</th></tr></thead><tbody>
+      ${months.map(([ym, x]) => `<tr><td><b>${esc(monthUz(ym))}</b></td><td class="small sal-people">${[...x.people.entries()].sort((a, b) => b[1] - a[1]).map(([n, v]) => `<div><a href="javascript:void 0" data-act="salaryHist" data-name="${esc(n)}">${esc(n)}</a> — ${money(v)}</div>`).join('')}</td><td class="num"><b>${money(x.sum)}</b></td></tr>`).join('')}
+      </tbody></table></div></div>` : ''}`;
+}
+
+// Bitta xodim: qachon, qaysi oy uchun, qancha — butun tarix
+function salaryHistory(name) {
+  const list = salaryPays().filter((p) => salaryWho(p) === name).sort((a, b) => b.date.localeCompare(a.date) || String(b.no).localeCompare(String(a.no)));
+  const t = today();
+  const sum = (arr) => arr.reduce((s, p) => s + p.amount, 0);
+  const year = list.filter((p) => p.date.startsWith(t.slice(0, 4)));
+  const month = list.filter((p) => p.date.startsWith(t.slice(0, 7)));
+  const byMonth = new Map();
+  list.forEach((p) => { const k = p.forMonth || p.date.slice(0, 7); byMonth.set(k, (byMonth.get(k) || 0) + p.amount); });
+  const body = `<div class="stats sal-stats">
+      <div class="stat"><div class="label">Jami berilgan</div><div class="value">${money(sum(list))}</div><div class="small muted">${list.length} ta to'lov${list.length ? ` · ${fmtDate(list[list.length - 1].date)} dan` : ''}</div></div>
+      <div class="stat"><div class="label">Shu yil</div><div class="value">${money(sum(year))}</div></div>
+      <div class="stat"><div class="label">Shu oy</div><div class="value">${money(sum(month))}</div></div>
+    </div>
+    ${byMonth.size ? `<h4 class="pf-title">${icon('calendar')}Qaysi oy uchun qancha</h4><div class="sal-months">${[...byMonth.entries()].sort((a, b) => b[0].localeCompare(a[0])).map(([ym, v]) => `<span class="chip"><b>${esc(monthUz(ym) || ym)}</b> ${money(v)}</span>`).join('')}</div>` : ''}
+    <h4 class="pf-title">${icon('clock')}Barcha to'lovlar</h4>
+    <div class="table-wrap"><table class="hist-table sal-hist"><thead><tr><th>Sana</th><th>Qaysi oy uchun</th><th class="num">Summa</th></tr></thead><tbody>
+    ${list.map((p) => `<tr><td><b>${fmtDate(p.date)}</b><div class="muted small">${esc([PAY_METHODS[p.method], p.note, userName(p.userId)].filter(Boolean).join(' · '))}</div></td>
+      <td>${esc(monthUz(p.forMonth) || '—')}</td>
+      <td class="num"><b>${salaryAmount(p)}</b></td></tr>`).join('') || emptyRow(3, "To'lov yo'q")}
+    </tbody>${list.length ? `<tfoot><tr><td colspan="2">Jami</td><td class="num"><b>${money(sum(list))}</b></td></tr></tfoot>` : ''}</table></div>`;
+  openModal({ title: `👷 ${name} — oylik tarixi`, body, wide: true });
+}
+
+// Bosh sahifa: shu oy kimga qancha oylik berilgan
+function salaryDashCard() {
+  if (!isAdmin()) return '';
+  const month = today().slice(0, 7);
+  const list = salaryPays().filter((p) => p.date.startsWith(month));
+  const groups = salaryGroups(list);
+  const total = list.reduce((s, p) => s + p.amount, 0);
+  return `<div class="card sal-card"><h3>👷 Oyliklar — ${esc(monthUz(month))}: ${money(total)} <a class="small sal-more" href="#reports/salary">Batafsil ›</a></h3>
+    ${groups.length ? `<div class="sal-list">${groups.map((g) => `<button type="button" class="sal-row" data-act="salaryHist" data-name="${esc(g.name)}">
+      <span class="sal-name"><b>${esc(g.name)}</b><span class="muted small">${g.count} marta · oxirgisi ${fmtDate(g.last.date)}</span></span><b class="sal-sum">${money(g.sum)}</b><span class="sal-go">›</span></button>`).join('')}</div>`
+      : '<p class="muted small">Shu oy hali oylik berilmagan.</p>'}</div>`;
 }
 
 function viewTop() {
@@ -7484,7 +7583,7 @@ const VIEWS = {
   supAcc: viewSupAcc, unpriced: viewUnpriced,
   payments: viewPayments, cash: viewCash, profit: viewProfit, top: viewTop, users: viewUsers,
   telegram: viewTelegram, company: viewCompany, warehouses: viewWarehouses, categories: viewCategories, backup: viewBackup,
-  server: viewServer, profile: viewProfile, layout: viewLayout, drivers: viewDrivers, kits: viewKits, expenses: viewExpenses, expenseCats: viewExpenseCats, currency: viewCurrency, install: viewInstall, labels: viewLabels, labelDesign: viewLabelDesign,
+  server: viewServer, profile: viewProfile, layout: viewLayout, drivers: viewDrivers, kits: viewKits, expenses: viewExpenses, expenseCats: viewExpenseCats, currency: viewCurrency, install: viewInstall, salary: viewSalary, labels: viewLabels, labelDesign: viewLabelDesign,
 };
 
 function render() {
@@ -7605,6 +7704,7 @@ const ACTIONS = {
   },
   showReceipt: (ds) => showReceipts(db.payments.find((p) => p.id === ds.id)?.receipts),
   loMove: (ds) => moveLayout(ds),
+  salaryHist: (ds) => { if (isAdmin()) salaryHistory(ds.name); },
   loOpen: (ds) => { filters['layout.open'] = filterVal('layout.open') === ds.sec ? '' : ds.sec; render(); },
   loReset: () => { if (!confirm("Bo'limlar va tablar asl tartibga qaytarilsinmi?")) return; db.uiOrder = { sections: [], tabs: {} }; save(); },
   expFilter: (ds) => { filters['expenses.cat'] = ds.cat || ''; render(); },

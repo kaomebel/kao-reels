@@ -1528,3 +1528,17 @@ html.modal-open, html.modal-open body { overflow: hidden; overscroll-behavior: n
 /* Ichki ro'yxat oxiriga yetganda surish orqadagi sahifaga o'tib ketmasin */
 .party-suggest, .pick-panel, .ss-list, #modalBody, #subBody, textarea { overscroll-behavior: contain; }
 .pick-panel, .ss-list, .party-suggest { -webkit-overflow-scrolling: touch; }
+
+/* Ish haqi: xodimlar ro'yxati va tarix */
+.sal-list { display: flex; flex-direction: column; gap: 6px; }
+.sal-row { display: grid; grid-template-columns: 1fr auto auto; grid-template-areas: "n s g" "b b b"; gap: 4px 10px; align-items: center; width: 100%; padding: 10px 12px; text-align: left; border-radius: 12px; background: var(--card); }
+.sal-row:hover { border-color: var(--accent); }
+.sal-name { grid-area: n; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.sal-sum { grid-area: s; white-space: nowrap; }
+.sal-go { grid-area: g; color: var(--muted); font-size: 20px; line-height: 1; }
+.sal-bar { grid-area: b; }
+.sal-card h3 { flex-wrap: wrap; }
+.sal-more { margin-left: auto; font-weight: 500; }
+.sal-months { display: flex; flex-wrap: wrap; gap: 6px; }
+.sal-stats { margin-bottom: 4px; }
+.sal-people, .sal-people div { white-space: normal; }
