@@ -1548,3 +1548,21 @@ html.modal-open, html.modal-open body { overflow: hidden; overscroll-behavior: n
 .bm-row { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; margin-bottom: 6px; border-radius: 10px; background: var(--danger-soft); }
 .bm-ok { margin: 14px 0 6px; padding: 12px; border: 2px solid var(--accent); border-radius: 12px; font-size: 16px; }
 .bm-ok input { width: 22px; height: 22px; }
+
+/* Mahsulot tarixi */
+.ph-sum { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; margin-bottom: 12px; }
+.ph-sum > div { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border-radius: 12px; background: var(--card-2); }
+.ph-sum span { color: var(--muted); font-size: 12.5px; }
+.ph-filter { margin-bottom: 6px; }
+.ph-filter .chip { cursor: pointer; }
+.ph-list { display: flex; flex-direction: column; gap: 8px; }
+.ph-card { border-left: 4px solid var(--border-strong); }
+.ph-card.ph-sale { border-left-color: var(--accent); }
+.ph-card.ph-in { border-left-color: #6a9a5b; }
+.ph-card .hc-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px; }
+.ph-go { margin-left: auto; color: var(--muted); font-size: 18px; line-height: 1; }
+.ph-who { font-size: 15px; margin: 2px 0 4px; }
+.ph-line { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.ph-pay { margin-top: 4px; font-size: 14px; }
+.ph-foot { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 4px 10px; margin-top: 6px; padding-top: 6px; border-top: 1px dashed var(--border); }
+.ph-card[hidden] { display: none; }

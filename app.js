@@ -2728,21 +2728,70 @@ function productHistory(id) {
   const rows = [];
   db.docs.forEach((d) => {
     const t = DOC_TYPES[d.type];
+    if (!t) return;
     d.items.filter((it) => it.productId === id).forEach((it) => {
-      let delta = t.stock * it.qty;
-      let wh = warehouse(d.warehouseId)?.name;
-      if (t.move) { delta = 0; wh += ' → ' + (warehouse(d.toWarehouseId)?.name || ''); }
-      rows.push({ d, t, it, delta, wh });
+      const delta = t.move ? 0 : t.stock * it.qty;
+      rows.push({ d, t, it, delta });
     });
   });
-  rows.sort((a, b) => a.d.date.localeCompare(b.d.date));
+  // Eskidan yangiga: har bir harakatdan keyin omborda qancha qolgani
+  rows.sort((a, b) => a.d.date.localeCompare(b.d.date) || String(a.d.created || '').localeCompare(String(b.d.created || '')));
+  let left = 0;
+  rows.forEach((r) => { left += r.delta; r.left = left; });
+  rows.reverse(); // ko'rsatishda — eng yangisi tepada
+  const seesMoney = can('money') || can('sale');
+  const sales = rows.filter((r) => r.d.type === 'sale');
+  const soldQty = sales.reduce((s, r) => s + r.it.qty, 0);
+  const soldSum = sales.reduce((s, r) => s + r.it.qty * r.it.price, 0);
+  const kind = (d) => (['sale', 'order', 'salesReturn'].includes(d.type) ? 'sale' : ['receipt', 'purchaseOrder', 'purchaseReturn', 'enter'].includes(d.type) ? 'in' : 'other');
+  const card = ({ d, t, it, delta, left: rest }) => {
+    const priceHidden = hidesCost(t) || (t.price === 'buy' && !can('costs') && !can('money'));
+    const who = ['sale', 'order', 'salesReturn'].includes(d.type)
+      ? `<div class="ph-who">👤 Kimga: <b>${esc(docPartyName(d) || 'Chakana xaridor')}</b></div>`
+      : ['receipt', 'purchaseOrder', 'purchaseReturn'].includes(d.type)
+        ? `<div class="ph-who">🚚 Kimdan: <b>${esc(party(it.supplierId || d.counterpartyId)?.name || docPartyName(d) || '—')}</b></div>` : '';
+    const wh = t.move ? `${warehouse(d.warehouseId)?.name || ''} → ${warehouse(d.toWarehouseId)?.name || ''}` : warehouse(d.warehouseId)?.name || '';
+    const paid = t.pay === 'in' && seesMoney && !multiSup(d) ? docPaid(d) : null;
+    const total = docTotal(d);
+    const debtRest = paid === null ? 0 : Math.max(0, total - paid);
+    const payState = paid === null ? '' : d.type === 'order'
+      ? (paid ? `<span class="muted">zaklad ${money(paid)}</span>` : '<span class="muted">to\'lanmagan</span>')
+      : debtRest > 0.5 ? `<span class="debt">to'langan ${money(paid)} · <b>qolgan ${money(debtRest)}</b></span>` : total ? '<span class="ok">✓ to\'liq to\'langan</span>' : '';
+    const other = d.items.length > 1 ? `<div class="muted small">Shu hujjatda yana: ${esc(d.items.filter((x) => x !== it).map((x) => `${itemName(x)} ×${fmt(x.qty)}`).join(', '))}${seesMoney ? ` · hujjat jami ${money(total)}` : ''}</div>` : '';
+    return `<div class="hist-card click ph-card ph-${kind(d)}" data-act="openDoc" data-id="${d.id}" data-kind="${kind(d)}">
+      <div class="hc-head"><b>${fmtDate(d.date)}</b> · ${esc(t.one)} <span class="muted">${esc(d.no)}</span>${d.status && t.statuses ? ` <span class="muted small">(${esc(t.statuses[d.status] || '')})</span>` : ''}<span class="ph-go">›</span></div>
+      ${who}
+      <div class="ph-line"><span>${fmt(it.qty)} dona${priceHidden ? '' : ` × ${money(it.price)}${it.disc ? ` <span class="muted small">(${fmt(it.listPrice)} − chegirma ${fmt(it.disc)})</span>` : ''}`}</span>${priceHidden ? '' : `<b>${money(it.qty * it.price)}</b>`}</div>
+      ${payState ? `<div class="ph-pay">${d.items.length > 1 ? '<span class="muted">Hujjat bo\'yicha:</span> ' : ''}${payState}</div>` : ''}
+      ${other}
+      <div class="ph-foot muted small"><span>${esc(wh)}${d.userId ? ` · ${esc(userName(d.userId))}` : ''}</span><span>${delta ? `${delta > 0 ? '+' : ''}${fmt(delta)} → ` : ''}omborda qoldi: <b>${fmt(rest)}</b></span></div>
+    </div>`;
+  };
+  const counts = { sale: rows.filter((r) => kind(r.d) === 'sale').length, in: rows.filter((r) => kind(r.d) === 'in').length };
   openModal({
-    title: `Harakatlar: ${p.name}`,
+    title: `Tarix: ${p.name}`,
     wide: true,
-    body: `<table><thead><tr><th>Sana</th><th>Hujjat</th><th>Ombor</th><th class="num">Soni</th><th class="num">Narx</th><th class="num">Qoldiqqa ta'siri</th></tr></thead><tbody>
-      ${rows.length ? rows.map(({ d, t, it, delta, wh }) => `<tr><td>${fmtDate(d.date)}</td><td>${esc(t.one)} ${esc(d.no)}</td><td>${esc(wh)}</td>
-        <td class="num">${it.qty}</td><td class="num">${money(it.price)}</td><td class="num">${delta > 0 ? '+' : ''}${delta || '—'}</td></tr>`).join('') : emptyRow(6, "Harakat yo'q")}
-      </tbody></table>`,
+    body: `<div class="ph-sum">
+        <div><span>Omborda hozir</span><b>${fmt(qtyIn(ctx.stock, id))} dona</b></div>
+        <div><span>Jami sotilgan</span><b>${fmt(soldQty)} dona</b></div>
+        ${seesMoney ? `<div><span>Sotuvdan tushum</span><b>${money(soldSum)}</b></div>` : ''}
+        ${sales[0] ? `<div><span>Oxirgi sotuv</span><b>${fmtDate(sales[0].d.date)}</b></div>` : ''}
+      </div>
+      <div class="chips ph-filter">
+        <button type="button" class="chip on" data-f="">Hammasi (${rows.length})</button>
+        <button type="button" class="chip" data-f="sale">Sotuvlar (${counts.sale})</button>
+        <button type="button" class="chip" data-f="in">Kirimlar (${counts.in})</button>
+      </div>
+      <p class="muted small">Har bir yozuvni bosing — hujjat to'liq ochiladi.</p>
+      <div class="hist-list ph-list">${rows.map(card).join('') || '<p class="muted">Harakat yo\'q</p>'}</div>`,
+    onOpen: () => {
+      $('#modalBody .ph-filter').addEventListener('click', (e) => {
+        const b = e.target.closest('[data-f]');
+        if (!b) return;
+        $$('#modalBody .ph-filter .chip').forEach((x) => x.classList.toggle('on', x === b));
+        $$('#modalBody .ph-card').forEach((c) => { c.hidden = !!b.dataset.f && c.dataset.kind !== b.dataset.f; });
+      });
+    },
   });
 }
 
