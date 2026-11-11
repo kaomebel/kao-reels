@@ -1542,3 +1542,9 @@ html.modal-open, html.modal-open body { overflow: hidden; overscroll-behavior: n
 .sal-months { display: flex; flex-wrap: wrap; gap: 6px; }
 .sal-stats { margin-bottom: 4px; }
 .sal-people, .sal-people div { white-space: normal; }
+
+/* Eng kam narxdan arzon sotish — tasdiqlash */
+.bm-text { margin: 0 0 10px; }
+.bm-row { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; margin-bottom: 6px; border-radius: 10px; background: var(--danger-soft); }
+.bm-ok { margin: 14px 0 6px; padding: 12px; border: 2px solid var(--accent); border-radius: 12px; font-size: 16px; }
+.bm-ok input { width: 22px; height: 22px; }

@@ -3947,6 +3947,34 @@ function openDoc(type, existing, preset = {}) {
 const canUseDoc = (type) => can(DOC_PERM[type]);
 const canEditDoc = (d) => isAdmin() || (canUseDoc(d.type) && d.userId === me?.id);
 
+// Eng kam narxdan arzon sotilayotganda: nima, qanchaga — va «Ha, roziman» belgisi
+function confirmBelowMin(lines) {
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (v) => { if (!done) { done = true; resolve(v); } };
+    const rows = lines.map((x) => {
+      const p = product(x.productId);
+      const limit = x.byCost ? (can('costs') ? `tannarx ${money(x.min)}` : 'ruxsat etilgan chegaradan past') : `eng kam narx ${money(x.min)}`;
+      return `<div class="bm-row"><b>${esc(p?.name || '')}</b><span>sotish narxi <b class="debt">${money(x.price)}</b> · ${limit}${x.byCost && !can('costs') ? '' : ` · <span class="debt">${money(x.min - x.price)} arzon</span>`}</span></div>`;
+    }).join('');
+    openSubModal({
+      title: '⚠️ Eng kam narxdan arzon',
+      submitText: 'Ha, sotilsin',
+      body: `<p class="bm-text">Siz mahsulotni <b>eng kam narxdan ham arzon</b> sotyapsiz:</p>${rows}
+        <label class="check bm-ok"><input type="checkbox" name="bmOk"> <span><b>Ha, roziman</b> — shu narxda sotilsin</span></label>
+        <p class="muted small">Bu sotuv administratorga «eng kam narxdan arzon» deb belgilanib ko'rinadi.</p>`,
+      onSubmit: (d) => {
+        if (!d.bmOk) { alert("Rozi bo'lsangiz — «Ha, roziman» ni belgilang."); return false; }
+        finish(true);
+      },
+      onOpen: () => {
+        $('#subModal').addEventListener('close', () => finish(false), { once: true });
+        $('#subBody [name=bmOk]').addEventListener('change', () => { if (subState) subState.dirty = false; });
+      },
+    });
+  });
+}
+
 async function saveDoc(type, existing, preset, data, stock) {
   const t = DOC_TYPES[type];
   let items = readItems();
@@ -3996,28 +4024,21 @@ async function saveDoc(type, existing, preset, data, stock) {
     return false;
   }
 
-  // Eng kam narxdan arzon sotish: sotuvchiga ruxsat yo'q, administrator tasdiqlaydi
-  if (t.price === 'sale' && type !== 'salesReturn') {
-    const low = items.map((it) => ({ it, p: product(it.productId) }))
-      .filter(({ it, p }) => p && minPriceUZS(p) && it.price < minPriceUZS(p))
-      .map(({ it, p }) => `${p.name}: ${fmt(it.price)} < eng kami ${fmt(minPriceUZS(p))} so'm`);
-    if (low.length) {
-      if (!can('costs')) {
-        alert("Narx eng kam narxdan past:\n" + low.join('\n') + "\n\nChegirmani kamaytiring (yoki narxni oshiring) — yoki administratorga murojaat qiling.");
-        return false;
-      }
-      if (!confirm("Narx eng kam narxdan past:\n" + low.join('\n') + "\n\nBaribir saqlansinmi?")) return false;
-    }
-  }
-  // Chegirma mahsulotlarning eng kam narxidan pastga tushirmasin
-  if (t.price === 'sale' && type !== 'salesReturn' && discountOf(data) > 0 && data.orderKind !== 'custom') {
-    const maxD = maxDiscount(items);
-    if (discountOf(data) > maxD) {
-      const units = Math.max(1, num(data.discountK) || 1);
-      const msg = `Chegirma juda katta: 1 donaga ${money(num(data.discount))} (jami ${money(discountOf(data))}).\nEng kam narx bo'yicha 1 donaga ko'pi bilan ${money(Math.floor(maxD / units))} chegirma qilish mumkin.`;
-      if (!isAdmin()) { alert(msg + '\n\nSotish mumkin emas — chegirmani kamaytiring.'); $('#modalBody [name=discount]')?.focus(); return false; }
-      if (!confirm(msg + '\n\nBaribir saqlansinmi? (faqat administrator)')) return false;
-    }
+  // Eng kam narxdan arzon sotish: taqiqlanmaydi — saqlashdan oldin ogohlantiriladi, «Ha, roziman» belgilansa sotiladi
+  let belowMin;
+  if (t.price === 'sale' && type !== 'salesReturn' && data.orderKind !== 'custom') {
+    const k = currency === 'USD' ? num(data.rate) : 1;
+    const perUnitDisc = num(data.discount); // savdoda chegirma 1 donaga
+    belowMin = items.map((it) => {
+      const p = product(it.productId);
+      if (!p) return null;
+      const min = minPriceUZS(p);
+      const floor = min || Math.round(ctx.cost?.[p.id] || 0);
+      const price = Math.round((it.price - perUnitDisc) * k);
+      return floor && price < floor ? { productId: p.id, price, min: floor, byCost: !min } : null;
+    }).filter(Boolean);
+    if (belowMin.length && !(await confirmBelowMin(belowMin))) return false;
+    if (!belowMin.length) belowMin = undefined;
   }
   if (t.move && data.warehouseId === data.toWarehouseId) {
     alert('Omborlar har xil bo\'lishi kerak.');
@@ -4098,6 +4119,8 @@ async function saveDoc(type, existing, preset, data, stock) {
     address: t.delivery ? delivery?.text || '' : undefined,
     addr: t.delivery ? delivery?.addr : undefined,
     discount: discountOf(data),
+    belowMin,
+    belowMinBy: belowMin ? me?.id : undefined,
     note: data.note.trim(),
     items,
     currency: t.fx ? currency : undefined,
@@ -6074,7 +6097,7 @@ function viewDocs(type) {
     const paid = t.pay ? docPaid(d) : 0;
     const where = t.party ? esc(docPartyName(d)) : esc(warehouse(d.warehouseId)?.name) + (t.move ? ' → ' + esc(warehouse(d.toWarehouseId)?.name) : '');
     return `<tr class="click ${isOpenSale(d) ? `sale-${d.status}` : ''} ${isOverdueSale(d) ? 'sale-late' : ''}" data-act="openDoc" data-id="${d.id}">
-      <td>${esc(d.no)}${isOverdueSale(d) ? '<div class="debt small">⚠ yopilmagan</div>' : ''}</td><td>${fmtDate(d.date)}${d.userId ? `<div class="muted small">${esc(userName(d.userId))}</div>` : ''}</td><td>${where}</td>
+      <td>${esc(d.no)}${isOverdueSale(d) ? '<div class="debt small">⚠ yopilmagan</div>' : ''}${d.belowMin?.length && can('costs') ? '<div class="debt small">⚠ eng kam narxdan arzon</div>' : ''}</td><td>${fmtDate(d.date)}${d.userId ? `<div class="muted small">${esc(userName(d.userId))}</div>` : ''}</td><td>${where}</td>
       <td class="items-cell">${d.items.slice(0, 3).map((it) => `${esc(itemName(it))} × ${it.qty}`).join('<br>')}${d.items.length > 3 ? `<br><span class="muted">yana ${d.items.length - 3} ta</span>` : ''}</td>
       <td class="num">${noSum ? '' : money(docTotal(d))}${d.currency === 'USD' ? `<div class="muted small">${fmtUsd(docTotalCur(d))} · ${fmtRate(d.rate)}</div>` : ''}</td>
       ${t.pay ? (isOrder
