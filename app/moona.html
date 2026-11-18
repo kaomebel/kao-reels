@@ -46,7 +46,11 @@ section.step h2 span{display:inline-grid;place-items:center;width:26px;height:26
 .clip{display:grid;grid-template-columns:54px minmax(0,1fr) auto;gap:12px;align-items:center;padding:8px;border:1px solid var(--line);border-radius:10px;background:var(--bg)}
 .clip.sel{border-color:var(--brass)}
 .clip .th{width:54px;aspect-ratio:9/16;border-radius:6px;background:var(--sunk) center/cover no-repeat;position:relative;cursor:pointer}
-.clip .th em{position:absolute;left:3px;bottom:3px;font:600 10px/1 var(--body);font-style:normal;background:rgba(0,0,0,.65);color:#fff;padding:2px 4px;border-radius:3px;font-variant-numeric:tabular-nums}
+.clip .th{overflow:hidden}
+.clip .th video,.clip .th img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;pointer-events:none;background:var(--sunk)}
+.clip.bad{border-color:var(--danger)}
+.clip.bad .th em{background:var(--danger)}
+.clip .th em{z-index:1;position:absolute;left:3px;bottom:3px;font:600 10px/1 var(--body);font-style:normal;background:rgba(0,0,0,.65);color:#fff;padding:2px 4px;border-radius:3px;font-variant-numeric:tabular-nums}
 .clip .meta{display:grid;gap:6px;min-width:0}
 .clip .meta .nm{font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .clip .tools{display:grid;grid-auto-flow:column;gap:4px}
@@ -105,6 +109,7 @@ input[type=range]{width:160px;accent-color:var(--brass)}
       </label>
       <p class="sample-note" id="sampleNote">Hozir namuna kadrlar turibdi. O'z videolaringizni qo'shsangiz, ular avtomatik o'chadi.</p>
       <ul class="clips" id="clips"></ul>
+      <label class="btn filebtn" id="addMore" for="files2" hidden>+ Yana video qo'shish<input id="files2" type="file" accept="video/*,image/*" multiple></label>
     </section>
 
     <section class="step">
@@ -181,54 +186,69 @@ function makeSample(i){
   g.fillStyle = 'rgba(255,255,255,.9)'; g.beginPath(); g.ellipse(360,700,250,90,0,0,Math.PI*2); g.fill();
   g.fillStyle = 'rgba(20,20,20,.85)'; [[170,760],[550,760]].forEach(([x,y]) => g.fillRect(x-6,y,12,320));
   g.fillStyle = 'rgba(255,255,255,.5)'; g.font = '600 34px Inter, sans-serif'; g.textAlign = 'center'; g.fillText('NAMUNA KADR '+(i+1), 360, 1180);
-  return { id: ++uid, kind: 'image', sample: true, name: 'Namuna '+(i+1), el: c, thumb: c.toDataURL('image/jpeg',.6), duration: Infinity, caption: SCRIPT[i] };
+  const im = new Image(); im.src = c.toDataURL('image/jpeg',.6);
+  return { id: ++uid, kind: 'image', sample: true, name: 'Namuna '+(i+1), el: c, thumbEl: im, duration: Infinity, caption: SCRIPT[i], ready: true, readyP: Promise.resolve(true) };
 }
 state.clips = [0,1,2,3].map(makeSample);
 
-/* ---------- adding files ---------- */
-function loadFile(file){
-  return new Promise(res => {
-    const url = URL.createObjectURL(file);
-    if (file.type.startsWith('image/')) {
-      const im = new Image();
-      im.onload = () => res({ id: ++uid, kind: 'image', name: file.name, el: im, thumb: url, duration: Infinity, caption: '' });
-      im.onerror = () => res(null); im.src = url; return;
-    }
+/* ---------- adding files: each clip appears at once, files open in parallel ---------- */
+const isVideo = f => f.type.startsWith('video/') || /\.(mov|mp4|m4v|webm|3gp|mkv)$/i.test(f.name);
+const isImage = f => f.type.startsWith('image/') || /\.(jpe?g|png|webp|heic|gif)$/i.test(f.name);
+const once = (el, evs, ms) => new Promise(r => {
+  const t = setTimeout(() => done(false), ms);
+  const done = ok => { clearTimeout(t); evs.forEach(e => el.removeEventListener(e, h)); el.removeEventListener('error', er); r(ok); };
+  const h = () => done(true), er = () => done(false);
+  evs.forEach(e => el.addEventListener(e, h)); el.addEventListener('error', er);
+});
+function makeClip(file){
+  const url = URL.createObjectURL(file);
+  const c = { id: ++uid, name: file.name, url, caption: '', ready: false, error: false };
+  if (isImage(file) && !isVideo(file)) {
+    c.kind = 'image'; c.duration = Infinity;
+    const im = new Image(); im.decoding = 'async'; c.el = im; c.thumbEl = im.cloneNode();
+    c.readyP = new Promise(r => { im.onload = () => r(true); im.onerror = () => r(false); im.src = url; c.thumbEl.src = url; });
+  } else {
+    c.kind = 'video'; c.duration = NaN;
     const v = document.createElement('video');
-    v.muted = true; v.playsInline = true; v.preload = 'auto'; v.setAttribute('playsinline',''); v.src = url;
-    const fail = setTimeout(() => res(null), 15000);
-    v.onloadedmetadata = () => {
-      const t = Math.min(0.5, (v.duration||1)/2);
-      const done = () => {
-        clearTimeout(fail);
-        const c = document.createElement('canvas'); c.width = 108; c.height = 192; drawCover(c.getContext('2d'), v, 108, 192, 1);
-        let thumb = ''; try { thumb = c.toDataURL('image/jpeg',.6); } catch (e) {}
-        res({ id: ++uid, kind: 'video', name: file.name, el: v, thumb, duration: v.duration, caption: '' });
-      };
-      v.onseeked = () => { v.onseeked = null; done(); };
-      v.currentTime = t;
-    };
-    v.onerror = () => { clearTimeout(fail); res(null); };
-  });
+    v.muted = true; v.playsInline = true; v.setAttribute('playsinline',''); v.setAttribute('muted',''); v.preload = 'auto'; v.src = url; c.el = v;
+    const t = document.createElement('video');
+    t.muted = true; t.playsInline = true; t.setAttribute('playsinline',''); t.setAttribute('muted',''); t.preload = 'metadata'; t.src = url + '#t=0.1'; c.thumbEl = t;
+    c.readyP = (async () => {
+      v.load();
+      let ok = v.readyState >= 1 || await once(v, ['loadedmetadata','loadeddata'], 2500);
+      if (!ok && !v.error) {            // some phones only start reading after a muted play()
+        try { await v.play(); v.pause(); } catch (e) {}
+        ok = v.readyState >= 1 || await once(v, ['loadedmetadata','loadeddata'], 6000);
+      }
+      if (ok && !v.videoWidth) await once(v, ['loadeddata','resize'], 3000);
+      c.duration = isFinite(v.duration) && v.duration > 0 ? v.duration : Infinity;
+      return ok && !!v.videoWidth;
+    })();
+  }
+  c.readyP.then(ok => { c.ready = ok; c.error = !ok; updateClip(c); });
+  return c;
 }
-async function addFiles(list){
-  const files = [...list].filter(f => /^(video|image)\//.test(f.type));
+function addFiles(list){
+  const files = [...list].filter(f => isVideo(f) || isImage(f));
   if (!files.length) { setStatus('Faqat video yoki rasm fayllarini qo\'shing.', 'err'); return; }
   if (state.clips.some(c => c.sample)) state.clips = [];
-  setStatus('Fayllar ochilmoqda…');
-  let bad = 0;
-  for (const f of files) {
-    const c = await loadFile(f);
-    if (!c) { bad++; continue; }
-    const used = new Set(state.clips.map(x => x.caption));
-    c.caption = SCRIPT.find(s => !used.has(s)) || '';
-    state.clips.push(c);
-  }
-  state.sel = Math.max(0, state.clips.length - 1);
-  renderList(); drawPreview();
-  setStatus(bad ? `${bad} ta fayl ochilmadi (format qo'llab-quvvatlanmaydi). Qolganlari qo'shildi.` : `${state.clips.length} ta klip tayyor.`, bad ? 'err' : 'ok');
+  const fresh = files.map(makeClip);
+  fresh.forEach(c => { const used = new Set(state.clips.map(x => x.caption)); c.caption = SCRIPT.find(s => !used.has(s)) || ''; state.clips.push(c); });
+  state.sel = state.clips.length - fresh.length;
+  renderList();
+  setStatus(`${fresh.length} ta fayl qo'shildi, ochilmoqda…`);
+  Promise.all(fresh.map(c => c.readyP)).then(r => {
+    const bad = r.filter(x => !x).length;
+    setStatus(bad ? `${bad} ta fayl ochilmadi: bu brauzer uning formatini o'qiy olmaydi. Qolganlari tayyor.` : `${state.clips.length} ta klip tayyor.`, bad ? 'err' : 'ok');
+  });
 }
-$('files').addEventListener('change', e => { addFiles(e.target.files); e.target.value = ''; });
+function updateClip(c){
+  const li = document.querySelector(`[data-clip="${c.id}"]`); if (!li) return;
+  li.querySelector('em').textContent = (state.clips.indexOf(c)+1) + ' · ' + fmt(c);
+  li.classList.toggle('bad', c.error);
+  $('renderBtn').disabled = !state.clips.some(x => !x.error) || state.busy;
+}
+['files','files2'].forEach(id => $(id).addEventListener('change', e => { addFiles(e.target.files); e.target.value = ''; }));
 const drop = $('drop');
 ['dragenter','dragover'].forEach(t => drop.addEventListener(t, e => { e.preventDefault(); drop.classList.add('over'); }));
 ['dragleave','drop'].forEach(t => drop.addEventListener(t, e => { e.preventDefault(); drop.classList.remove('over'); }));
@@ -237,15 +257,15 @@ document.addEventListener('dragover', e => e.preventDefault());
 document.addEventListener('drop', e => { e.preventDefault(); if (e.target !== drop && !drop.contains(e.target)) addFiles(e.dataTransfer.files); });
 
 /* ---------- clip list ---------- */
-function fmt(s){ return isFinite(s) ? s.toFixed(1)+' s' : 'rasm'; }
+function fmt(c){ return c.error ? 'ochilmadi' : !c.ready ? '…' : c.kind === 'image' ? 'rasm' : isFinite(c.duration) ? c.duration.toFixed(1)+' s' : 'video'; }
 function renderList(){
   $('sampleNote').hidden = !state.clips.some(c => c.sample);
   const ul = $('clips'); ul.textContent = '';
   state.clips.forEach((c, i) => {
-    const li = document.createElement('li'); li.className = 'clip' + (i === state.sel ? ' sel' : '');
-    const th = document.createElement('div'); th.className = 'th'; th.style.backgroundImage = c.thumb ? `url("${c.thumb}")` : '';
+    const li = document.createElement('li'); li.className = 'clip' + (i === state.sel ? ' sel' : '') + (c.error ? ' bad' : ''); li.dataset.clip = c.id;
+    const th = document.createElement('div'); th.className = 'th';
     th.title = 'Ko\'rish'; th.onclick = () => { state.sel = i; renderList(); drawPreview(); };
-    const em = document.createElement('em'); em.textContent = (i+1) + ' · ' + fmt(c.duration); th.append(em);
+    const em = document.createElement('em'); em.textContent = (i+1) + ' · ' + fmt(c); th.append(c.thumbEl, em);
     const meta = document.createElement('div'); meta.className = 'meta';
     const nm = document.createElement('div'); nm.className = 'nm'; nm.textContent = c.name;
     const inp = document.createElement('input'); inp.type = 'text'; inp.id = 'cap_'+c.id; inp.value = c.caption; inp.placeholder = 'Ekrandagi yozuv (bo\'sh qoldirsa bo\'ladi)';
@@ -262,7 +282,8 @@ function renderList(){
     );
     li.append(th, meta, tools); ul.append(li);
   });
-  $('renderBtn').disabled = !state.clips.length || state.busy;
+  $('renderBtn').disabled = !state.clips.some(x => !x.error) || state.busy;
+  $('addMore').hidden = !state.clips.length || state.clips.some(c => c.sample);
 }
 
 /* ---------- segmented controls ---------- */
@@ -349,13 +370,28 @@ function frame(g, W, H, src, p, age, caption, first){
   drawWatermark(g, W, H);
   drawCaption(g, W, H, caption, age);
 }
-function drawPreview(){
-  if (state.busy || state.result) return;
-  cv.width = 1080; cv.height = 1920;
-  const c = state.clips[state.sel];
-  if (!c) { ctx.fillStyle = '#16181d'; ctx.fillRect(0,0,1080,1920); ctx.fillStyle = '#9ba2ad'; ctx.font = '600 44px Inter, sans-serif'; ctx.textAlign = 'center'; ctx.fillText('Videolarni qo\'shing', 540, 960); return; }
-  frame(ctx, 1080, 1920, c.el, 0.5, 1, c.caption, true);
+/* live preview: the selected clip plays in the phone frame with its caption */
+const PW = 540, PH = 960, LOOP = 4;
+let pvClip = null, pvT0 = 0;
+function stopPreviewVideo(){ if (pvClip && pvClip.kind === 'video') { pvClip.el.pause(); pvClip.el.loop = false; } pvClip = null; }
+function drawPreview(){ /* selection changes are picked up by the loop; caption edits redraw on the next frame */ }
+function previewLoop(){
+  requestAnimationFrame(previewLoop);
+  if (state.busy || state.result || document.hidden) return;
+  if (cv.width !== PW) { cv.width = PW; cv.height = PH; }
+  const c = state.clips[state.sel], now = performance.now();
+  if (c !== pvClip) { stopPreviewVideo(); pvClip = c; pvT0 = now; c && (c._pv = false); }
+  if (!c) { ctx.fillStyle = '#16181d'; ctx.fillRect(0,0,PW,PH); ctx.fillStyle = '#9ba2ad'; ctx.font = '600 24px Inter, sans-serif'; ctx.textAlign = 'center'; ctx.fillText('Videolarni qo\'shing', PW/2, PH/2); return; }
+  if (c.kind === 'video' && c.ready && !c._pv) { c._pv = true; c.el.muted = true; c.el.loop = true; c.el.play().catch(() => {}); }
+  const age = ((now - pvT0)/1000) % LOOP;
+  if (!c.ready) {
+    frame(ctx, PW, PH, null, 0, age, c.caption, true);
+    ctx.fillStyle = 'rgba(255,255,255,.75)'; ctx.font = '600 22px Inter, sans-serif'; ctx.textAlign = 'center';
+    ctx.fillText(c.error ? 'Bu fayl ochilmadi' : 'Ochilmoqda…', PW/2, PH*0.62); return;
+  }
+  frame(ctx, PW, PH, c.el, age/LOOP, age, c.caption, true);
 }
+requestAnimationFrame(previewLoop);
 
 /* ---------- render ---------- */
 function setStatus(t, kind){ const s = $('status'); s.textContent = t; s.className = 'status' + (kind ? ' '+kind : ''); }
@@ -368,11 +404,15 @@ const sources = new WeakMap();
 async function render(){
   if (state.busy || !state.clips.length) return;
   if (!window.MediaRecorder || !cv.captureStream) { setStatus('Bu brauzer video yozishni qo\'llamaydi. Chrome yoki Safari\'ning yangi versiyasida oching.', 'err'); return; }
-  state.busy = true; renderList(); $('renderBtn').disabled = true; $('badge').textContent = 'Yozilmoqda';
+  state.busy = true; stopPreviewVideo(); renderList(); $('renderBtn').disabled = true; $('badge').textContent = 'Yozilmoqda';
+  setStatus('Fayllar tayyorlanmoqda…');
+  await Promise.all(state.clips.map(c => c.readyP));
+  if (!state.clips.some(c => c.ready)) { state.busy = false; renderList(); $('badge').textContent = 'Ko\'rinish'; setStatus('Birorta ham fayl ochilmadi.', 'err'); return; }
   let wake = null; try { wake = await navigator.wakeLock?.request('screen'); } catch (e) {}
   await document.fonts?.load?.('900 60px Montserrat').catch(() => {});
   const W = state.res, H = Math.round(W*16/9); cv.width = W; cv.height = H;
-  const clips = state.clips.slice();
+  const clips = state.clips.filter(c => c.ready);
+  clips.forEach(c => { if (c.kind === 'video') { c.el.loop = false; c.el.pause(); } });
   const total = state.dur - END_SEC, per = total / clips.length;
   const plan = clips.map(c => ({ c, start: c.kind === 'video' && c.duration > per + 0.6 ? 0.3 : 0, len: c.kind === 'video' ? Math.max(0.6, Math.min(per, c.duration - (c.duration > per + 0.6 ? 0.3 : 0) - 0.05)) : per }));
   const fullLen = plan.reduce((a, x) => a + x.len, 0) + END_SEC;
@@ -405,7 +445,8 @@ async function render(){
         const v = c.el;
         if (orig && !sources.has(v)) { try { const s = ac.createMediaElementSource(v); s.connect(origGain); sources.set(v, s); } catch (e) {} }
         v.muted = !orig;
-        await new Promise(r => { v.onseeked = () => { v.onseeked = null; r(); }; v.currentTime = start; setTimeout(r, 1500); });
+        if (Math.abs(v.currentTime - start) > 0.05) await new Promise(r => { v.onseeked = () => { v.onseeked = null; r(); }; v.currentTime = start; setTimeout(r, 1500); });
+        if (v.readyState < 2) await once(v, ['canplay','loadeddata'], 3000);
         try { await v.play(); } catch (e) { v.muted = true; try { await v.play(); } catch (e2) {} }
         const ts = performance.now();
         while (true) {
