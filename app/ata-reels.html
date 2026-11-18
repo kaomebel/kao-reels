@@ -1,0 +1,477 @@
+<title>ATA Reels Montaj</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Montserrat:wght@600;800;900&family=Inter:wght@400;500;600&display=swap">
+<style>
+/* Layout: phone-shaped preview on the left, one column of numbered steps on the right; stacks on phones with a sticky render bar. */
+:root{
+  --bg:#eef0f3; --surface:#ffffff; --sunk:#e4e7ec; --fg:#15171c; --muted:#5d6470; --line:#d6dae1;
+  --brass:#a87a1f; --brass-soft:#f3e7cc; --on-brass:#1a1204; --danger:#b3261e; --ok:#1d7a46;
+  --display:"Montserrat",system-ui,sans-serif; --body:"Inter",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --r:12px;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#111317; --surface:#1a1d23; --sunk:#23272f; --fg:#eceef1; --muted:#9ba2ad; --line:#2d323b;
+  --brass:#d8a842; --brass-soft:#3a2f17; --on-brass:#1a1204; --danger:#f2867d; --ok:#5fcf8e; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#111317; --surface:#1a1d23; --sunk:#23272f; --fg:#eceef1; --muted:#9ba2ad; --line:#2d323b;
+  --brass:#d8a842; --brass-soft:#3a2f17; --on-brass:#1a1204; --danger:#f2867d; --ok:#5fcf8e; color-scheme:dark}
+[hidden]{display:none!important}
+html,body{background:var(--bg);color:var(--fg)}
+body{font-family:var(--body);font-size:15px;line-height:1.45;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:20px 110px}
+.wrap{max-width:1080px;margin:0 auto;display:grid;grid-template-columns:minmax(0,360px) minmax(0,1fr);gap:28px;align-items:start}
+@media (max-width:820px){.wrap{grid-template-columns:minmax(0,1fr)}}
+header.top{max-width:1080px;margin:0 auto 18px;display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}
+header.top h1{font-family:var(--display);font-weight:900;font-size:26px;letter-spacing:.02em;margin:0;text-wrap:balance}
+header.top h1 b{color:var(--brass)}
+header.top p{margin:0;color:var(--muted)}
+.stage{position:sticky;top:calc(env(safe-area-inset-top,0px) + 12px);display:grid;gap:12px}
+@media (max-width:820px){.stage{position:static;max-width:300px;margin:0 auto;width:100%}}
+.phone{position:relative;aspect-ratio:9/16;max-width:100%;border-radius:22px;overflow:hidden;background:#000;border:6px solid var(--fg);box-shadow:0 18px 40px -22px rgba(0,0,0,.55)}
+.phone canvas,.phone video{position:absolute;inset:0;width:100%;height:100%;display:block;object-fit:cover;background:#000}
+.badge{position:absolute;left:10px;top:10px;font:600 11px/1 var(--body);letter-spacing:.08em;text-transform:uppercase;background:rgba(0,0,0,.6);color:#fff;padding:6px 8px;border-radius:6px}
+.meter{height:6px;border-radius:3px;background:var(--sunk);overflow:hidden}
+.meter i{display:block;height:100%;width:0;background:var(--brass);transition:width .2s linear}
+.status{font-size:13px;color:var(--muted);min-height:1.4em;font-variant-numeric:tabular-nums}
+.status.err{color:var(--danger)} .status.ok{color:var(--ok)}
+.steps{display:grid;gap:18px;min-width:0}
+section.step{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:18px;display:grid;gap:14px;min-width:0}
+section.step h2{margin:0;font-family:var(--display);font-weight:800;font-size:17px;display:flex;gap:10px;align-items:center}
+section.step h2 span{display:inline-grid;place-items:center;width:26px;height:26px;border-radius:50%;background:var(--brass);color:var(--on-brass);font-size:13px}
+.drop{border:2px dashed var(--line);border-radius:var(--r);padding:22px 16px;text-align:center;display:grid;gap:8px;justify-items:center;cursor:pointer;transition:border-color .15s,background .15s}
+.drop:hover,.drop.over{border-color:var(--brass);background:var(--brass-soft)}
+.drop strong{font-family:var(--display);font-size:16px}
+.drop small{color:var(--muted)}
+.clips{display:grid;gap:10px;margin:0;padding:0;list-style:none}
+.clip{display:grid;grid-template-columns:54px minmax(0,1fr) auto;gap:12px;align-items:center;padding:8px;border:1px solid var(--line);border-radius:10px;background:var(--bg)}
+.clip.sel{border-color:var(--brass)}
+.clip .th{width:54px;aspect-ratio:9/16;border-radius:6px;background:var(--sunk) center/cover no-repeat;position:relative;cursor:pointer}
+.clip .th em{position:absolute;left:3px;bottom:3px;font:600 10px/1 var(--body);font-style:normal;background:rgba(0,0,0,.65);color:#fff;padding:2px 4px;border-radius:3px;font-variant-numeric:tabular-nums}
+.clip .meta{display:grid;gap:6px;min-width:0}
+.clip .meta .nm{font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.clip .tools{display:grid;grid-auto-flow:column;gap:4px}
+.ib{width:34px;height:34px;border-radius:8px;border:1px solid var(--line);background:var(--surface);color:var(--fg);font-size:15px;cursor:pointer;display:grid;place-items:center}
+.ib:hover{border-color:var(--brass)}
+.ib:disabled{opacity:.35;cursor:default}
+.sample-note{font-size:13px;color:var(--muted);background:var(--sunk);border-radius:8px;padding:8px 10px}
+label.f{display:grid;gap:6px;font-size:13px;font-weight:600;color:var(--muted)}
+input[type=text],input[type=tel]{font:500 15px var(--body);color:var(--fg);background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:9px 11px;width:100%;min-width:0;box-sizing:border-box}
+input[type=text]:focus,input[type=tel]:focus{outline:2px solid var(--brass);outline-offset:0;border-color:transparent}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:9px;overflow:hidden;width:max-content;max-width:100%}
+.seg button{font:600 14px var(--body);background:var(--surface);color:var(--fg);border:0;padding:9px 14px;cursor:pointer;border-right:1px solid var(--line)}
+.seg button:last-child{border-right:0}
+.seg button[aria-pressed=true]{background:var(--brass);color:var(--on-brass)}
+.row{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+.btn{font:600 15px var(--body);border-radius:10px;padding:11px 16px;border:1px solid var(--line);background:var(--surface);color:var(--fg);cursor:pointer}
+.btn:hover{border-color:var(--brass)}
+.btn.primary{background:var(--brass);border-color:var(--brass);color:var(--on-brass);font-family:var(--display);font-weight:800;letter-spacing:.02em}
+.btn:disabled{opacity:.5;cursor:default}
+.filebtn{position:relative;overflow:hidden}
+.filebtn input{position:absolute;inset:0;opacity:0;cursor:pointer}
+.chk{display:flex;gap:8px;align-items:center;font-size:14px}
+input[type=range]{width:160px;accent-color:var(--brass)}
+:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
+.bar{position:fixed;left:0;right:0;bottom:0;z-index:20;background:var(--surface);border-top:1px solid var(--line);padding:12px max(16px,env(safe-area-inset-right,0px)) calc(12px + env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px))}
+.bar .in{max-width:1080px;margin:0 auto;display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+.bar .in .status{flex:1 1 200px}
+.tip{font-size:13px;color:var(--muted);margin:0}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+
+<header class="top">
+  <h1><b>ATA</b> Reels Montaj</h1>
+  <p>Videolarni tashlang. Dastur ularni 9:16 formatga keltiradi, yozuv, logotip va musiqa qo'shib, bitta MP4 qiladi.</p>
+</header>
+
+<div class="wrap">
+  <aside class="stage">
+    <div class="phone" id="phone">
+      <canvas id="cv" width="1080" height="1920" aria-label="Video ko'rinishi"></canvas>
+      <video id="out" playsinline controls hidden></video>
+      <span class="badge" id="badge">Ko'rinish</span>
+    </div>
+    <div class="meter" aria-hidden="true"><i id="meter"></i></div>
+    <p class="tip">Montaj vaqtida ekranni o'chirmang va boshqa ilovaga o'tmang. Video real vaqtda yoziladi: 20 soniyalik video taxminan 25 soniyada tayyor bo'ladi.</p>
+  </aside>
+
+  <div class="steps">
+    <section class="step">
+      <h2><span>1</span> Videolar va rasmlar</h2>
+      <label class="drop" id="drop" for="files">
+        <strong>Videolarni shu yerga tashlang</strong>
+        <small>yoki bosing va galereyadan tanlang · video va rasm · bir nechtasini birdan</small>
+        <input id="files" type="file" accept="video/*,image/*" multiple hidden>
+      </label>
+      <p class="sample-note" id="sampleNote">Hozir namuna kadrlar turibdi. O'z videolaringizni qo'shsangiz, ular avtomatik o'chadi.</p>
+      <ul class="clips" id="clips"></ul>
+    </section>
+
+    <section class="step">
+      <h2><span>2</span> Uzunlik va sifat</h2>
+      <div class="row">
+        <div class="seg" role="group" aria-label="Video uzunligi" id="durSeg">
+          <button type="button" data-v="15">15 s</button><button type="button" data-v="20" aria-pressed="true">20 s</button><button type="button" data-v="30">30 s</button>
+        </div>
+        <div class="seg" role="group" aria-label="Sifat" id="resSeg">
+          <button type="button" data-v="720">720p · tez</button><button type="button" data-v="1080" aria-pressed="true">1080p</button>
+        </div>
+      </div>
+      <p class="tip">Uzunlik oxirgi logotip kadrini ham o'z ichiga oladi. Har bir klipga vaqt teng bo'linadi.</p>
+    </section>
+
+    <section class="step">
+      <h2><span>3</span> Brend va oxirgi kadr</h2>
+      <div class="grid2">
+        <label class="f">Brend nomi<input id="brand" type="text" value="ATA MEBEL"></label>
+        <label class="f">Telefon<input id="phoneNum" type="tel" placeholder="+998 __ ___ __ __"></label>
+      </div>
+      <label class="f">Oxirgi kadrdagi chaqiriq<input id="cta" type="text" value="Narxi uchun direktga yozing 📩"></label>
+      <div class="row">
+        <span class="btn filebtn">Logotip yuklash (PNG)<input id="logoIn" type="file" accept="image/*"></span>
+        <button class="btn" type="button" id="logoClear" hidden>Logotipni olib tashlash</button>
+        <span class="status" id="logoName"></span>
+      </div>
+    </section>
+
+    <section class="step">
+      <h2><span>4</span> Ovoz</h2>
+      <div class="row">
+        <span class="btn filebtn">Musiqa tanlash (MP3)<input id="musicIn" type="file" accept="audio/*"></span>
+        <button class="btn" type="button" id="musicClear" hidden>Musiqani olib tashlash</button>
+        <span class="status" id="musicName">Musiqa tanlanmagan</span>
+      </div>
+      <div class="row">
+        <label class="chk"><input type="checkbox" id="origAudio"> Videoning o'z ovozini qoldirish</label>
+        <label class="chk">Musiqa balandligi <input type="range" id="musicVol" min="0" max="1" step="0.05" value="0.8"></label>
+      </div>
+      <p class="tip">Instagram'da trenddagi musiqani joylashda ham qo'shsa bo'ladi. Unda bu yerda musiqasiz qoldiring.</p>
+    </section>
+  </div>
+</div>
+
+<div class="bar">
+  <div class="in">
+    <button class="btn primary" type="button" id="renderBtn">Montaj qilish</button>
+    <button class="btn" type="button" id="saveBtn" hidden>MP4 saqlash</button>
+    <button class="btn" type="button" id="backBtn" hidden>Tahrirga qaytish</button>
+    <span class="status" id="status" role="status" aria-live="polite">Tayyor. Videolarni qo'shing va "Montaj qilish"ni bosing.</span>
+  </div>
+</div>
+
+<script>
+(() => {
+const $ = id => document.getElementById(id);
+const cv = $('cv'), ctx = cv.getContext('2d');
+const SCRIPT = ["Qaynoq choynak to'g'ridan-to'g'ri stolga 😳","Iz yo'q ✅","Dog' qolmaydi","Tirnalmaydi 🔪","KERAMOGRANIT","Temir karkas 💪","Yumshoq va mustahkam","Stol + 4 stul"];
+const END_SEC = 2.5;
+const state = { clips: [], sel: 0, dur: 20, res: 1080, logo: null, music: null, busy: false, result: null, ext: 'mp4' };
+let uid = 0;
+
+/* ---------- persistence of brand fields (per viewer) ---------- */
+const KEYS = ['brand','phoneNum','cta'];
+try { KEYS.forEach(k => { const v = localStorage.getItem('ata_'+k); if (v !== null) $(k).value = v; }); } catch (e) {}
+KEYS.forEach(k => $(k).addEventListener('input', () => { try { localStorage.setItem('ata_'+k, $(k).value); } catch (e) {} drawPreview(); }));
+
+/* ---------- sample clips so the first view shows the result ---------- */
+function makeSample(i){
+  const c = document.createElement('canvas'); c.width = 720; c.height = 1280; const g = c.getContext('2d');
+  const hues = [[38,'#2b2a28','#8c7d66'],[210,'#1f2833','#7d8fa3'],[20,'#2a2220','#a37f6c'],[160,'#1d2a26','#6f9488']][i%4];
+  const gr = g.createLinearGradient(0,0,720,1280); gr.addColorStop(0,hues[1]); gr.addColorStop(1,hues[2]); g.fillStyle = gr; g.fillRect(0,0,720,1280);
+  g.fillStyle = 'rgba(255,255,255,.9)'; g.beginPath(); g.ellipse(360,700,250,90,0,0,Math.PI*2); g.fill();
+  g.fillStyle = 'rgba(20,20,20,.85)'; [[170,760],[550,760]].forEach(([x,y]) => g.fillRect(x-6,y,12,320));
+  g.fillStyle = 'rgba(255,255,255,.5)'; g.font = '600 34px Inter, sans-serif'; g.textAlign = 'center'; g.fillText('NAMUNA KADR '+(i+1), 360, 1180);
+  return { id: ++uid, kind: 'image', sample: true, name: 'Namuna '+(i+1), el: c, thumb: c.toDataURL('image/jpeg',.6), duration: Infinity, caption: SCRIPT[i] };
+}
+state.clips = [0,1,2,3].map(makeSample);
+
+/* ---------- adding files ---------- */
+function loadFile(file){
+  return new Promise(res => {
+    const url = URL.createObjectURL(file);
+    if (file.type.startsWith('image/')) {
+      const im = new Image();
+      im.onload = () => res({ id: ++uid, kind: 'image', name: file.name, el: im, thumb: url, duration: Infinity, caption: '' });
+      im.onerror = () => res(null); im.src = url; return;
+    }
+    const v = document.createElement('video');
+    v.muted = true; v.playsInline = true; v.preload = 'auto'; v.setAttribute('playsinline',''); v.src = url;
+    const fail = setTimeout(() => res(null), 15000);
+    v.onloadedmetadata = () => {
+      const t = Math.min(0.5, (v.duration||1)/2);
+      const done = () => {
+        clearTimeout(fail);
+        const c = document.createElement('canvas'); c.width = 108; c.height = 192; drawCover(c.getContext('2d'), v, 108, 192, 1);
+        let thumb = ''; try { thumb = c.toDataURL('image/jpeg',.6); } catch (e) {}
+        res({ id: ++uid, kind: 'video', name: file.name, el: v, thumb, duration: v.duration, caption: '' });
+      };
+      v.onseeked = () => { v.onseeked = null; done(); };
+      v.currentTime = t;
+    };
+    v.onerror = () => { clearTimeout(fail); res(null); };
+  });
+}
+async function addFiles(list){
+  const files = [...list].filter(f => /^(video|image)\//.test(f.type));
+  if (!files.length) { setStatus('Faqat video yoki rasm fayllarini qo\'shing.', 'err'); return; }
+  if (state.clips.some(c => c.sample)) state.clips = [];
+  setStatus('Fayllar ochilmoqda…');
+  let bad = 0;
+  for (const f of files) {
+    const c = await loadFile(f);
+    if (!c) { bad++; continue; }
+    const used = new Set(state.clips.map(x => x.caption));
+    c.caption = SCRIPT.find(s => !used.has(s)) || '';
+    state.clips.push(c);
+  }
+  state.sel = Math.max(0, state.clips.length - 1);
+  renderList(); drawPreview();
+  setStatus(bad ? `${bad} ta fayl ochilmadi (format qo'llab-quvvatlanmaydi). Qolganlari qo'shildi.` : `${state.clips.length} ta klip tayyor.`, bad ? 'err' : 'ok');
+}
+$('files').addEventListener('change', e => { addFiles(e.target.files); e.target.value = ''; });
+const drop = $('drop');
+['dragenter','dragover'].forEach(t => drop.addEventListener(t, e => { e.preventDefault(); drop.classList.add('over'); }));
+['dragleave','drop'].forEach(t => drop.addEventListener(t, e => { e.preventDefault(); drop.classList.remove('over'); }));
+drop.addEventListener('drop', e => addFiles(e.dataTransfer.files));
+document.addEventListener('dragover', e => e.preventDefault());
+document.addEventListener('drop', e => { e.preventDefault(); if (e.target !== drop && !drop.contains(e.target)) addFiles(e.dataTransfer.files); });
+
+/* ---------- clip list ---------- */
+function fmt(s){ return isFinite(s) ? s.toFixed(1)+' s' : 'rasm'; }
+function renderList(){
+  $('sampleNote').hidden = !state.clips.some(c => c.sample);
+  const ul = $('clips'); ul.textContent = '';
+  state.clips.forEach((c, i) => {
+    const li = document.createElement('li'); li.className = 'clip' + (i === state.sel ? ' sel' : '');
+    const th = document.createElement('div'); th.className = 'th'; th.style.backgroundImage = c.thumb ? `url("${c.thumb}")` : '';
+    th.title = 'Ko\'rish'; th.onclick = () => { state.sel = i; renderList(); drawPreview(); };
+    const em = document.createElement('em'); em.textContent = (i+1) + ' · ' + fmt(c.duration); th.append(em);
+    const meta = document.createElement('div'); meta.className = 'meta';
+    const nm = document.createElement('div'); nm.className = 'nm'; nm.textContent = c.name;
+    const inp = document.createElement('input'); inp.type = 'text'; inp.id = 'cap_'+c.id; inp.value = c.caption; inp.placeholder = 'Ekrandagi yozuv (bo\'sh qoldirsa bo\'ladi)';
+    inp.setAttribute('aria-label', `${i+1}-klip yozuvi`);
+    inp.oninput = () => { c.caption = inp.value; state.sel = i; drawPreview(); };
+    inp.onfocus = () => { if (state.sel !== i) { state.sel = i; [...ul.children].forEach((x,j) => x.classList.toggle('sel', j===i)); drawPreview(); } };
+    meta.append(nm, inp);
+    const tools = document.createElement('div'); tools.className = 'tools';
+    const mk = (txt, lbl, fn, dis) => { const b = document.createElement('button'); b.type = 'button'; b.className = 'ib'; b.textContent = txt; b.setAttribute('aria-label', lbl); b.title = lbl; b.disabled = !!dis; b.onclick = fn; return b; };
+    tools.append(
+      mk('↑','Yuqoriga', () => { [state.clips[i-1], state.clips[i]] = [state.clips[i], state.clips[i-1]]; state.sel = i-1; renderList(); drawPreview(); }, i === 0),
+      mk('↓','Pastga', () => { [state.clips[i+1], state.clips[i]] = [state.clips[i], state.clips[i+1]]; state.sel = i+1; renderList(); drawPreview(); }, i === state.clips.length-1),
+      mk('✕','O\'chirish', () => { state.clips.splice(i,1); state.sel = Math.min(state.sel, state.clips.length-1); renderList(); drawPreview(); })
+    );
+    li.append(th, meta, tools); ul.append(li);
+  });
+  $('renderBtn').disabled = !state.clips.length || state.busy;
+}
+
+/* ---------- segmented controls ---------- */
+function seg(id, key){
+  $(id).addEventListener('click', e => {
+    const b = e.target.closest('button'); if (!b || state.busy) return;
+    [...$(id).children].forEach(x => x.setAttribute('aria-pressed', x === b ? 'true' : 'false'));
+    state[key] = +b.dataset.v;
+  });
+}
+seg('durSeg','dur'); seg('resSeg','res');
+
+/* ---------- logo & music ---------- */
+$('logoIn').addEventListener('change', e => {
+  const f = e.target.files[0]; if (!f) return;
+  const im = new Image(); im.onload = () => { state.logo = im; $('logoName').textContent = f.name; $('logoClear').hidden = false; drawPreview(); };
+  im.src = URL.createObjectURL(f); e.target.value = '';
+});
+$('logoClear').onclick = () => { state.logo = null; $('logoName').textContent = ''; $('logoClear').hidden = true; drawPreview(); };
+$('musicIn').addEventListener('change', e => { const f = e.target.files[0]; if (!f) return; state.music = f; $('musicName').textContent = f.name; $('musicClear').hidden = false; e.target.value = ''; });
+$('musicClear').onclick = () => { state.music = null; $('musicName').textContent = 'Musiqa tanlanmagan'; $('musicClear').hidden = true; };
+
+/* ---------- drawing ---------- */
+function srcSize(s){ return s.videoWidth ? [s.videoWidth, s.videoHeight] : [s.naturalWidth || s.width, s.naturalHeight || s.height]; }
+function drawCover(g, s, W, H, zoom){
+  const [sw, sh] = srcSize(s); if (!sw || !sh) { g.fillStyle = '#000'; g.fillRect(0,0,W,H); return; }
+  const k = Math.max(W/sw, H/sh) * zoom, dw = sw*k, dh = sh*k;
+  g.drawImage(s, (W-dw)/2, (H-dh)/2, dw, dh);
+}
+const easeBack = t => { const c = 1.6; t = Math.min(1, Math.max(0, t)); return 1 + (c+1)*Math.pow(t-1,3) + c*Math.pow(t-1,2); };
+function wrap(g, text, maxW){
+  const words = text.split(/\s+/).filter(Boolean), lines = []; let cur = '';
+  for (const w of words) { const t = cur ? cur+' '+w : w; if (g.measureText(t).width > maxW && cur) { lines.push(cur); cur = w; } else cur = t; }
+  if (cur) lines.push(cur); return lines;
+}
+function rr(g, x, y, w, h, r){ g.beginPath(); g.moveTo(x+r,y); g.arcTo(x+w,y,x+w,y+h,r); g.arcTo(x+w,y+h,x,y+h,r); g.arcTo(x,y+h,x,y,r); g.arcTo(x,y,x+w,y,r); g.closePath(); }
+function drawCaption(g, W, H, text, age){
+  if (!text.trim()) return;
+  const fs = Math.round(W*0.068); g.font = `900 ${fs}px Montserrat, system-ui, sans-serif`;
+  const lines = wrap(g, text, W*0.8), lh = fs*1.28, pad = fs*0.42;
+  const s = easeBack(age/0.32), a = Math.min(1, age/0.12);
+  g.save(); g.globalAlpha = a; g.translate(W/2, H*0.24); g.scale(s, s);
+  g.textAlign = 'center'; g.textBaseline = 'middle';
+  const top = -(lines.length*lh)/2;
+  lines.forEach((ln, i) => {
+    const w = g.measureText(ln).width + pad*2, y = top + i*lh;
+    g.fillStyle = '#ffffff'; rr(g, -w/2, y, w, lh - 6, fs*0.24); g.fill();
+    g.fillStyle = '#121212'; g.fillText(ln, 0, y + (lh-6)/2 + fs*0.04);
+  });
+  g.restore();
+}
+function drawWatermark(g, W, H){
+  const brand = $('brand').value.trim(); const y = H*0.085;
+  g.save(); g.globalAlpha = .92;
+  if (state.logo) { const h = W*0.075, w = h * state.logo.naturalWidth / state.logo.naturalHeight; g.drawImage(state.logo, W/2 - w/2, y - h/2, w, h); }
+  else if (brand) {
+    const fs = Math.round(W*0.034); g.font = `800 ${fs}px Montserrat, system-ui, sans-serif`; g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.shadowColor = 'rgba(0,0,0,.55)'; g.shadowBlur = fs*0.5; g.fillStyle = '#e6b84f'; g.fillText(brand.split('').join(' '), W/2, y);
+  }
+  g.restore();
+}
+function drawEndCard(g, W, H, age){
+  const a = Math.min(1, age/0.35);
+  g.fillStyle = `rgba(10,10,12,${0.72*a})`; g.fillRect(0,0,W,H);
+  const s = easeBack(age/0.45); g.save(); g.globalAlpha = a; g.translate(W/2, H*0.44); g.scale(s, s);
+  g.textAlign = 'center'; g.textBaseline = 'middle';
+  if (state.logo) { const h = W*0.34, w = Math.min(W*0.8, h*state.logo.naturalWidth/state.logo.naturalHeight), hh = w*state.logo.naturalHeight/state.logo.naturalWidth; g.drawImage(state.logo, -w/2, -hh/2 - W*0.05, w, hh); }
+  else { const fs = W*0.13; g.font = `900 ${fs}px Montserrat, system-ui, sans-serif`; g.fillStyle = '#e6b84f'; g.fillText($('brand').value.trim() || 'ATA MEBEL', 0, -W*0.04); }
+  g.restore();
+  const b = Math.min(1, Math.max(0, (age-0.35)/0.35));
+  g.save(); g.globalAlpha = b; g.textAlign = 'center'; g.textBaseline = 'middle';
+  const cta = $('cta').value.trim(), ph = $('phoneNum').value.trim();
+  if (cta) { const fs = Math.round(W*0.055); g.font = `800 ${fs}px Montserrat, system-ui, sans-serif`; g.fillStyle = '#ffffff';
+    wrap(g, cta, W*0.84).forEach((ln, i) => g.fillText(ln, W/2, H*0.6 + i*fs*1.25)); }
+  if (ph) { const fs = Math.round(W*0.05); g.font = `700 ${fs}px Montserrat, system-ui, sans-serif`; g.fillStyle = '#e6b84f'; g.fillText(ph, W/2, H*0.72); }
+  g.restore();
+}
+function frame(g, W, H, src, p, age, caption, first){
+  g.fillStyle = '#000'; g.fillRect(0,0,W,H);
+  const punch = first ? 0 : Math.max(0, 1 - age/0.22) * 0.07;
+  if (src) drawCover(g, src, W, H, 1.02 + 0.06*p + punch);
+  if (!first && age < 0.14) { g.fillStyle = `rgba(255,255,255,${0.55*(1-age/0.14)})`; g.fillRect(0,0,W,H); }
+  const gr = g.createLinearGradient(0,0,0,H*0.4); gr.addColorStop(0,'rgba(0,0,0,.35)'); gr.addColorStop(1,'rgba(0,0,0,0)'); g.fillStyle = gr; g.fillRect(0,0,W,H*0.4);
+  drawWatermark(g, W, H);
+  drawCaption(g, W, H, caption, age);
+}
+function drawPreview(){
+  if (state.busy || state.result) return;
+  cv.width = 1080; cv.height = 1920;
+  const c = state.clips[state.sel];
+  if (!c) { ctx.fillStyle = '#16181d'; ctx.fillRect(0,0,1080,1920); ctx.fillStyle = '#9ba2ad'; ctx.font = '600 44px Inter, sans-serif'; ctx.textAlign = 'center'; ctx.fillText('Videolarni qo\'shing', 540, 960); return; }
+  frame(ctx, 1080, 1920, c.el, 0.5, 1, c.caption, true);
+}
+
+/* ---------- render ---------- */
+function setStatus(t, kind){ const s = $('status'); s.textContent = t; s.className = 'status' + (kind ? ' '+kind : ''); }
+function pickMime(){
+  const c = ['video/mp4;codecs=avc1.640028,mp4a.40.2','video/mp4;codecs=avc1.42E01E,mp4a.40.2','video/mp4;codecs=avc1,mp4a.40.2','video/mp4;codecs=avc1','video/mp4','video/webm;codecs=vp9,opus','video/webm;codecs=vp8,opus','video/webm'];
+  return c.find(m => window.MediaRecorder && MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(m)) || '';
+}
+const nextFrame = () => new Promise(r => requestAnimationFrame(r));
+const sources = new WeakMap();
+async function render(){
+  if (state.busy || !state.clips.length) return;
+  if (!window.MediaRecorder || !cv.captureStream) { setStatus('Bu brauzer video yozishni qo\'llamaydi. Chrome yoki Safari\'ning yangi versiyasida oching.', 'err'); return; }
+  state.busy = true; renderList(); $('renderBtn').disabled = true; $('badge').textContent = 'Yozilmoqda';
+  let wake = null; try { wake = await navigator.wakeLock?.request('screen'); } catch (e) {}
+  await document.fonts?.load?.('900 60px Montserrat').catch(() => {});
+  const W = state.res, H = Math.round(W*16/9); cv.width = W; cv.height = H;
+  const clips = state.clips.slice();
+  const total = state.dur - END_SEC, per = total / clips.length;
+  const plan = clips.map(c => ({ c, start: c.kind === 'video' && c.duration > per + 0.6 ? 0.3 : 0, len: c.kind === 'video' ? Math.max(0.6, Math.min(per, c.duration - (c.duration > per + 0.6 ? 0.3 : 0) - 0.05)) : per }));
+  const fullLen = plan.reduce((a, x) => a + x.len, 0) + END_SEC;
+
+  const ac = new (window.AudioContext || window.webkitAudioContext)(); await ac.resume().catch(() => {});
+  const dest = ac.createMediaStreamDestination();
+  const silent = ac.createConstantSource ? ac.createConstantSource() : null; if (silent) { const z = ac.createGain(); z.gain.value = 0; silent.connect(z).connect(dest); silent.start(); }
+  let musicGain = null, musicSrc = null;
+  if (state.music) {
+    try { const buf = await ac.decodeAudioData(await state.music.arrayBuffer()); musicSrc = ac.createBufferSource(); musicSrc.buffer = buf; musicSrc.loop = true; musicGain = ac.createGain(); musicGain.gain.value = +$('musicVol').value; musicSrc.connect(musicGain).connect(dest); }
+    catch (e) { setStatus('Musiqa fayli ochilmadi, musiqasiz davom etyapman.', 'err'); }
+  }
+  const orig = $('origAudio').checked;
+  const origGain = ac.createGain(); origGain.gain.value = orig ? 1 : 0; origGain.connect(dest);
+
+  const mime = pickMime(); state.ext = mime.includes('mp4') ? 'mp4' : 'webm';
+  const stream = new MediaStream([...cv.captureStream(30).getVideoTracks(), ...dest.stream.getAudioTracks()]);
+  const rec = new MediaRecorder(stream, mime ? { mimeType: mime, videoBitsPerSecond: W >= 1080 ? 9e6 : 5e6 } : undefined);
+  const chunks = []; rec.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
+  const stopped = new Promise(r => rec.onstop = r);
+  rec.start(500);
+  const t0 = ac.currentTime;
+  if (musicSrc) { musicSrc.start(); musicGain.gain.setValueAtTime(+$('musicVol').value, t0 + fullLen - 1.2); musicGain.gain.linearRampToValueAtTime(0, t0 + fullLen); }
+  let elapsedAll = 0, lastSrc = null;
+  const tick = () => { $('meter').style.width = Math.min(100, elapsedAll/fullLen*100).toFixed(1)+'%'; setStatus(`Montaj: ${elapsedAll.toFixed(1)} / ${fullLen.toFixed(1)} s`); };
+  try {
+    for (let i = 0; i < plan.length; i++) {
+      const { c, start, len } = plan[i]; const base = elapsedAll;
+      if (c.kind === 'video') {
+        const v = c.el;
+        if (orig && !sources.has(v)) { try { const s = ac.createMediaElementSource(v); s.connect(origGain); sources.set(v, s); } catch (e) {} }
+        v.muted = !orig;
+        await new Promise(r => { v.onseeked = () => { v.onseeked = null; r(); }; v.currentTime = start; setTimeout(r, 1500); });
+        try { await v.play(); } catch (e) { v.muted = true; try { await v.play(); } catch (e2) {} }
+        const ts = performance.now();
+        while (true) {
+          const age = (performance.now() - ts)/1000; if (age >= len || v.ended) break;
+          elapsedAll = base + age; frame(ctx, W, H, v, age/len, age, c.caption, i === 0); tick(); await nextFrame();
+        }
+        v.pause(); lastSrc = v;
+      } else {
+        const ts = performance.now();
+        while (true) {
+          const age = (performance.now() - ts)/1000; if (age >= len) break;
+          elapsedAll = base + age; frame(ctx, W, H, c.el, age/len, age, c.caption, i === 0); tick(); await nextFrame();
+        }
+        lastSrc = c.el;
+      }
+      elapsedAll = base + len;
+    }
+    const ts = performance.now(), base = elapsedAll;
+    while (true) {
+      const age = (performance.now() - ts)/1000; if (age >= END_SEC) break;
+      elapsedAll = base + age;
+      ctx.fillStyle = '#000'; ctx.fillRect(0,0,W,H); if (lastSrc) drawCover(ctx, lastSrc, W, H, 1.08 + 0.03*age/END_SEC);
+      drawEndCard(ctx, W, H, age); tick(); await nextFrame();
+    }
+  } finally {
+    rec.stop(); await stopped;
+    try { musicSrc?.stop(); } catch (e) {} try { silent?.stop(); } catch (e) {}
+    stream.getTracks().forEach(t => t.stop()); ac.close().catch(() => {}); wake?.release?.().catch(() => {});
+    state.busy = false;
+  }
+  const blob = new Blob(chunks, { type: mime || 'video/webm' });
+  if (!blob.size) { setStatus('Video yozilmadi. Sahifani yangilab, qaytadan urinib ko\'ring.', 'err'); $('badge').textContent = 'Ko\'rinish'; renderList(); drawPreview(); return; }
+  state.result = blob;
+  const out = $('out'); out.src = URL.createObjectURL(blob); out.hidden = false; cv.hidden = true;
+  $('badge').textContent = 'Tayyor'; $('meter').style.width = '100%';
+  $('saveBtn').hidden = false; $('backBtn').hidden = false; $('renderBtn').hidden = true;
+  setStatus(`Tayyor: ${fullLen.toFixed(1)} s, ${(blob.size/1048576).toFixed(1)} MB (${state.ext.toUpperCase()}). Endi saqlang.`, 'ok');
+  window.__ataResult = blob;
+}
+$('renderBtn').onclick = () => render().catch(e => { state.busy = false; renderList(); $('badge').textContent = 'Ko\'rinish'; setStatus('Xatolik: ' + (e && e.message || e), 'err'); });
+$('backBtn').onclick = () => {
+  state.result = null; const out = $('out'); out.pause(); out.hidden = true; cv.hidden = false;
+  $('saveBtn').hidden = true; $('backBtn').hidden = true; $('renderBtn').hidden = false; $('badge').textContent = 'Ko\'rinish'; $('meter').style.width = '0';
+  renderList(); drawPreview(); setStatus('Tahrirlang va qaytadan "Montaj qilish"ni bosing.');
+};
+
+/* ---------- save ---------- */
+let downloads = null;
+if (window.claude?.use) window.claude.use('downloads').then(d => { downloads = d; }).catch(() => {});
+$('saveBtn').onclick = async () => {
+  if (!state.result) return;
+  const d = new Date(), name = `ata-reels-${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}-${String(d.getHours()).padStart(2,'0')}${String(d.getMinutes()).padStart(2,'0')}.${state.ext}`;
+  if (downloads) {
+    try { await downloads.save({ filename: name, data: state.result }); setStatus('Saqlandi. Endi Instagram\'ga joylashingiz mumkin.', 'ok'); }
+    catch (e) {
+      const m = { declined: 'Saqlash bekor qilindi.', rate_limited: 'Bir oz kuting va qaytadan bosing.', too_large: 'Fayl juda katta. 720p sifatda qayta montaj qiling.' }[e && e.code];
+      setStatus(m || 'Bu oynada saqlab bo\'lmadi. Sahifani brauzerda oching.', 'err');
+    }
+    return;
+  }
+  if (window.top === window) { const a = document.createElement('a'); a.href = URL.createObjectURL(state.result); a.download = name; document.body.append(a); a.click(); a.remove(); setStatus('Yuklab olindi.', 'ok'); }
+  else setStatus('Bu oynada saqlash ishlamayapti. Sahifani Claude ilovasida yoki brauzerda to\'liq oching.', 'err');
+};
+
+renderList();
+(document.fonts?.ready || Promise.resolve()).then(drawPreview);
+drawPreview();
+})();
+</script>
