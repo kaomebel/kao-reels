@@ -4084,7 +4084,7 @@ async function saveDoc(type, existing, preset, data, stock) {
       const min = minPriceUZS(p);
       const floor = min || Math.round(ctx.cost?.[p.id] || 0);
       const price = Math.round((it.price - perUnitDisc) * k);
-      return floor && price < floor ? { productId: p.id, price, min: floor, byCost: !min } : null;
+      return floor && price < floor ? { productId: p.id, qty: it.qty, price, min: floor, byCost: !min } : null;
     }).filter(Boolean);
     if (belowMin.length && !(await confirmBelowMin(belowMin))) return false;
     if (!belowMin.length) belowMin = undefined;
@@ -5388,6 +5388,12 @@ function renderAlertBanner() {
     const sum = shorts.reduce((s, x) => s + x.amount, 0);
     parts.push(isAdmin() ? `⚠️ Kam topshirilgan kassa: <b class="late">${money(sum)}</b> — qolganini qabul qiling` : `⚠️ Kassa <b class="late">${money(sum)}</b> kam topshirilgan — to'liqlab bering`);
   }
+  const bm = me ? belowMinSales() : [];
+  if (bm.length) {
+    parts.push(isAdmin()
+      ? `⚠️ Eng kam narxdan arzon sotilgan: <b class="late">${bm.length} ta</b> (−${money(bm.reduce((a, d) => a + bmLoss(d), 0))})`
+      : `⚠️ Siz <b class="late">${bm.length} ta</b> sotuvni eng kam narxdan arzon sotdingiz — administratorga xabar berildi`);
+  }
   if (me && can('sale')) {
     const open = openSales();
     const late = open.filter(isOverdueSale).length;
@@ -5915,6 +5921,68 @@ function staffCashCard() {
     <div class="sc-row sc-all"><span>Jami</span><b class="sc-sum">${money(rows.reduce((s, x) => s + x.total + x.shorts.reduce((a, y) => a + y.amount, 0), 0))}</b><span></span></div></div>`;
 }
 
+// ---------- Eng kam narxdan arzon sotuvlar: administratorga xabar, xodimga eslatma ----------
+const bmQty = (d, x) => x.qty || d.items.filter((it) => it.productId === x.productId).reduce((a, it) => a + it.qty, 0) || 1;
+const bmLoss = (d) => (d.belowMin || []).reduce((a, x) => a + Math.max(0, x.min - x.price) * bmQty(d, x), 0);
+const bmSeller = (d) => d.belowMinBy || d.userId;
+// Administrator hali ko'rmagan (yopmagan) — barchasi; xodimga — o'ziniki
+function belowMinSales({ all = false } = {}) {
+  return db.docs.filter((d) => d.belowMin?.length && (all || !d.belowMinSeen) && (isAdmin() || bmSeller(d) === me?.id))
+    .sort((a, b) => (b.date + (b.no || '')).localeCompare(a.date + (a.no || '')));
+}
+// Bitta sotuv bo'yicha ogohlantirish qatori (qaydnomalarda, kartada)
+function bmLines(d, { cost = can('costs') } = {}) {
+  return (d.belowMin || []).map((x) => {
+    const p = product(x.productId);
+    const q = bmQty(d, x);
+    const lim = x.byCost && !cost ? 'ruxsat etilgan chegaradan past' : `eng kami ${fmt(x.min)}`;
+    return `<div>${esc(p?.name || '')}: <b>${fmt(x.price)}</b> × ${fmt(q)} · ${lim}${x.byCost && !cost ? '' : ` · <b>−${fmt((x.min - x.price) * q)}</b>`}</div>`;
+  }).join('');
+}
+function bmNote(d) {
+  if (!d.belowMin?.length) return '';
+  const seen = d.belowMinSeen;
+  return `<div class="bm-note">⚠️ <b>Eng kam narxdan arzon sotilgan</b>${userName(bmSeller(d)) ? ` (${esc(userName(bmSeller(d)))})` : ''}${bmLines(d)}
+    ${seen ? `<div class="small">✓ Administrator ko'rdi ${fmtDate(String(seen.at || '').slice(0, 10))}${seen.note ? ` — <b>${esc(seen.note)}</b>` : ''}</div>` : '<div class="small">Administrator hali ko\'rmagan</div>'}</div>`;
+}
+
+function belowMinCard() {
+  if (!me) return '';
+  if (isAdmin()) {
+    const list = belowMinSales();
+    if (!list.length) return '';
+    return `<div class="card bm-card"><h3>⚠️ Eng kam narxdan arzon sotilgan — ${list.length} ta · −${money(list.reduce((a, d) => a + bmLoss(d), 0))}</h3>
+      <p class="muted small">Xodim ogohlantirishga «Ha, roziman» deb sotgan. Ko'rib chiqib, kerak bo'lsa izoh yozing (masalan, jarima) va yoping — izoh xodimga ham ko'rinadi.</p>
+      ${list.map((d) => `<div class="bm-item">
+        <div class="cs-head"><span><b>${fmtDate(d.date)}</b> · <a href="javascript:void 0" data-act="openDoc" data-id="${d.id}">${esc(DOC_TYPES[d.type]?.one || '')} ${esc(d.no)}</a> · 👤 ${esc(docPartyName(d) || 'Chakana xaridor')}</span><b class="debt">−${money(bmLoss(d))}</b></div>
+        <div class="small">Sotgan: <b>${esc(userName(bmSeller(d)) || '—')}</b></div>
+        <div class="small bm-lines">${bmLines(d, { cost: true })}</div>
+        <div class="bm-btns"><button class="small" data-act="bmSeen" data-id="${d.id}" data-note="1">✏️ Izoh / jarima yozib yopish</button><button class="small primary" data-act="bmSeen" data-id="${d.id}">${icon('check')}Ko'rdim</button></div>
+      </div>`).join('')}</div>`;
+  }
+  // Xodim: o'zi arzon sotganlari — administrator ko'rmaguncha; ko'rib izoh yozgan bo'lsa — 7 kun davomida
+  const weekAgo = new Date(Date.now() - 7 * 864e5).toISOString().slice(0, 10);
+  const list = belowMinSales({ all: true }).filter((d) => !d.belowMinSeen || (d.belowMinSeen.note && String(d.belowMinSeen.at || '').slice(0, 10) >= weekAgo));
+  if (!list.length) return '';
+  return `<div class="card bm-card"><h3>⚠️ Siz eng kam narxdan arzon sotgansiz</h3>
+    <p class="muted small">Bu sotuvlar haqida administratorga xabar borgan.</p>
+    ${list.map((d) => `<div class="bm-item"><div class="cs-head"><span><b>${fmtDate(d.date)}</b> · ${esc(d.no)} · 👤 ${esc(docPartyName(d) || 'Chakana xaridor')}</span></div>
+      <div class="small bm-lines">${bmLines(d)}</div>
+      <div class="small">${d.belowMinSeen ? `Administrator: <b>${esc(d.belowMinSeen.note || "ko'rdi")}</b>` : '<span class="muted">Administrator hali ko\'rmagan</span>'}</div></div>`).join('')}</div>`;
+}
+
+async function belowMinSeen(id, withNote) {
+  const d = doc(id);
+  if (!d || !isAdmin()) return;
+  let note = '';
+  if (withNote) {
+    note = prompt(`${d.no}: izoh yoki chora (masalan: «jarima 50 000», «farq ish haqidan ushlanadi»).\nBu yozuv xodimga ham ko'rinadi.`, '');
+    if (note === null) return;
+  }
+  d.belowMinSeen = { at: new Date().toISOString(), by: me.id, note: note.trim() || undefined };
+  await save();
+}
+
 // Qaydnoma qatorlari: naqd kirim (qayerdan) va chiqim (nimaga)
 const csItemsHtml = (d) => `<div class="cs-items">${d.items.map((it) => `<div><span>${esc(itemName(it))}</span><span>${fmt(it.qty)} × ${fmt(it.price)} = <b>${fmt(it.qty * it.price)}</b></span></div>`).join('')}${d.discount ? `<div class="muted"><span>Chegirma</span><span>−${fmt(d.discount)}</span></div>` : ''}</div>`;
 const csInRow = (p) => {
@@ -5927,7 +5995,7 @@ const csInRow = (p) => {
     const rest = Math.max(0, docTotal(d) - paid);
     what = `<b>${esc(DOC_TYPES[d.type]?.one || '')} ${esc(d.no)}</b>${whoName ? ` · 👤 ${esc(whoName)}` : ''}
       ${csItemsHtml(d)}
-      <div class="small muted">Hujjat jami ${money(docTotal(d))} · to'langan ${money(paid)}${rest > 0.5 ? ` · <span class="debt">qarz qoldi ${money(rest)}</span>` : ' · ✓ to\'liq'}</div>`;
+      <div class="small muted">Hujjat jami ${money(docTotal(d))} · to'langan ${money(paid)}${rest > 0.5 ? ` · <span class="debt">qarz qoldi ${money(rest)}</span>` : ' · ✓ to\'liq'}</div>${bmNote(d)}`;
   } else if (p.handover) {
     what = `<b>Shofyordan qabul qilingan</b>${whoName ? ` · ${esc(whoName)}` : ''}`;
   } else {
@@ -5974,6 +6042,7 @@ function adminCashStatement() {
       ${shorts ? `<div><span>− Kam topshirilgan (ochiq)</span><b class="debt">−${money(shorts)}</b></div>` : ''}
       <div class="cs-due"><span>Sizning kassangizda</span><b>${money(mine)}</b></div>
     </div>
+    ${(() => { const bm = db.docs.filter((d) => d.belowMin?.length && d.date === t); return bm.length ? `<h4 class="pf-title">⚠️ Bugun eng kam narxdan arzon sotilgan — ${bm.length} ta</h4>${bm.map((d) => `<div class="cs-row cs-out"><div class="cs-head"><span><b>${esc(d.no)}</b> · ${esc(userName(bmSeller(d)) || '')} · 👤 ${esc(docPartyName(d) || 'Chakana xaridor')}</span><b class="debt">−${money(bmLoss(d))}</b></div><div class="small">${bmLines(d, { cost: true })}</div></div>`).join('')}` : ''; })()}
     ${got.size ? `<h4 class="pf-title">👥 Bugun xodimlardan qabul qilindi</h4>${[...got.entries()].map(([id, v]) => `<div class="cs-row"><div class="cs-head"><b>${esc(userName(id) || '—')}</b><b class="ok">+${money(v)}</b></div></div>`).join('')}` : ''}
     <h4 class="pf-title">💵 Bugun kassaga kelgan naqd pul — ${money(sum(ins))}</h4>
     ${ins.length ? ins.map(csInRow).join('') : '<p class="muted small">Bugun naqd kirim yo\'q.</p>'}
@@ -6005,12 +6074,13 @@ function cashStatement(userId) {
       ${shortSum ? `<div><span>⚠️ Avval kam topshirilgan</span><b class="debt">+${money(shortSum)}</b></div>` : ''}
       <div class="cs-due"><span>Topshirishi kerak</span><b>${money(due)}</b></div>
     </div>
+    ${(() => { const bm = [...new Set([...ins.map((p) => p.docId && doc(p.docId)), ...sold].filter((d) => d?.belowMin?.length))]; return bm.length ? `<div class="bm-note">⚠️ <b>${bm.length} ta sotuv eng kam narxdan arzon</b> — jami ${money(bm.reduce((a, d) => a + bmLoss(d), 0))} kam: ${bm.map((d) => esc(d.no)).join(', ')}</div>` : ''; })()}
     <h4 class="pf-title">💵 Qayerdan pul keldi</h4>
     ${ins.length ? ins.map(csInRow).join('') : '<p class="muted small">Naqd kirim yo\'q.</p>'}
     <h4 class="pf-title">💸 Nimaga ishlatildi</h4>
     ${outs.length ? outs.map(csOutRow).join('') : '<p class="muted small">Naqd puldan xarajat qilinmagan.</p>'}
     ${shorts.length ? `<h4 class="pf-title">⚠️ Kam topshirilganlar</h4>${shorts.map((x) => `<div class="cs-row cs-out"><div class="cs-head"><span class="small">${fmtDate(x.date)} — ${money(x.expected)} o'rniga ${money(x.got)} berilgan</span><b class="debt">${money(x.amount)}</b></div></div>`).join('')}` : ''}
-    ${sold.length ? `<h4 class="pf-title">🛒 Bugungi sotuvlari (${sold.length} ta)</h4>${sold.map((d) => { const paid = docPaid(d); const rest = Math.max(0, docTotal(d) - paid); return `<div class="cs-row cs-sale click" data-act="openDoc" data-id="${d.id}"><div class="cs-head"><b>${esc(d.no)}</b>${d.counterpartyId && d.counterpartyId !== 'retail' ? ` · 👤 ${esc(docPartyName(d))}` : ''}<b>${money(docTotal(d))}</b></div>${csItemsHtml(d)}<div class="small ${rest > 0.5 ? 'debt' : 'ok'}">${rest > 0.5 ? `to'langan ${money(paid)} · qarz ${money(rest)}` : '✓ to\'langan'}</div></div>`; }).join('')}` : ''}
+    ${sold.length ? `<h4 class="pf-title">🛒 Bugungi sotuvlari (${sold.length} ta)</h4>${sold.map((d) => { const paid = docPaid(d); const rest = Math.max(0, docTotal(d) - paid); return `<div class="cs-row cs-sale click" data-act="openDoc" data-id="${d.id}"><div class="cs-head"><b>${esc(d.no)}</b>${d.counterpartyId && d.counterpartyId !== 'retail' ? ` · 👤 ${esc(docPartyName(d))}` : ''}<b>${money(docTotal(d))}</b></div>${csItemsHtml(d)}<div class="small ${rest > 0.5 ? 'debt' : 'ok'}">${rest > 0.5 ? `to'langan ${money(paid)} · qarz ${money(rest)}` : '✓ to\'langan'}</div>${bmNote(d)}</div>`; }).join('')}` : ''}
     ${nonCash.length ? `<h4 class="pf-title">💳 Bugun kartaga / terminalga tushgan (topshirilmaydi)</h4>${nonCash.map((p) => `<div class="cs-row cs-info"><div class="cs-head"><span class="small">${esc(PAY_METHODS[p.method] || p.method)} · ${cashLine(p)}</span><b>${p.dir === 'out' ? '−' : ''}${money(p.amount)}</b></div></div>`).join('')}` : ''}
     <p class="muted small">Naqd pul hisobi ${fmtDate(CASH_START)} dan, administrator «Qabul qildim» bosgunga qadar yuritiladi.</p>`;
   openModal({
@@ -6193,7 +6263,7 @@ function viewDashboard() {
     ? `<div class="card warn-card backup-warn">${icon('alert')}<span>${age === Infinity ? "Hali birorta ham zaxira nusxa olinmagan." : `Oxirgi zaxira nusxa ${Math.floor(age)} kun oldin olingan.`} Ma'lumot yo'qolmasligi uchun zaxira oling${db.telegram.backupChatId ? '' : ' yoki har kungi avtomatik zaxirani yoqing'}.</span>
         <button class="small primary" data-act="backup">${icon('download')}Zaxira olish</button><a href="#settings/backup">Sozlash</a></div>` : '';
   const moneyBtns = isAdmin() ? `<div class="money-btns"><button class="mb-in" data-act="moneyMenu" data-dir="in"><span>＋</span>Kirim</button><button class="mb-out" data-act="moneyMenu" data-dir="out"><span>−</span>Chiqim</button></div>` : '';
-  return moneyBtns + installCard + backupWarn + usageWarn + staffCashCard() + salaryDashCard() + supplierDebtsCard() + customerCreditsCard() + myCashCard() + labelsDueCard() + handoverCard() + openSalesCard() + `<div class="stats">${cards.map(([l, v, h, cls]) => `<div class="stat">
+  return moneyBtns + installCard + backupWarn + usageWarn + belowMinCard() + staffCashCard() + salaryDashCard() + supplierDebtsCard() + customerCreditsCard() + myCashCard() + labelsDueCard() + handoverCard() + openSalesCard() + `<div class="stats">${cards.map(([l, v, h, cls]) => `<div class="stat">
       <div class="stat-ic ${cls || ''}">${icon(cardIcon[l] || 'chart')}</div>
       <div class="label">${l}</div><div class="value ${cls || ''}">${v}</div><div class="muted small">${h}</div></div>`).join('')}</div>
     <div class="quick">${quick}</div>
@@ -6250,7 +6320,7 @@ function viewDocs(type) {
     const paid = t.pay ? docPaid(d) : 0;
     const where = t.party ? esc(docPartyName(d)) : esc(warehouse(d.warehouseId)?.name) + (t.move ? ' → ' + esc(warehouse(d.toWarehouseId)?.name) : '');
     return `<tr class="click ${isOpenSale(d) ? `sale-${d.status}` : ''} ${isOverdueSale(d) ? 'sale-late' : ''}" data-act="openDoc" data-id="${d.id}">
-      <td>${esc(d.no)}${isOverdueSale(d) ? '<div class="debt small">⚠ yopilmagan</div>' : ''}${d.belowMin?.length && can('costs') ? '<div class="debt small">⚠ eng kam narxdan arzon</div>' : ''}</td><td>${fmtDate(d.date)}${d.userId ? `<div class="muted small">${esc(userName(d.userId))}</div>` : ''}</td><td>${where}</td>
+      <td>${esc(d.no)}${isOverdueSale(d) ? '<div class="debt small">⚠ yopilmagan</div>' : ''}${d.belowMin?.length && (isAdmin() || bmSeller(d) === me?.id) ? `<div class="debt small">⚠ eng kam narxdan arzon${d.belowMinSeen ? ' · ko\'rildi' : ''}</div>` : ''}</td><td>${fmtDate(d.date)}${d.userId ? `<div class="muted small">${esc(userName(d.userId))}</div>` : ''}</td><td>${where}</td>
       <td class="items-cell">${d.items.slice(0, 3).map((it) => `${esc(itemName(it))} × ${it.qty}`).join('<br>')}${d.items.length > 3 ? `<br><span class="muted">yana ${d.items.length - 3} ta</span>` : ''}</td>
       <td class="num">${noSum ? '' : money(docTotal(d))}${d.currency === 'USD' ? `<div class="muted small">${fmtUsd(docTotalCur(d))} · ${fmtRate(d.rate)}</div>` : ''}</td>
       ${t.pay ? (isOrder
@@ -7859,6 +7929,7 @@ const ACTIONS = {
   savePrices: () => { if (can('money')) savePrices(); },
   bookFreight: async (ds) => { const d = doc(ds.id); if (d && canBookFreight()) { await bookFreight(d); save(); } },
   collectCash: (ds) => { if (isAdmin()) collectCash(ds.id); },
+  bmSeen: (ds) => belowMinSeen(ds.id, !!ds.note),
   cashStmt: (ds) => { if (isAdmin() && ds.id === me?.id) adminCashStatement(); else if (isAdmin() || ds.id === me?.id) cashStatement(ds.id); },
   closeShort: (ds) => {
     const x = (db.cashShorts || []).find((y) => y.id === ds.id);

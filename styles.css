@@ -1596,3 +1596,12 @@ html.modal-open, html.modal-open body { overflow: hidden; overscroll-behavior: n
   .cash-pill b { font-size: 14px; }
   .sidebar:has(.cash-pill:not([hidden])) .rate-box { padding: 4px 8px; font-size: 11px; }
 }
+
+/* Eng kam narxdan arzon sotuv — xabarlar */
+.bm-note { margin-top: 6px; padding: 8px 10px; border-radius: 10px; background: var(--danger-soft); font-size: 13.5px; }
+.bm-note > div { margin-top: 2px; }
+.bm-card { border-color: var(--danger, #b3442e); }
+.bm-item { padding: 10px 0; border-bottom: 1px solid var(--border); }
+.bm-item:last-child { border-bottom: none; }
+.bm-lines { margin: 4px 0; }
+.bm-btns { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; margin-top: 6px; }
