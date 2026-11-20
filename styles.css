@@ -1566,3 +1566,20 @@ html.modal-open, html.modal-open body { overflow: hidden; overscroll-behavior: n
 .ph-pay { margin-top: 4px; font-size: 14px; }
 .ph-foot { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 4px 10px; margin-top: 6px; padding-top: 6px; border-top: 1px dashed var(--border); }
 .ph-card[hidden] { display: none; }
+
+/* Kassa qaydnomasi */
+.cs-open { display: flex; width: 100%; align-items: center; justify-content: space-between; gap: 10px; text-align: left; border: none; color: inherit; cursor: pointer; }
+.cs-more { flex: none; font-size: 14px; font-weight: 600; color: var(--accent-dark); }
+.cs-link { padding: 4px 8px; border: none; background: transparent; color: var(--accent-dark); font-weight: 700; font-size: 17px; text-decoration: underline dotted; cursor: pointer; }
+.cs-sum { display: flex; flex-direction: column; gap: 6px; padding: 12px 14px; border-radius: 12px; background: var(--card-2); }
+.cs-sum > div { display: flex; justify-content: space-between; gap: 10px; }
+.cs-sum .cs-due { margin-top: 4px; padding-top: 8px; border-top: 1px solid var(--border-strong); font-size: 17px; }
+.cs-sum .cs-due b { font-size: 20px; }
+.cs-row { padding: 10px 12px; margin-bottom: 8px; border: 1px solid var(--border); border-left: 4px solid var(--ok, #4a8a3c); border-radius: 12px; background: var(--card); }
+.cs-row.cs-out { border-left-color: var(--danger, #b3442e); }
+.cs-row.cs-sale { border-left-color: var(--accent); cursor: pointer; }
+.cs-row.cs-info { border-left-color: var(--border-strong); }
+.cs-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; flex-wrap: wrap; margin-bottom: 2px; }
+.cs-items { margin: 4px 0; font-size: 14px; }
+.cs-items > div { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.cs-items > div > span:last-child { white-space: nowrap; color: var(--muted); }
