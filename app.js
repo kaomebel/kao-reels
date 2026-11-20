@@ -5915,6 +5915,74 @@ function staffCashCard() {
     <div class="sc-row sc-all"><span>Jami</span><b class="sc-sum">${money(rows.reduce((s, x) => s + x.total + x.shorts.reduce((a, y) => a + y.amount, 0), 0))}</b><span></span></div></div>`;
 }
 
+// Qaydnoma qatorlari: naqd kirim (qayerdan) va chiqim (nimaga)
+const csItemsHtml = (d) => `<div class="cs-items">${d.items.map((it) => `<div><span>${esc(itemName(it))}</span><span>${fmt(it.qty)} × ${fmt(it.price)} = <b>${fmt(it.qty * it.price)}</b></span></div>`).join('')}${d.discount ? `<div class="muted"><span>Chegirma</span><span>−${fmt(d.discount)}</span></div>` : ''}</div>`;
+const csInRow = (p) => {
+  const d = p.docId && doc(p.docId);
+  const who = party(p.counterpartyId);
+  const whoName = who && p.counterpartyId !== 'retail' ? who.name : d ? (docPartyName(d) || 'Chakana xaridor') : '';
+  let what;
+  if (d) {
+    const paid = docPaid(d);
+    const rest = Math.max(0, docTotal(d) - paid);
+    what = `<b>${esc(DOC_TYPES[d.type]?.one || '')} ${esc(d.no)}</b>${whoName ? ` · 👤 ${esc(whoName)}` : ''}
+      ${csItemsHtml(d)}
+      <div class="small muted">Hujjat jami ${money(docTotal(d))} · to'langan ${money(paid)}${rest > 0.5 ? ` · <span class="debt">qarz qoldi ${money(rest)}</span>` : ' · ✓ to\'liq'}</div>`;
+  } else if (p.handover) {
+    what = `<b>Shofyordan qabul qilingan</b>${whoName ? ` · ${esc(whoName)}` : ''}`;
+  } else {
+    what = `<b>${esc(p.purpose || "To'lov")}</b>${whoName ? ` · 👤 ${esc(whoName)}` : ''}`;
+  }
+  return `<div class="cs-row"><div class="cs-head"><span class="muted small">${fmtDate(p.date)} · ${esc(p.no || '')}</span><b class="ok">+${money(p.amount)}</b></div>${what}${p.note ? `<div class="small muted">Izoh: ${esc(p.note)}</div>` : ''}</div>`;
+};
+const csOutRow = (p) => {
+  const d = p.docId && doc(p.docId);
+  const what = d
+    ? `<b>${esc(DOC_TYPES[d.type]?.one || '')} ${esc(d.no)}</b>${party(p.counterpartyId) ? ` · ${esc(party(p.counterpartyId).name)}` : ''}${csItemsHtml(d)}`
+    : `<b>${expenseEmoji(p.purpose)} ${esc(p.purpose || 'Chiqim')}</b>${p.sub ? ` › ${esc(p.sub)}` : ''}${p.employee ? ` · 👷 ${esc(p.employee)}` : ''}${!p.purpose && party(p.counterpartyId) ? ` · ${esc(party(p.counterpartyId).name)}` : ''}`;
+  return `<div class="cs-row cs-out"><div class="cs-head"><span class="muted small">${fmtDate(p.date)} · ${esc(p.no || '')}</span><b class="debt">−${money(p.amount)}</b></div>${what}${p.note ? `<div class="small muted">Izoh: ${esc(p.note)}</div>` : ''}</div>`;
+};
+
+// Administrator kassasi: hisobdagi naqd pul − xodimlar qo'lidagi (hali topshirilmagan) − kam topshirilgan
+function adminCash() {
+  const all = cashBalances().cash || 0;
+  const staff = cashStaff();
+  const held = staff.reduce((a, x) => a + x.total, 0);
+  const shorts = staff.reduce((a, x) => a + x.shorts.reduce((b, y) => b + y.amount, 0), 0);
+  return { all, staff, held, shorts, mine: all - held - shorts };
+}
+
+function adminCashStatement() {
+  const { all, staff, held, shorts, mine } = adminCash();
+  const t = today();
+  const staffIds = new Set(db.users.filter((u) => u.role !== 'admin').map((u) => u.id));
+  // Bugun administrator qo'lidan o'tgan naqd pul (xodimlar qo'lidagisi emas)
+  const todays = db.payments.filter((p) => p.method === 'cash' && p.date === t && p.handover?.status !== 'pending' && !(staffIds.has(cashHolder(p)) && !p.collected));
+  const ins = todays.filter((p) => p.dir === 'in');
+  const outs = todays.filter((p) => p.dir !== 'in');
+  // Bugun xodimlardan qabul qilingan
+  const got = new Map();
+  db.payments.forEach((p) => {
+    if (!p.collected || String(p.collected.at || '').slice(0, 10) !== t) return;
+    const k = cashHolder(p);
+    got.set(k, (got.get(k) || 0) + (p.dir === 'in' ? p.amount : -p.amount));
+  });
+  const sum = (l) => l.reduce((a, p) => a + p.amount, 0);
+  const body = `<div class="cs-sum">
+      <div><span>Hisob bo'yicha jami naqd pul</span><b>${money(all)}</b></div>
+      ${staff.filter((x) => x.total).map(({ u, total }) => `<div><span>− ${esc(u.name)} qo'lida (topshirmagan) <a href="javascript:void 0" data-act="cashStmt" data-id="${u.id}">batafsil</a></span><b class="debt">−${money(total)}</b></div>`).join('')}
+      ${shorts ? `<div><span>− Kam topshirilgan (ochiq)</span><b class="debt">−${money(shorts)}</b></div>` : ''}
+      <div class="cs-due"><span>Sizning kassangizda</span><b>${money(mine)}</b></div>
+    </div>
+    ${got.size ? `<h4 class="pf-title">👥 Bugun xodimlardan qabul qilindi</h4>${[...got.entries()].map(([id, v]) => `<div class="cs-row"><div class="cs-head"><b>${esc(userName(id) || '—')}</b><b class="ok">+${money(v)}</b></div></div>`).join('')}` : ''}
+    <h4 class="pf-title">💵 Bugun kassaga kelgan naqd pul — ${money(sum(ins))}</h4>
+    ${ins.length ? ins.map(csInRow).join('') : '<p class="muted small">Bugun naqd kirim yo\'q.</p>'}
+    <h4 class="pf-title">💸 Bugun naqddan sarflangan — ${money(sum(outs))}</h4>
+    ${outs.length ? outs.map(csOutRow).join('') : '<p class="muted small">Bugun naqddan xarajat qilinmagan.</p>'}
+    <p class="muted small">Karta, terminal va hisob raqamidagi pullar bu yerga kirmaydi — ular Pul → Kassa va hisoblar bo'limida.</p>`;
+  openModal({ title: 'Sizning kassangiz — naqd pul', wide: true, body });
+}
+
 // Kassa qaydnomasi: xodim topshiradigan summa qayerdan keldi va nimaga ishlatildi — batafsil
 function cashStatement(userId) {
   const u = db.users.find((x) => x.id === userId);
@@ -5931,32 +5999,6 @@ function cashStatement(userId) {
   // Naqd bo'lmagan (karta, terminal, hisob) — topshirilmaydi, ma'lumot uchun
   const nonCash = db.payments.filter((p) => p.date === t && p.userId === userId && p.method !== 'cash' && p.method !== 'credit');
   const sold = db.docs.filter((d) => d.type === 'sale' && d.date === t && d.userId === userId);
-  const itemsHtml = (d) => `<div class="cs-items">${d.items.map((it) => `<div><span>${esc(itemName(it))}</span><span>${fmt(it.qty)} × ${fmt(it.price)} = <b>${fmt(it.qty * it.price)}</b></span></div>`).join('')}${d.discount ? `<div class="muted"><span>Chegirma</span><span>−${fmt(d.discount)}</span></div>` : ''}</div>`;
-  const inRow = (p) => {
-    const d = p.docId && doc(p.docId);
-    const who = party(p.counterpartyId);
-    const whoName = who && p.counterpartyId !== 'retail' ? who.name : d ? (docPartyName(d) || 'Chakana xaridor') : '';
-    let what;
-    if (d) {
-      const paid = docPaid(d);
-      const rest = Math.max(0, docTotal(d) - paid);
-      what = `<b>${esc(DOC_TYPES[d.type]?.one || '')} ${esc(d.no)}</b>${whoName ? ` · 👤 ${esc(whoName)}` : ''}
-        ${itemsHtml(d)}
-        <div class="small muted">Hujjat jami ${money(docTotal(d))} · to'langan ${money(paid)}${rest > 0.5 ? ` · <span class="debt">qarz qoldi ${money(rest)}</span>` : ' · ✓ to\'liq'}</div>`;
-    } else if (p.handover) {
-      what = `<b>Shofyordan qabul qilingan</b>${whoName ? ` · ${esc(whoName)}` : ''}`;
-    } else {
-      what = `<b>${esc(p.purpose || "To'lov")}</b>${whoName ? ` · 👤 ${esc(whoName)}` : ''}`;
-    }
-    return `<div class="cs-row"><div class="cs-head"><span class="muted small">${fmtDate(p.date)} · ${esc(p.no || '')}</span><b class="ok">+${money(p.amount)}</b></div>${what}${p.note ? `<div class="small muted">Izoh: ${esc(p.note)}</div>` : ''}</div>`;
-  };
-  const outRow = (p) => {
-    const d = p.docId && doc(p.docId);
-    const what = d
-      ? `<b>${esc(DOC_TYPES[d.type]?.one || '')} ${esc(d.no)}</b>${party(p.counterpartyId) ? ` · ${esc(party(p.counterpartyId).name)}` : ''}${itemsHtml(d)}`
-      : `<b>${expenseEmoji(p.purpose)} ${esc(p.purpose || 'Chiqim')}</b>${p.sub ? ` › ${esc(p.sub)}` : ''}${p.employee ? ` · 👷 ${esc(p.employee)}` : ''}${!p.purpose && party(p.counterpartyId) ? ` · ${esc(party(p.counterpartyId).name)}` : ''}`;
-    return `<div class="cs-row cs-out"><div class="cs-head"><span class="muted small">${fmtDate(p.date)} · ${esc(p.no || '')}</span><b class="debt">−${money(p.amount)}</b></div>${what}${p.note ? `<div class="small muted">Izoh: ${esc(p.note)}</div>` : ''}</div>`;
-  };
   const body = `<div class="cs-sum">
       <div><span>💵 Naqd olingan (${ins.length} ta)</span><b class="ok">+${money(inSum)}</b></div>
       <div><span>💸 Naqddan sarflangan (${outs.length} ta)</span><b class="debt">−${money(outSum)}</b></div>
@@ -5964,11 +6006,11 @@ function cashStatement(userId) {
       <div class="cs-due"><span>Topshirishi kerak</span><b>${money(due)}</b></div>
     </div>
     <h4 class="pf-title">💵 Qayerdan pul keldi</h4>
-    ${ins.length ? ins.map(inRow).join('') : '<p class="muted small">Naqd kirim yo\'q.</p>'}
+    ${ins.length ? ins.map(csInRow).join('') : '<p class="muted small">Naqd kirim yo\'q.</p>'}
     <h4 class="pf-title">💸 Nimaga ishlatildi</h4>
-    ${outs.length ? outs.map(outRow).join('') : '<p class="muted small">Naqd puldan xarajat qilinmagan.</p>'}
+    ${outs.length ? outs.map(csOutRow).join('') : '<p class="muted small">Naqd puldan xarajat qilinmagan.</p>'}
     ${shorts.length ? `<h4 class="pf-title">⚠️ Kam topshirilganlar</h4>${shorts.map((x) => `<div class="cs-row cs-out"><div class="cs-head"><span class="small">${fmtDate(x.date)} — ${money(x.expected)} o'rniga ${money(x.got)} berilgan</span><b class="debt">${money(x.amount)}</b></div></div>`).join('')}` : ''}
-    ${sold.length ? `<h4 class="pf-title">🛒 Bugungi sotuvlari (${sold.length} ta)</h4>${sold.map((d) => { const paid = docPaid(d); const rest = Math.max(0, docTotal(d) - paid); return `<div class="cs-row cs-sale click" data-act="openDoc" data-id="${d.id}"><div class="cs-head"><b>${esc(d.no)}</b>${d.counterpartyId && d.counterpartyId !== 'retail' ? ` · 👤 ${esc(docPartyName(d))}` : ''}<b>${money(docTotal(d))}</b></div>${itemsHtml(d)}<div class="small ${rest > 0.5 ? 'debt' : 'ok'}">${rest > 0.5 ? `to'langan ${money(paid)} · qarz ${money(rest)}` : '✓ to\'langan'}</div></div>`; }).join('')}` : ''}
+    ${sold.length ? `<h4 class="pf-title">🛒 Bugungi sotuvlari (${sold.length} ta)</h4>${sold.map((d) => { const paid = docPaid(d); const rest = Math.max(0, docTotal(d) - paid); return `<div class="cs-row cs-sale click" data-act="openDoc" data-id="${d.id}"><div class="cs-head"><b>${esc(d.no)}</b>${d.counterpartyId && d.counterpartyId !== 'retail' ? ` · 👤 ${esc(docPartyName(d))}` : ''}<b>${money(docTotal(d))}</b></div>${csItemsHtml(d)}<div class="small ${rest > 0.5 ? 'debt' : 'ok'}">${rest > 0.5 ? `to'langan ${money(paid)} · qarz ${money(rest)}` : '✓ to\'langan'}</div></div>`; }).join('')}` : ''}
     ${nonCash.length ? `<h4 class="pf-title">💳 Bugun kartaga / terminalga tushgan (topshirilmaydi)</h4>${nonCash.map((p) => `<div class="cs-row cs-info"><div class="cs-head"><span class="small">${esc(PAY_METHODS[p.method] || p.method)} · ${cashLine(p)}</span><b>${p.dir === 'out' ? '−' : ''}${money(p.amount)}</b></div></div>`).join('')}` : ''}
     <p class="muted small">Naqd pul hisobi ${fmtDate(CASH_START)} dan, administrator «Qabul qildim» bosgunga qadar yuritiladi.</p>`;
   openModal({
@@ -7744,15 +7786,12 @@ function render() {
   // Xodim: kassasidagi naqd pul doim ko'rinib turadi (bosilsa — batafsil qaydnoma)
   const pill = $('#cashPill');
   if (pill) {
-    const staffMe = !isAdmin();
-    pill.hidden = !staffMe;
-    if (staffMe) {
-      const cashNow = staffCash(me.id).total + staffShorts(me.id).reduce((s, x) => s + x.amount, 0);
-      pill.dataset.id = me.id;
-      pill.classList.toggle('zero', cashNow <= 0);
-      pill.innerHTML = `<span class="cp-l">💵 Kassangizda</span><b>${money(cashNow)}</b>`;
-      pill.title = "Bosing: qayerdan pul keldi, nimaga ishlatildi";
-    }
+    const cashNow = isAdmin() ? adminCash().mine : staffCash(me.id).total + staffShorts(me.id).reduce((s, x) => s + x.amount, 0);
+    pill.hidden = false;
+    pill.dataset.id = me.id;
+    pill.classList.toggle('zero', cashNow <= 0);
+    pill.innerHTML = `<span class="cp-l">💵 Kassangizda</span><b>${money(cashNow)}</b>`;
+    pill.title = "Bosing: qayerdan pul keldi, nimaga ishlatildi";
   }
   $('#rateBox').innerHTML = usdRate() ? `${icon('cash')}<span>1 $ = <b>${fmtRate(usdRate())}</b> so'm</span>` : '';
   $('#syncBanner').hidden = !syncState.offline;
@@ -7820,7 +7859,7 @@ const ACTIONS = {
   savePrices: () => { if (can('money')) savePrices(); },
   bookFreight: async (ds) => { const d = doc(ds.id); if (d && canBookFreight()) { await bookFreight(d); save(); } },
   collectCash: (ds) => { if (isAdmin()) collectCash(ds.id); },
-  cashStmt: (ds) => { if (isAdmin() || ds.id === me?.id) cashStatement(ds.id); },
+  cashStmt: (ds) => { if (isAdmin() && ds.id === me?.id) adminCashStatement(); else if (isAdmin() || ds.id === me?.id) cashStatement(ds.id); },
   closeShort: (ds) => {
     const x = (db.cashShorts || []).find((y) => y.id === ds.id);
     if (!x || !isAdmin()) return;
