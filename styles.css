@@ -1583,3 +1583,16 @@ html.modal-open, html.modal-open body { overflow: hidden; overscroll-behavior: n
 .cs-items { margin: 4px 0; font-size: 14px; }
 .cs-items > div { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
 .cs-items > div > span:last-child { white-space: nowrap; color: var(--muted); }
+
+/* Xodim kassasi — doim ko'rinadigan belgi */
+.cash-pill { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; width: 100%; margin-bottom: 8px; padding: 8px 12px; border: 1px solid rgba(240, 201, 154, .35); border-radius: 12px; background: rgba(240, 201, 154, .14); color: #fff6ea; text-align: left; cursor: pointer; line-height: 1.15; }
+.cash-pill[hidden] { display: none; }
+.cash-pill .cp-l { font-size: 11.5px; color: var(--side-muted); }
+.cash-pill b { font-size: 16px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.cash-pill.zero b { opacity: .75; }
+@media (max-width: 900px) {
+  .cash-pill { width: auto; margin: 0; padding: 4px 10px; border-radius: 10px; }
+  .cash-pill .cp-l { font-size: 10.5px; }
+  .cash-pill b { font-size: 14px; }
+  .sidebar:has(.cash-pill:not([hidden])) .rate-box { display: none; }
+}

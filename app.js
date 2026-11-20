@@ -7741,6 +7741,19 @@ function render() {
   me = Object.assign(me, db.users.find((u) => u.id === me.id));
   $('#authForm').innerHTML = '';
   $('#userName').innerHTML = `<b>${esc(me.name)}</b><span>${ROLES[me.role]}</span>`;
+  // Xodim: kassasidagi naqd pul doim ko'rinib turadi (bosilsa — batafsil qaydnoma)
+  const pill = $('#cashPill');
+  if (pill) {
+    const staffMe = !isAdmin();
+    pill.hidden = !staffMe;
+    if (staffMe) {
+      const cashNow = staffCash(me.id).total + staffShorts(me.id).reduce((s, x) => s + x.amount, 0);
+      pill.dataset.id = me.id;
+      pill.classList.toggle('zero', cashNow <= 0);
+      pill.innerHTML = `<span class="cp-l">💵 Kassangizda</span><b>${money(cashNow)}</b>`;
+      pill.title = "Bosing: qayerdan pul keldi, nimaga ishlatildi";
+    }
+  }
   $('#rateBox').innerHTML = usdRate() ? `${icon('cash')}<span>1 $ = <b>${fmtRate(usdRate())}</b> so'm</span>` : '';
   $('#syncBanner').hidden = !syncState.offline;
   refreshCtx();
